@@ -36,33 +36,70 @@ class CapabilityRegistry:
                 ``context_managers``, ``providers``, and ``content`` lists.
         """
         # Tools
+        # Policy: if two services register the same name, the last registration wins.
         for tool_spec in describe_result.get("tools", []):
-            self._tool_to_service[tool_spec["name"]] = service_key
+            try:
+                name = tool_spec["name"]
+            except KeyError as exc:
+                raise KeyError(
+                    f"Tool descriptor from service '{service_key}' is missing 'name' key: {tool_spec!r}"
+                ) from exc
+            self._tool_to_service[name] = service_key
             self._all_tool_specs.append(tool_spec)
 
         # Hooks — one entry per (service, hook_name, event, priority) tuple
+        # Policy: duplicate hook names across services are all retained (hooks fan-out).
         for hook_descriptor in describe_result.get("hooks", []):
+            try:
+                hook_name = hook_descriptor["name"]
+                event = hook_descriptor["event"]
+                priority = hook_descriptor["priority"]
+            except KeyError as exc:
+                raise KeyError(
+                    f"Hook descriptor from service '{service_key}' is missing key {exc}: {hook_descriptor!r}"
+                ) from exc
             self._hook_entries.append(
                 {
                     "service_key": service_key,
-                    "hook_name": hook_descriptor["name"],
-                    "event": hook_descriptor["event"],
-                    "priority": hook_descriptor["priority"],
+                    "hook_name": hook_name,
+                    "event": event,
+                    "priority": priority,
                 }
             )
             self._all_hook_descriptors.append(hook_descriptor)
 
         # Orchestrators
+        # Policy: last registration wins on name collision.
         for orch in describe_result.get("orchestrators", []):
-            self._orchestrator_to_service[orch["name"]] = service_key
+            try:
+                name = orch["name"]
+            except KeyError as exc:
+                raise KeyError(
+                    f"Orchestrator descriptor from service '{service_key}' is missing 'name' key: {orch!r}"
+                ) from exc
+            self._orchestrator_to_service[name] = service_key
 
         # Context managers
+        # Policy: last registration wins on name collision.
         for ctx_mgr in describe_result.get("context_managers", []):
-            self._context_manager_to_service[ctx_mgr["name"]] = service_key
+            try:
+                name = ctx_mgr["name"]
+            except KeyError as exc:
+                raise KeyError(
+                    f"Context manager descriptor from service '{service_key}' is missing 'name' key: {ctx_mgr!r}"
+                ) from exc
+            self._context_manager_to_service[name] = service_key
 
         # Providers
+        # Policy: last registration wins on name collision.
         for provider in describe_result.get("providers", []):
-            self._provider_to_service[provider["name"]] = service_key
+            try:
+                name = provider["name"]
+            except KeyError as exc:
+                raise KeyError(
+                    f"Provider descriptor from service '{service_key}' is missing 'name' key: {provider!r}"
+                ) from exc
+            self._provider_to_service[name] = service_key
 
         # Content paths
         content_paths = describe_result.get("content", [])
