@@ -1,0 +1,60 @@
+session:
+  orchestrator:
+    class: amplifier_foundation.orchestrators.streaming.StreamingOrchestrator
+  context:
+    class: amplifier_foundation.context_managers.simple.SimpleContextManager
+  behaviors:
+  - '@foundation:behaviors/agents.yaml'
+  - '@foundation:behaviors/amplifier-dev.yaml'
+  - '@foundation:behaviors/foundation-expert.yaml'
+  - '@foundation:behaviors/logging.yaml'
+  - '@foundation:behaviors/progress-monitor.yaml'
+  - '@foundation:behaviors/redaction.yaml'
+  - '@foundation:behaviors/sessions.yaml'
+  - '@foundation:behaviors/shadow-amplifier.yaml'
+  - '@foundation:behaviors/status-context.yaml'
+  - '@foundation:behaviors/streaming-ui.yaml'
+  - '@foundation:behaviors/tasks.yaml'
+  - '@foundation:behaviors/todo-reminder.yaml'
+  - '@foundation:behaviors/skills.yaml'
+  - '@foundation:behaviors/amplifier-expert.yaml'
+  - '@foundation:behaviors/core-expert.yaml'
+  - '@foundation:behaviors/recipes.yaml'
+  - '@foundation:behaviors/design-intelligence.yaml'
+  - '@foundation:behaviors/skills-tool.yaml'
+  - '@foundation:behaviors/browser-tester.yaml'
+  - '@foundation:behaviors/superpowers-methodology.yaml'
+  - '@foundation:behaviors/apply-patch.yaml'
+  - '@foundation:behaviors/routing.yaml'
+  - '@foundation:behaviors/modes.yaml'
+  tools:
+  - class: amplifier_foundation.tools.delegate.DelegateTool
+  - class: amplifier_foundation.tools.filesystem.edit.EditTool
+  - class: amplifier_foundation.tools.filesystem.read.ReadTool
+  - class: amplifier_foundation.tools.filesystem.write.WriteTool
+  - class: amplifier_foundation.tools.bash.BashTool
+  - class: amplifier_foundation.tools.web.WebFetchTool
+  - class: amplifier_foundation.tools.web.WebSearchTool
+  - class: amplifier_foundation.tools.search.glob.GlobTool
+  - class: amplifier_foundation.tools.search.grep.GrepTool
+  - class: amplifier_foundation.tools.task.TaskTool
+  - class: amplifier_foundation.tools.todo.TodoTool
+  - class: amplifier_foundation.tools.recipes.RecipesTool
+  - class: amplifier_foundation.tools.apply_patch.tool.ApplyPatchTool
+  - class: amplifier_modes.tools.mode.ModeTool
+  hooks:
+  - class: amplifier_foundation.hooks.deprecation.DeprecationHook
+  - class: amplifier_foundation.hooks.progress_monitor.ProgressMonitorHooks
+  - class: amplifier_foundation.hooks.session_naming.SessionNamingHook
+  - class: amplifier_foundation.hooks.todo_display.TodoDisplayHooks
+  - class: amplifier_foundation.hooks.status_context.StatusContextHook
+  - class: amplifier_foundation.hooks.streaming_ui.StreamingUIHooks
+  - class: amplifier_foundation.hooks.todo_reminder.TodoReminderHook
+  - class: amplifier_foundation.hooks.shell.ShellHookBridge
+  - class: amplifier_modes.hooks.mode.ModeHooks
+  - class: amplifier_foundation.hooks.approval.approval_hook.ApprovalHook
+  # TODO: These hooks are functional (no class), need amplifier-lite adapter:
+  # - amplifier_foundation.hooks.logging (functions only, no hook class)
+  # - amplifier_foundation.hooks.redaction (functions only, no hook class)
+  # - amplifier_foundation.hooks.routing (functions only, no hook class)
+  # - amplifier_foundation.tools.mcp.hooks.MCPVisibilityHook (needs mcp wiring)

@@ -1,0 +1,7 @@
+includes:
+- foundation/default
+
+session:
+  providers:
+    anthropic:
+      class: amplifier_providers.providers.anthropic.AnthropicProvider

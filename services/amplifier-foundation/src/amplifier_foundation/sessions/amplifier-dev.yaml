@@ -1,0 +1,6 @@
+includes:
+- foundation/default
+
+session:
+  tools:
+  - class: amplifier_foundation.tools.bundle_shadow.ShadowTool

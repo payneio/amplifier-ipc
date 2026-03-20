@@ -1,0 +1,7 @@
+includes:
+- foundation/default
+
+session:
+  providers:
+    openai:
+      class: amplifier_providers.providers.openai.OpenAIProvider
