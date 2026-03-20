@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from amplifier_ipc_protocol import ChatRequest
@@ -11,8 +10,6 @@ from amplifier_ipc_protocol import TextBlock
 from amplifier_ipc_protocol import ToolCall
 from amplifier_ipc_protocol import Usage
 from amplifier_ipc_protocol import provider
-
-logger = logging.getLogger(__name__)
 
 __all__ = ["MockProvider"]
 
