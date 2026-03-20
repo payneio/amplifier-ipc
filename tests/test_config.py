@@ -228,3 +228,23 @@ def test_resolve_service_command_override_no_working_dir() -> None:
 
     assert command == ["custom-cmd"]
     assert cwd is None
+
+
+def test_resolve_service_command_empty_override_falls_through() -> None:
+    """ServiceOverride with empty command must not be returned.
+
+    An override of command=[] is a misconfiguration that would cause
+    asyncio.create_subprocess_exec(*[]) to raise TypeError.  The guard
+    ``if override is not None and override.command`` must treat an empty
+    list as "no override" and fall back to the service-name default.
+    """
+    settings = HostSettings(
+        service_overrides={
+            "my-service": ServiceOverride(command=[]),
+        }
+    )
+    command, cwd = resolve_service_command("my-service", settings)
+
+    # Empty command override must be ignored; fall through to default.
+    assert command == ["my-service"]
+    assert cwd is None

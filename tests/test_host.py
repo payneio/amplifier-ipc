@@ -46,14 +46,23 @@ class FakeService:
 
 
 async def test_host_build_registry() -> None:
-    """_build_registry sends describe to each service and populates the registry."""
+    """_build_registry sends describe to each service and populates the registry.
+
+    The real IPC protocol server returns a nested format with a 'capabilities'
+    wrapper and 'content' as {'paths': [...]} rather than a flat list.
+    _build_registry must extract and flatten this before calling registry.register().
+    """
+    # This is the REAL format returned by the protocol Server.describe() handler:
     describe_result = {
-        "tools": [{"name": "bash", "description": "Run bash commands"}],
-        "hooks": [],
-        "orchestrators": [{"name": "loop"}],
-        "context_managers": [{"name": "simple"}],
-        "providers": [{"name": "anthropic"}],
-        "content": [],
+        "name": "foundation",
+        "capabilities": {
+            "tools": [{"name": "bash", "description": "Run bash commands"}],
+            "hooks": [],
+            "orchestrators": [{"name": "loop"}],
+            "context_managers": [{"name": "simple"}],
+            "providers": [{"name": "anthropic"}],
+            "content": {"paths": ["agents/readme.md", "context/base.md"]},
+        },
     }
 
     client = FakeClient(responses={"describe": describe_result})

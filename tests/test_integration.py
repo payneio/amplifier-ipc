@@ -2,6 +2,9 @@
 
 Proves the full stack works end-to-end using a real OS subprocess:
   spawn -> describe -> tool.execute -> content.read -> shutdown
+
+Also exercises Host._build_registry() with a real subprocess to close the
+coverage gap where the format-normalisation code was previously untested.
 """
 
 from __future__ import annotations
@@ -11,6 +14,8 @@ import os
 import sys
 from pathlib import Path
 
+from amplifier_ipc_host.config import HostSettings, SessionConfig
+from amplifier_ipc_host.host import Host
 from amplifier_ipc_host.lifecycle import ServiceProcess, shutdown_service
 from amplifier_ipc_host.registry import CapabilityRegistry
 from amplifier_ipc_protocol.client import Client
@@ -206,6 +211,54 @@ async def test_registry_from_real_service(tmp_path: Path) -> None:
         content = registry.get_content_services()
         assert "mock" in content
         assert "agents/test_agent.md" in content["mock"]
+
+    finally:
+        await shutdown_service(service, timeout=5.0)
+
+
+async def test_host_build_registry_with_real_subprocess(tmp_path: Path) -> None:
+    """Host._build_registry() correctly normalises the protocol server's nested format.
+
+    This closes the coverage gap identified in the code quality review: previously
+    no test exercised the Host._build_registry() → registry.register() path using
+    a real subprocess.  The protocol server returns:
+
+        {"name": "...", "capabilities": {"tools": [...], "content": {"paths": [...]}}}
+
+    and _build_registry() must extract and flatten this before calling register().
+    """
+    pkg_parent = _create_mock_service_package(tmp_path)
+    service = await _spawn_mock_service(pkg_parent)
+
+    config = SessionConfig(
+        services=["mock"],
+        orchestrator="",
+        context_manager="",
+        provider="",
+    )
+    settings = HostSettings()
+
+    host = Host(config=config, settings=settings)
+    # Inject the real subprocess as the service (bypasses _spawn_services)
+    host._services = {"mock": service}
+
+    try:
+        # This is the code path that was previously broken: _build_registry()
+        # receives the protocol server's nested describe response and must
+        # normalise it to flat format before calling registry.register().
+        await host._build_registry()
+
+        # Verify the registry was populated via Host._build_registry, not manual transform
+        assert host._registry.get_tool_service("echo") == "mock"
+
+        all_specs = host._registry.get_all_tool_specs()
+        spec_names = [s["name"] for s in all_specs]
+        assert "echo" in spec_names
+
+        content = host._registry.get_content_services()
+        assert "mock" in content
+        assert "agents/test_agent.md" in content["mock"]
+        assert "context/test_context.md" in content["mock"]
 
     finally:
         await shutdown_service(service, timeout=5.0)

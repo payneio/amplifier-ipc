@@ -289,6 +289,11 @@ class Host:
     async def _build_registry(self) -> None:
         """Send ``describe`` to each service and register results in the registry.
 
+        The IPC protocol server wraps capabilities under a ``capabilities`` key
+        and represents content as ``{"paths": [...]}`` rather than a flat list.
+        This method normalises the nested format into the flat dict expected by
+        :meth:`~amplifier_ipc_host.registry.CapabilityRegistry.register`.
+
         Uses a 10-second timeout per service.
         """
         for service_key, service in self._services.items():
@@ -296,7 +301,28 @@ class Host:
                 service.client.request("describe"),
                 timeout=_DESCRIBE_TIMEOUT_S,
             )
-            self._registry.register(service_key, describe_result)
+            # The real protocol server nests all capability lists under a
+            # "capabilities" key.  Fall back to the raw dict so unit tests
+            # that inject pre-flattened dicts continue to work.
+            caps = describe_result.get("capabilities", describe_result)
+
+            # "content" may be {"paths": [...]} (nested) or already a list (flat).
+            content_field = caps.get("content", [])
+            content_paths: list[str] = (
+                content_field.get("paths", [])
+                if isinstance(content_field, dict)
+                else content_field
+            )
+
+            flat: dict = {
+                "tools": caps.get("tools", []),
+                "hooks": caps.get("hooks", []),
+                "orchestrators": caps.get("orchestrators", []),
+                "context_managers": caps.get("context_managers", []),
+                "providers": caps.get("providers", []),
+                "content": content_paths,
+            }
+            self._registry.register(service_key, flat)
 
     async def _spawn_services(self) -> None:
         """Spawn all services declared in the session config."""

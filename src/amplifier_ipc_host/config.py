@@ -118,7 +118,7 @@ def resolve_service_command(
     working directory.
     """
     override = settings.service_overrides.get(service_name)
-    if override is not None:
+    if override is not None and override.command:
         return override.command, override.working_dir
 
     return [service_name], None
