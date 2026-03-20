@@ -1,0 +1,10 @@
+behavior:
+  name: amplifier-expert-behavior
+  version: 1.0.0
+  description: Authoritative consultant for the complete Amplifier ecosystem
+  context:
+    include:
+    - context/ecosystem-overview.md
+  agents:
+    include:
+    - amplifier:amplifier-expert

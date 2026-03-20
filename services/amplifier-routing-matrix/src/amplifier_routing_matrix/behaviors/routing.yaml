@@ -1,0 +1,9 @@
+behavior:
+  hooks:
+  - class: amplifier_routing_matrix.hooks.routing.RoutingHook
+    config:
+      default_matrix: balanced
+  context:
+    include:
+    - context/routing-instructions.md
+    - context/role-definitions.md

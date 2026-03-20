@@ -1,0 +1,20 @@
+behavior:
+  name: behavior-modes
+  version: 1.0.0
+  description: Generic mode system for runtime behavior modification
+  tools:
+  - class: amplifier_modes.tools.mode.ModeTool
+    config:
+      gate_policy: warn
+  hooks:
+  - class: amplifier_modes.hooks.mode.ModeHooks
+    config:
+      search_paths: []
+  - class: amplifier_foundation.hooks.approval.ApprovalHook
+    config:
+      rules: []
+      default_action: continue
+      policy_driven_only: true
+  context:
+    include:
+    - context/modes-instructions.md

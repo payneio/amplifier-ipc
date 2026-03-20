@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "amplifier-modes"
+version = "0.1.0"
+description = "Amplifier Modes IPC service — runtime mode management"
+requires-python = ">=3.11"
+dependencies = [
+    "amplifier-ipc-protocol",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+amplifier-modes-serve = "amplifier_modes.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/amplifier_modes"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+extraPaths = ["src"]
+
+[tool.uv.sources]
+amplifier-ipc-protocol = { path = "../../amplifier-ipc-protocol" }

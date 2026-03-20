@@ -1,0 +1,16 @@
+behavior:
+  name: recipes-behavior
+  version: 1.0.0
+  description: Multi-step AI agent orchestration via declarative YAML recipes
+  tools:
+  - class: amplifier_foundation.tools.recipes.RecipesTool
+    config:
+      session_dir: ~/.amplifier/projects/{project}/recipe-sessions
+      auto_cleanup_days: 7
+  context:
+    include:
+    - context/recipe-awareness.md
+  agents:
+    include:
+    - recipes:recipe-author
+    - recipes:result-validator

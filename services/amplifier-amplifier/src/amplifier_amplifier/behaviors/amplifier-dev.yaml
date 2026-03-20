@@ -1,0 +1,7 @@
+behavior:
+  name: amplifier-dev-behavior
+  version: 1.0.0
+  description: Development hygiene and best practices for Amplifier CLI users
+  context:
+    include:
+    - context/development-hygiene.md

@@ -1,0 +1,16 @@
+behavior:
+  name: browser-testing-behavior
+  version: 1.0.0
+  description: 'Browser automation behavior - adds browser agents for web interaction,
+
+    research, and visual documentation. Can be composed into any bundle.
+
+    '
+  context:
+    include:
+    - context/browser-awareness.md
+  agents:
+    include:
+    - browser-tester:browser-operator
+    - browser-tester:browser-researcher
+    - browser-tester:visual-documenter

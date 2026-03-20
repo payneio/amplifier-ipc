@@ -1,0 +1,14 @@
+behavior:
+  name: behavior-apply-patch
+  version: 1.0.0
+  description: V4A diff-based file editing via apply_patch tool
+  tools:
+  - class: amplifier_foundation.tools.apply_patch.ApplyPatchTool
+    config:
+      engine: native
+      allowed_write_paths:
+      - .
+      denied_write_paths: []
+  context:
+    include:
+    - context/editing-guidance.md

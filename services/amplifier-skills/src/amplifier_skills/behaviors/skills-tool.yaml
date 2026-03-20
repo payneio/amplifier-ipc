@@ -1,0 +1,25 @@
+behavior:
+  name: skills-tool-behavior
+  version: 1.0.0
+  description: 'Minimal skills support: just the tool-skills module and context instructions.
+
+
+    No curated skills are pre-configured. Use this when your bundle brings its
+
+    own skills via config.skills or when you only need workspace/user skills
+
+    from the default discovery paths (.amplifier/skills/, ~/.amplifier/skills/).
+
+    '
+  tools:
+  - class: amplifier_skills.tools.skills.SkillsTool
+    config:
+      visibility:
+        enabled: true
+        inject_role: user
+        max_skills_visible: 50
+        ephemeral: true
+        priority: 20
+  context:
+    include:
+    - context/skills-instructions.md

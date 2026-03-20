@@ -1,0 +1,10 @@
+behavior:
+  name: core-expert-behavior
+  version: 1.0.0
+  description: Expert consultant for Amplifier kernel internals
+  context:
+    include:
+    - context/release-mandate.md
+  agents:
+    include:
+    - core:core-expert
