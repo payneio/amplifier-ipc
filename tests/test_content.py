@@ -19,7 +19,7 @@ class FakeClient:
     def __init__(self, content_map: dict[str, str]) -> None:
         self.content_map = content_map
 
-    async def request(self, method: str, params: dict) -> dict:
+    async def request(self, method: str, params: dict[str, str]) -> dict[str, str]:
         if method == "content.read":
             path = params["path"]
             if path not in self.content_map:
@@ -161,3 +161,36 @@ async def test_assemble_system_prompt_deduplicates() -> None:
 
     # philosophy content appears exactly once despite being listed twice
     assert result.count("philosophy content") == 1
+
+
+async def test_assemble_system_prompt_skips_failed_reads() -> None:
+    """Failed content reads are logged and skipped; remaining content still assembles."""
+    # Register two context/ paths but only provide content for one —
+    # the missing path will raise KeyError inside FakeClient, triggering the
+    # warning-and-skip branch in assemble_system_prompt.
+    partial_content: dict[str, str] = {
+        "context/philosophy.md": "philosophy content",
+        # context/shared/common.md intentionally absent → FakeClient raises KeyError
+    }
+
+    registry = CapabilityRegistry()
+    registry.register(
+        "foundation",
+        {
+            "tools": [],
+            "hooks": [],
+            "orchestrators": [],
+            "context_managers": [],
+            "providers": [],
+            "content": ["context/shared/common.md", "context/philosophy.md"],
+        },
+    )
+
+    services = {"foundation": FakeService(FakeClient(partial_content))}
+
+    result = await assemble_system_prompt(registry, services)
+
+    # Successful read is present
+    assert "philosophy content" in result
+    # Failed read is absent (gracefully skipped)
+    assert "common shared content" not in result

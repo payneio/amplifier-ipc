@@ -18,6 +18,26 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _append_if_unique(
+    content: str,
+    key: str,
+    seen_hashes: set[str],
+    parts: list[str],
+) -> None:
+    """Append a ``<context_file>`` block only if its content hasn't been seen before.
+
+    Args:
+        content: The file content to deduplicate and format.
+        key: The path identifier used in the ``<context_file path="…">`` attribute.
+        seen_hashes: Mutable set of SHA-256 hex digests already added to *parts*.
+        parts: Mutable list of formatted XML blocks being assembled.
+    """
+    h = hashlib.sha256(content.encode()).hexdigest()
+    if h not in seen_hashes:
+        seen_hashes.add(h)
+        parts.append(f'<context_file path="{key}">\n{content}\n</context_file>')
+
+
 async def resolve_mention(mention: str, registry: Any, services: dict[str, Any]) -> str:
     """Resolve a ``@namespace:path`` mention via the ``content.read`` RPC.
 
@@ -104,13 +124,7 @@ async def assemble_system_prompt(
                 )
                 continue
 
-            content_hash = hashlib.sha256(content.encode()).hexdigest()
-            if content_hash in seen_hashes:
-                continue
-
-            seen_hashes.add(content_hash)
-            key = f"{service_key}:{path}"
-            parts.append(f'<context_file path="{key}">\n{content}\n</context_file>')
+            _append_if_unique(content, f"{service_key}:{path}", seen_hashes, parts)
 
     # 2. Resolve extra @mentions and include unique content
     for mention in mentions or []:
@@ -120,12 +134,6 @@ async def assemble_system_prompt(
             logger.warning("Failed to resolve mention %r: %s", mention, exc)
             continue
 
-        content_hash = hashlib.sha256(content.encode()).hexdigest()
-        if content_hash in seen_hashes:
-            continue
-
-        seen_hashes.add(content_hash)
-        key = mention.lstrip("@")
-        parts.append(f'<context_file path="{key}">\n{content}\n</context_file>')
+        _append_if_unique(content, mention.lstrip("@"), seen_hashes, parts)
 
     return "\n".join(parts)
