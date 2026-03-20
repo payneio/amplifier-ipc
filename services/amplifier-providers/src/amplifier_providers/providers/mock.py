@@ -32,8 +32,6 @@ class MockProvider:
         ]
         self.responses = (config or {}).get("responses", default_responses)
         self.call_count = 0
-        self.debug = False
-        self.raw_debug = False
 
     async def complete(self, request: ChatRequest, **kwargs: Any) -> ChatResponse:
         """Generate a mock completion from ChatRequest."""
@@ -75,7 +73,3 @@ class MockProvider:
             )
 
         return response
-
-    def parse_tool_calls(self, response: ChatResponse) -> list[ToolCall]:
-        """Parse tool calls from ChatResponse."""
-        return response.tool_calls or []
