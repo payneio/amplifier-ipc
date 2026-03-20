@@ -6,7 +6,6 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -203,7 +202,7 @@ class ModeDiscovery:
         self._cache.clear()
 
 
-@hook(events=["provider:request", "tool:pre"], priority=10)
+@hook(events=["provider:request", "tool:pre"], priority=5)
 class ModeHooks:
     """Generic mode enforcement via hooks."""
 
@@ -211,9 +210,9 @@ class ModeHooks:
 
     def __init__(self) -> None:
         self.discovery = ModeDiscovery()
-        self.warned_tools: set[str] = set()
+        self._warned_tools: set[str] = set()
         self.infrastructure_tools: set[str] = {"mode", "todo"}
-        self._active_mode: str | None = None
+        self._active_mode: ModeDefinition | None = None
         self._require_approval_tools: set[str] = set()
 
     def _get_active_mode(self) -> ModeDefinition | None:
@@ -223,19 +222,14 @@ class ModeHooks:
         This uses the generic key that approval hook respects, allowing modes to
         drive approval policy without the approval hook knowing about modes.
         """
-        mode_name = self._active_mode
-        if not mode_name:
+        mode = self._active_mode
+        if not mode:
             # Clear approval requirements when no mode is active
             self._require_approval_tools = set()
             return None
 
-        mode = self.discovery.find(mode_name)
-        if mode:
-            # Populate generic approval key - approval hook checks this
-            self._require_approval_tools = set(mode.confirm_tools)
-        else:
-            self._require_approval_tools = set()
-
+        # Populate generic approval key - approval hook checks this
+        self._require_approval_tools = set(mode.confirm_tools)
         return mode
 
     async def handle(self, event: str, data: dict) -> HookResult:
@@ -304,8 +298,8 @@ class ModeHooks:
         # Warn-first tools: warn once, then allow
         if tool_name in mode.warn_tools:
             warn_key = f"{mode.name}:{tool_name}"
-            if warn_key not in self.warned_tools:
-                self.warned_tools.add(warn_key)
+            if warn_key not in self._warned_tools:
+                self._warned_tools.add(warn_key)
                 return HookResult(
                     action=HookAction.DENY,
                     reason=f"Mode '{mode.name}': '{tool_name}' requires confirmation. "
@@ -326,7 +320,7 @@ class ModeHooks:
 
     def reset_warnings(self) -> None:
         """Reset warned tools (called when switching modes)."""
-        self.warned_tools.clear()
+        self._warned_tools.clear()
 
 
 # Exports for external use
