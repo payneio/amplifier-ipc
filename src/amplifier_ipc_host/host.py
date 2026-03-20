@@ -30,6 +30,8 @@ from amplifier_ipc_protocol.framing import read_message, write_message
 
 logger = logging.getLogger(__name__)
 
+_DESCRIBE_TIMEOUT_S = 10.0
+
 
 class Host:
     """Orchestrates a full IPC session: spawn → discover → route → persist → teardown.
@@ -176,8 +178,13 @@ class Host:
             The ``result`` field from the orchestrator's final response.
         """
         orchestrator_svc: ServiceProcess = self._services[orchestrator_key]
-        assert orchestrator_svc.process.stdin is not None
-        assert orchestrator_svc.process.stdout is not None
+        if (
+            orchestrator_svc.process.stdin is None
+            or orchestrator_svc.process.stdout is None
+        ):
+            raise RuntimeError(
+                f"Orchestrator service '{orchestrator_key}' was not started with pipes"
+            )
 
         execute_id = uuid.uuid4().hex[:16]
 
@@ -240,6 +247,9 @@ class Host:
             elif message.get("id") == execute_id and "result" in message:
                 return message["result"]  # type: ignore[return-value]
 
+            else:
+                logger.debug("Unrecognised orchestrator message: %r", message)
+
     # ------------------------------------------------------------------
     # Delegating helper (testable entry point)
     # ------------------------------------------------------------------
@@ -277,7 +287,7 @@ class Host:
         for service_key, service in self._services.items():
             describe_result = await asyncio.wait_for(
                 service.client.request("describe"),
-                timeout=10.0,
+                timeout=_DESCRIBE_TIMEOUT_S,
             )
             self._registry.register(service_key, describe_result)
 
