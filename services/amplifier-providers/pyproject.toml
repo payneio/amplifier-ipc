@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "amplifier-providers"
+version = "0.1.0"
+description = "Amplifier Providers IPC service — LLM provider integrations"
+requires-python = ">=3.11"
+dependencies = [
+    "amplifier-ipc-protocol",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic"]
+openai = ["openai"]
+azure = ["openai", "azure-identity"]
+gemini = ["google-generativeai"]
+ollama = ["ollama"]
+vllm = ["openai"]
+copilot = ["openai"]
+all = [
+    "anthropic",
+    "openai",
+    "azure-identity",
+    "google-generativeai",
+    "ollama",
+]
+
+[project.scripts]
+amplifier-providers-serve = "amplifier_providers.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/amplifier_providers"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+extraPaths = ["src"]
+
+[tool.uv.sources]
+amplifier-ipc-protocol = { path = "../../amplifier-ipc-protocol" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]
