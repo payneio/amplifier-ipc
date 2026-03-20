@@ -94,114 +94,6 @@ def parse_mode_file(file_path: Path) -> ModeDefinition | None:
     )
 
 
-class ModeDiscovery:
-    """Discover mode definitions from search paths.
-
-    Args:
-        search_paths: Explicit paths to search for mode files
-        working_dir: Project directory for `.amplifier/modes/` discovery.
-            Falls back to cwd. Important for server deployments where
-            process cwd differs from user's project directory.
-    """
-
-    def __init__(
-        self,
-        search_paths=None,
-        working_dir=None,
-    ):
-        self._working_dir = working_dir or Path.cwd()
-        # Normalize search_paths: accept bare Paths (legacy) or (Path, source) tuples
-        if search_paths is not None:
-            normalized: list[tuple[Path, str]] = []
-            for entry in search_paths:
-                if isinstance(entry, tuple):
-                    normalized.append(entry)
-                else:
-                    normalized.append((entry, ""))
-            self._search_paths = normalized
-        else:
-            self._search_paths = self._default_search_paths()
-        self._cache: dict[str, ModeDefinition] = {}
-
-    def _default_search_paths(self) -> list[tuple[Path, str]]:
-        """Get default search paths for mode discovery."""
-        paths: list[tuple[Path, str]] = []
-
-        # Project modes (highest precedence) - use working_dir instead of cwd
-        project_modes = self._working_dir / ".amplifier" / "modes"
-        if project_modes.exists():
-            paths.append((project_modes, "project"))
-
-        # User modes
-        user_modes = Path.home() / ".amplifier" / "modes"
-        if user_modes.exists():
-            paths.append((user_modes, "user"))
-
-        return paths
-
-    def add_search_path(self, path: Path, source: str = "") -> None:
-        """Add a search path (e.g., from bundle)."""
-        if path.exists() and path not in [p for p, _s in self._search_paths]:
-            self._search_paths.append((path, source))
-
-    def find(self, name: str) -> ModeDefinition | None:
-        """Find a mode definition by name."""
-        # Check cache first
-        if name in self._cache:
-            return self._cache[name]
-
-        # Search paths
-        for base_path, source_label in self._search_paths:
-            mode_file = base_path / f"{name}.md"
-            if mode_file.exists():
-                mode_def = parse_mode_file(mode_file)
-                if mode_def:
-                    mode_def.source = source_label
-                    self._cache[name] = mode_def
-                    return mode_def
-
-        return None
-
-    def list_modes(self) -> list[tuple[str, str, str]]:
-        """List all available modes as (name, description, source) tuples."""
-        modes: dict[str, tuple[str, str]] = {}
-
-        for base_path, source_label in self._search_paths:
-            if not base_path.exists():
-                continue
-            for mode_file in base_path.glob("*.md"):
-                name = mode_file.stem
-                if name not in modes:  # First match wins (precedence)
-                    mode_def = parse_mode_file(mode_file)
-                    if mode_def:
-                        mode_def.source = source_label
-                        modes[name] = (mode_def.description, source_label)
-                        self._cache[name] = mode_def
-
-        return sorted((name, desc, source) for name, (desc, source) in modes.items())
-
-    def get_shortcuts(self) -> dict[str, str]:
-        """Get mapping of shortcut -> mode name for all modes with shortcuts."""
-        shortcuts: dict[str, str] = {}
-
-        for base_path, _source_label in self._search_paths:
-            if not base_path.exists():
-                continue
-            for mode_file in base_path.glob("*.md"):
-                name = mode_file.stem
-                mode_def = self._cache.get(name) or parse_mode_file(mode_file)
-                if mode_def:
-                    self._cache[name] = mode_def
-                    if mode_def.shortcut and mode_def.shortcut not in shortcuts:
-                        shortcuts[mode_def.shortcut] = name
-
-        return shortcuts
-
-    def clear_cache(self) -> None:
-        """Clear the mode definition cache."""
-        self._cache.clear()
-
-
 @hook(events=["provider:request", "tool:pre"], priority=5)
 class ModeHooks:
     """Generic mode enforcement via hooks."""
@@ -209,28 +101,8 @@ class ModeHooks:
     name = "mode_hooks"
 
     def __init__(self) -> None:
-        self.discovery = ModeDiscovery()
         self._warned_tools: set[str] = set()
-        self.infrastructure_tools: set[str] = {"mode", "todo"}
         self._active_mode: ModeDefinition | None = None
-        self._require_approval_tools: set[str] = set()
-
-    def _get_active_mode(self) -> ModeDefinition | None:
-        """Get the currently active mode definition.
-
-        Updates _require_approval_tools for approval hook integration.
-        This uses the generic key that approval hook respects, allowing modes to
-        drive approval policy without the approval hook knowing about modes.
-        """
-        mode = self._active_mode
-        if not mode:
-            # Clear approval requirements when no mode is active
-            self._require_approval_tools = set()
-            return None
-
-        # Populate generic approval key - approval hook checks this
-        self._require_approval_tools = set(mode.confirm_tools)
-        return mode
 
     async def handle(self, event: str, data: dict) -> HookResult:
         """Dispatch to the appropriate handler based on event type."""
@@ -242,7 +114,7 @@ class ModeHooks:
 
     async def _handle_provider_request(self, _event: str, _data: dict) -> HookResult:
         """Inject mode context on every provider request."""
-        mode = self._get_active_mode()
+        mode = self._active_mode
         if not mode or not mode.context:
             return HookResult(action=HookAction.CONTINUE)
 
@@ -269,15 +141,11 @@ class ModeHooks:
 
     async def _handle_tool_pre(self, _event: str, data: dict) -> HookResult:
         """Moderate tools based on active mode policy."""
-        mode = self._get_active_mode()
+        mode = self._active_mode
         if not mode:
             return HookResult(action=HookAction.CONTINUE)
 
         tool_name = data.get("tool_name", "")
-
-        # Infrastructure tools: always bypass the cascade
-        if tool_name in self.infrastructure_tools:
-            return HookResult(action=HookAction.CONTINUE)
 
         # Safe tools: always allow
         if tool_name in mode.safe_tools:
@@ -289,11 +157,6 @@ class ModeHooks:
                 action=HookAction.DENY,
                 reason=f"Mode '{mode.name}': '{tool_name}' is blocked. {mode.description}",
             )
-
-        # Confirm tools: let approval hook handle it
-        # (_require_approval_tools is already set by _get_active_mode)
-        if tool_name in mode.confirm_tools:
-            return HookResult(action=HookAction.CONTINUE)
 
         # Warn-first tools: warn once, then allow
         if tool_name in mode.warn_tools:
@@ -326,7 +189,6 @@ class ModeHooks:
 # Exports for external use
 __all__ = [
     "ModeDefinition",
-    "ModeDiscovery",
     "ModeHooks",
     "parse_mode_file",
 ]
