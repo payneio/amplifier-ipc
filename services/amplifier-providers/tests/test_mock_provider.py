@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from amplifier_ipc_protocol import ChatRequest, ChatResponse, Message
 from amplifier_ipc_protocol.discovery import scan_package
+from amplifier_ipc_protocol.server import Server
+from amplifier_providers.providers.mock import MockProvider
 
 
 def test_scan_package_discovers_mock() -> None:
@@ -27,8 +29,6 @@ def test_scan_package_mock_is_provider_instance() -> None:
 
 async def test_describe_reports_mock_provider() -> None:
     """Server.describe must report mock in capabilities.providers."""
-    from amplifier_ipc_protocol.server import Server
-
     server = Server("amplifier_providers")
     result = await server._handle_describe()
 
@@ -44,8 +44,6 @@ async def test_describe_reports_mock_provider() -> None:
 
 async def test_mock_provider_complete_returns_chat_response() -> None:
     """MockProvider.complete() must return a ChatResponse."""
-    from amplifier_providers.providers.mock import MockProvider
-
     provider = MockProvider()
     request = ChatRequest(
         messages=[Message(role="user", content="Hello, how are you?")]
@@ -57,8 +55,6 @@ async def test_mock_provider_complete_returns_chat_response() -> None:
 
 async def test_mock_provider_complete_has_content() -> None:
     """MockProvider.complete() must return ChatResponse with non-empty content."""
-    from amplifier_providers.providers.mock import MockProvider
-
     provider = MockProvider()
     request = ChatRequest(messages=[Message(role="user", content="Tell me something")])
     response = await provider.complete(request)
@@ -69,8 +65,6 @@ async def test_mock_provider_complete_has_content() -> None:
 
 async def test_mock_provider_complete_has_usage() -> None:
     """MockProvider.complete() must return ChatResponse with usage info."""
-    from amplifier_providers.providers.mock import MockProvider
-
     provider = MockProvider()
     request = ChatRequest(messages=[Message(role="user", content="Hello")])
     response = await provider.complete(request)
@@ -80,8 +74,6 @@ async def test_mock_provider_complete_has_usage() -> None:
 
 async def test_mock_provider_tracks_call_count() -> None:
     """MockProvider must track call_count incrementing with each complete() call."""
-    from amplifier_providers.providers.mock import MockProvider
-
     provider = MockProvider()
     assert provider.call_count == 0
 
@@ -95,8 +87,6 @@ async def test_mock_provider_tracks_call_count() -> None:
 
 async def test_mock_provider_read_keyword_produces_tool_call() -> None:
     """MockProvider must return ToolCall when 'read' is in last message content."""
-    from amplifier_providers.providers.mock import MockProvider
-
     provider = MockProvider()
     request = ChatRequest(
         messages=[Message(role="user", content="Please read the file")]
@@ -111,8 +101,6 @@ async def test_mock_provider_read_keyword_produces_tool_call() -> None:
 
 async def test_mock_provider_no_read_keyword_returns_text() -> None:
     """MockProvider must return text content when no 'read' keyword present."""
-    from amplifier_providers.providers.mock import MockProvider
-
     provider = MockProvider()
     request = ChatRequest(
         messages=[Message(role="user", content="What is the weather?")]
@@ -129,8 +117,6 @@ async def test_mock_provider_no_read_keyword_returns_text() -> None:
 
 async def test_mock_provider_cycles_through_responses() -> None:
     """MockProvider must cycle through response texts."""
-    from amplifier_providers.providers.mock import MockProvider
-
     provider = MockProvider()
     request = ChatRequest(messages=[Message(role="user", content="Hello")])
 
@@ -149,8 +135,6 @@ async def test_mock_provider_cycles_through_responses() -> None:
 
 async def test_mock_provider_accepts_config_dict_with_responses() -> None:
     """MockProvider must accept config dict with optional responses list."""
-    from amplifier_providers.providers.mock import MockProvider
-
     custom_responses = ["Custom response A", "Custom response B"]
     provider = MockProvider(config={"responses": custom_responses})
 
@@ -161,8 +145,6 @@ async def test_mock_provider_accepts_config_dict_with_responses() -> None:
 
 async def test_mock_provider_uses_default_responses_when_no_config() -> None:
     """MockProvider must use default responses when no config provided."""
-    from amplifier_providers.providers.mock import MockProvider
-
     provider_no_arg = MockProvider()
     provider_none = MockProvider(config=None)
     provider_empty = MockProvider(config={})
@@ -175,8 +157,6 @@ async def test_mock_provider_uses_default_responses_when_no_config() -> None:
 
 async def test_mock_provider_config_responses_used_in_complete() -> None:
     """MockProvider must use config responses when completing requests."""
-    from amplifier_providers.providers.mock import MockProvider
-
     custom_responses = ["Only this response"]
     provider = MockProvider(config={"responses": custom_responses})
     request = ChatRequest(messages=[Message(role="user", content="Hello")])

@@ -63,7 +63,7 @@ class MockProvider:
             )
         else:
             # Regular text response
-            response_text = self.responses[self.call_count % len(self.responses)]
+            response_text = self.responses[(self.call_count - 1) % len(self.responses)]
             response = ChatResponse(
                 content=[TextBlock(text=response_text)],
                 usage=Usage(input_tokens=10, output_tokens=20, total_tokens=30),
