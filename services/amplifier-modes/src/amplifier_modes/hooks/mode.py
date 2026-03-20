@@ -181,10 +181,6 @@ class ModeHooks:
             f"Use /mode off to exit {mode.name} mode.",
         )
 
-    def reset_warnings(self) -> None:
-        """Reset warned tools (called when switching modes)."""
-        self._warned_tools.clear()
-
 
 # Exports for external use
 __all__ = [
