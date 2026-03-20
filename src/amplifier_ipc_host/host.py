@@ -243,9 +243,16 @@ class Host:
                 sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
                 sys.stdout.flush()
 
-            # Final response matching execute_id
+            # Final response matching execute_id — success
             elif message.get("id") == execute_id and "result" in message:
                 return message["result"]  # type: ignore[return-value]
+
+            # Final response matching execute_id — error
+            elif message.get("id") == execute_id and "error" in message:
+                err = message["error"]
+                raise RuntimeError(
+                    f"Orchestrator returned error: {err.get('message', err)}"
+                )
 
             else:
                 logger.debug("Unrecognised orchestrator message: %r", message)

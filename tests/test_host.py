@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from amplifier_ipc_host.config import HostSettings, SessionConfig
 from amplifier_ipc_host.host import Host
@@ -133,3 +136,58 @@ async def test_host_route_orchestrator_message() -> None:
     assert len(tool_client.calls) == 1
     assert tool_client.calls[0][0] == "tool.execute"
     assert tool_client.calls[0][1]["tool_name"] == "bash"
+
+
+async def test_orchestrator_loop_raises_on_error_response() -> None:
+    """_orchestrator_loop raises RuntimeError when orchestrator returns a JSON-RPC error."""
+    config = SessionConfig(
+        services=["orch"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+
+    host = Host(config=config, settings=settings)
+
+    # Fake process with non-None stdin/stdout so the pipe check passes
+    fake_process = MagicMock()
+    fake_process.stdin = MagicMock()
+    fake_process.stdout = MagicMock()
+
+    fake_service = MagicMock()
+    fake_service.process = fake_process
+    host._services = {"orch": fake_service}
+
+    # Capture the execute_id written by the loop so we can echo it back
+    captured_id: list[str] = []
+
+    async def fake_write(stream: object, message: dict) -> None:  # type: ignore[type-arg]
+        if message.get("method") == "orchestrator.execute":
+            captured_id.append(message["id"])
+
+    read_call_count = 0
+
+    async def fake_read(stream: object) -> dict | None:  # type: ignore[type-arg]
+        nonlocal read_call_count
+        read_call_count += 1
+        if read_call_count == 1:
+            # Return an error response matching the execute_id
+            return {
+                "jsonrpc": "2.0",
+                "id": captured_id[0],
+                "error": {"code": -32603, "message": "Internal orchestrator error"},
+            }
+        # If the loop doesn't handle the error and iterates, return None to break it
+        return None
+
+    with (
+        patch("amplifier_ipc_host.host.write_message", fake_write),
+        patch("amplifier_ipc_host.host.read_message", fake_read),
+    ):
+        with pytest.raises(RuntimeError, match="Orchestrator returned error"):
+            await host._orchestrator_loop(
+                orchestrator_key="orch",
+                prompt="hello",
+                system_prompt="be helpful",
+            )
