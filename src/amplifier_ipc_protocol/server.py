@@ -325,7 +325,7 @@ class Server:
 
     async def _run(self) -> None:
         """Internal async entry point — sets up stdin/stdout streams."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         # --- stdin as StreamReader ---
         reader = asyncio.StreamReader()

@@ -98,8 +98,7 @@ class Client:
         if params is not None:
             message["params"] = params
 
-        loop = asyncio.get_event_loop()
-        future: asyncio.Future[Any] = loop.create_future()
+        future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         self._pending[req_id] = future
 
         await write_message(self._writer, message)
