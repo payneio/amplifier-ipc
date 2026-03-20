@@ -1,0 +1,300 @@
+"""Host orchestration — ties config, lifecycle, registry, router, content, and persistence.
+
+The :class:`Host` is the top-level coordinator for an IPC session.  It spawns
+service subprocesses, discovers their capabilities, builds a routing table, runs
+the orchestrator turn loop, persists the transcript, and tears everything down.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import sys
+import uuid
+from pathlib import Path
+from typing import Any
+
+from amplifier_ipc_host.config import (
+    HostSettings,
+    SessionConfig,
+    resolve_service_command,
+)
+from amplifier_ipc_host.content import assemble_system_prompt
+from amplifier_ipc_host.lifecycle import ServiceProcess, shutdown_service, spawn_service
+from amplifier_ipc_host.persistence import SessionPersistence
+from amplifier_ipc_host.registry import CapabilityRegistry
+from amplifier_ipc_host.router import Router
+from amplifier_ipc_protocol.errors import JsonRpcError, make_error_response
+from amplifier_ipc_protocol.framing import read_message, write_message
+
+logger = logging.getLogger(__name__)
+
+
+class Host:
+    """Orchestrates a full IPC session: spawn → discover → route → persist → teardown.
+
+    Args:
+        config: Parsed session configuration (services, orchestrator, etc.).
+        settings: Host-level settings including service command overrides.
+        session_dir: Base directory for session persistence.  Defaults to
+            ``~/.amplifier/sessions``.
+    """
+
+    def __init__(
+        self,
+        config: SessionConfig,
+        settings: HostSettings,
+        session_dir: Path | None = None,
+    ) -> None:
+        self._config = config
+        self._settings = settings
+        self._session_dir = session_dir or (Path.home() / ".amplifier" / "sessions")
+
+        # Internal state — populated during run()
+        self._services: dict[str, Any] = {}
+        self._registry: CapabilityRegistry = CapabilityRegistry()
+        self._router: Router | None = None
+        self._persistence: SessionPersistence | None = None
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def run(self, prompt: str) -> str:
+        """Execute a full session turn.
+
+        1. Generate a session ID and create :class:`SessionPersistence`.
+        2. Spawn all configured services.
+        3. Discover capabilities via ``describe`` and build the registry.
+        4. Resolve orchestrator / context-manager / provider service keys.
+        5. Build a :class:`Router`.
+        6. Assemble the system prompt via content resolution.
+        7. Run the orchestrator turn loop.
+        8. Persist metadata and finalize.
+
+        Args:
+            prompt: The user prompt to pass to the orchestrator.
+
+        Returns:
+            The final text response from the orchestrator.
+
+        Raises:
+            RuntimeError: If the orchestrator, context manager, or provider
+                declared in the config is not found in the registry.
+        """
+        session_id = uuid.uuid4().hex[:16]
+        self._persistence = SessionPersistence(session_id, self._session_dir)
+
+        try:
+            # 2. Spawn services
+            await self._spawn_services()
+
+            # 3. Build registry
+            await self._build_registry()
+
+            # 4. Resolve service keys
+            orchestrator_key = self._registry.get_orchestrator_service(
+                self._config.orchestrator
+            )
+            context_manager_key = self._registry.get_context_manager_service(
+                self._config.context_manager
+            )
+            provider_key = self._registry.get_provider_service(self._config.provider)
+
+            if orchestrator_key is None:
+                raise RuntimeError(
+                    f"Orchestrator '{self._config.orchestrator}' not found in registry"
+                )
+            if context_manager_key is None:
+                raise RuntimeError(
+                    f"Context manager '{self._config.context_manager}' not found in registry"
+                )
+            if provider_key is None:
+                raise RuntimeError(
+                    f"Provider '{self._config.provider}' not found in registry"
+                )
+
+            # 5. Build router
+            self._router = Router(
+                registry=self._registry,
+                services=self._services,
+                context_manager_key=context_manager_key,
+                provider_key=provider_key,
+            )
+
+            # 6. Assemble system prompt
+            system_prompt = await assemble_system_prompt(self._registry, self._services)
+
+            # 7. Orchestrator turn loop
+            result = await self._orchestrator_loop(
+                orchestrator_key=orchestrator_key,
+                prompt=prompt,
+                system_prompt=system_prompt,
+            )
+
+            # 8. Save metadata + finalize
+            self._persistence.save_metadata(
+                {
+                    "session_id": session_id,
+                    "prompt": prompt,
+                }
+            )
+            self._persistence.finalize()
+
+            return result
+
+        finally:
+            await self._teardown_services()
+
+    # ------------------------------------------------------------------
+    # Orchestrator turn loop
+    # ------------------------------------------------------------------
+
+    async def _orchestrator_loop(
+        self,
+        orchestrator_key: str,
+        prompt: str,
+        system_prompt: str,
+    ) -> str:
+        """Drive the bidirectional orchestrator routing loop.
+
+        Writes an ``orchestrator.execute`` JSON-RPC request to the orchestrator
+        process, then processes messages until the final response arrives:
+
+        * ``request.*`` messages are routed via :meth:`_handle_orchestrator_request`
+          and the result is written back.
+        * ``stream.*`` notifications are relayed to stdout.
+        * A response whose ``id`` matches the execute request is the final result.
+
+        Args:
+            orchestrator_key: Service key for the orchestrator in ``_services``.
+            prompt: User prompt to execute.
+            system_prompt: Assembled system prompt for this session.
+
+        Returns:
+            The ``result`` field from the orchestrator's final response.
+        """
+        orchestrator_svc: ServiceProcess = self._services[orchestrator_key]
+        assert orchestrator_svc.process.stdin is not None
+        assert orchestrator_svc.process.stdout is not None
+
+        execute_id = uuid.uuid4().hex[:16]
+
+        request: dict[str, Any] = {
+            "jsonrpc": "2.0",
+            "id": execute_id,
+            "method": "orchestrator.execute",
+            "params": {
+                "prompt": prompt,
+                "system_prompt": system_prompt,
+            },
+        }
+        await write_message(orchestrator_svc.process.stdin, request)
+
+        # Read loop
+        while True:
+            message = await read_message(orchestrator_svc.process.stdout)
+            if message is None:
+                raise RuntimeError("Orchestrator connection closed unexpectedly")
+
+            method: str | None = message.get("method")
+
+            # Request from the orchestrator — route it and send back a response
+            if method is not None and method.startswith("request."):
+                params = message.get("params")
+                msg_id = message.get("id")
+
+                try:
+                    result = await self._handle_orchestrator_request(method, params)
+                    response: dict[str, Any] = {
+                        "jsonrpc": "2.0",
+                        "id": msg_id,
+                        "result": result,
+                    }
+
+                    # Persist context messages
+                    if (
+                        method == "request.context_add_message"
+                        and self._persistence is not None
+                        and isinstance(params, dict)
+                    ):
+                        self._persistence.append_message(params)
+
+                except JsonRpcError as exc:
+                    response = exc.to_response(msg_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("Unexpected error routing %r", method)
+                    response = make_error_response(
+                        msg_id, -32603, f"Internal error: {exc}"
+                    )
+
+                await write_message(orchestrator_svc.process.stdin, response)
+
+            # Stream notification — relay to stdout
+            elif method is not None and method.startswith("stream."):
+                sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
+                sys.stdout.flush()
+
+            # Final response matching execute_id
+            elif message.get("id") == execute_id and "result" in message:
+                return message["result"]  # type: ignore[return-value]
+
+    # ------------------------------------------------------------------
+    # Delegating helper (testable entry point)
+    # ------------------------------------------------------------------
+
+    async def _handle_orchestrator_request(self, method: str, params: Any) -> Any:
+        """Delegate an orchestrator request to the :class:`Router`.
+
+        This thin wrapper exists to simplify testing — callers can inject a
+        pre-built registry and router and call this method directly.
+
+        Args:
+            method: The JSON-RPC method string (e.g. ``"request.tool_execute"``).
+            params: The JSON-RPC params payload.
+
+        Returns:
+            The result returned by the router.
+
+        Raises:
+            RuntimeError: If the router has not been initialised yet.
+            JsonRpcError: Propagated from the router on routing failure.
+        """
+        if self._router is None:
+            raise RuntimeError("Router has not been initialised")
+        return await self._router.route_request(method, params)
+
+    # ------------------------------------------------------------------
+    # Lifecycle helpers
+    # ------------------------------------------------------------------
+
+    async def _build_registry(self) -> None:
+        """Send ``describe`` to each service and register results in the registry.
+
+        Uses a 10-second timeout per service.
+        """
+        for service_key, service in self._services.items():
+            describe_result = await asyncio.wait_for(
+                service.client.request("describe"),
+                timeout=10.0,
+            )
+            self._registry.register(service_key, describe_result)
+
+    async def _spawn_services(self) -> None:
+        """Spawn all services declared in the session config."""
+        for service_name in self._config.services:
+            command, working_dir = resolve_service_command(service_name, self._settings)
+            service = await spawn_service(service_name, command, working_dir)
+            self._services[service_name] = service
+
+    async def _teardown_services(self) -> None:
+        """Gracefully shut down all running :class:`ServiceProcess` instances."""
+        for service in self._services.values():
+            if isinstance(service, ServiceProcess):
+                try:
+                    await shutdown_service(service)
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Error shutting down service %r", getattr(service, "name", "?")
+                    )
