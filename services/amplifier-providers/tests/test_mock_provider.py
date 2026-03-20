@@ -60,9 +60,7 @@ async def test_mock_provider_complete_has_content() -> None:
     from amplifier_providers.providers.mock import MockProvider
 
     provider = MockProvider()
-    request = ChatRequest(
-        messages=[Message(role="user", content="Tell me something")]
-    )
+    request = ChatRequest(messages=[Message(role="user", content="Tell me something")])
     response = await provider.complete(request)
 
     assert response.content is not None, "ChatResponse.content must not be None"
@@ -74,9 +72,7 @@ async def test_mock_provider_complete_has_usage() -> None:
     from amplifier_providers.providers.mock import MockProvider
 
     provider = MockProvider()
-    request = ChatRequest(
-        messages=[Message(role="user", content="Hello")]
-    )
+    request = ChatRequest(messages=[Message(role="user", content="Hello")])
     response = await provider.complete(request)
 
     assert response.usage is not None, "ChatResponse.usage must not be None"
@@ -136,9 +132,7 @@ async def test_mock_provider_cycles_through_responses() -> None:
     from amplifier_providers.providers.mock import MockProvider
 
     provider = MockProvider()
-    request = ChatRequest(
-        messages=[Message(role="user", content="Hello")]
-    )
+    request = ChatRequest(messages=[Message(role="user", content="Hello")])
 
     # Make multiple calls and collect response texts
     texts = set()
@@ -151,3 +145,43 @@ async def test_mock_provider_cycles_through_responses() -> None:
 
     # Should have cycled through at least 2 different responses
     assert len(texts) >= 2, f"Expected cycling through responses, got: {texts}"
+
+
+async def test_mock_provider_accepts_config_dict_with_responses() -> None:
+    """MockProvider must accept config dict with optional responses list."""
+    from amplifier_providers.providers.mock import MockProvider
+
+    custom_responses = ["Custom response A", "Custom response B"]
+    provider = MockProvider(config={"responses": custom_responses})
+
+    assert provider.responses == custom_responses, (
+        f"Expected custom responses from config, got: {provider.responses}"
+    )
+
+
+async def test_mock_provider_uses_default_responses_when_no_config() -> None:
+    """MockProvider must use default responses when no config provided."""
+    from amplifier_providers.providers.mock import MockProvider
+
+    provider_no_arg = MockProvider()
+    provider_none = MockProvider(config=None)
+    provider_empty = MockProvider(config={})
+
+    # All three should have non-empty default responses
+    assert len(provider_no_arg.responses) > 0
+    assert len(provider_none.responses) > 0
+    assert len(provider_empty.responses) > 0
+
+
+async def test_mock_provider_config_responses_used_in_complete() -> None:
+    """MockProvider must use config responses when completing requests."""
+    from amplifier_providers.providers.mock import MockProvider
+
+    custom_responses = ["Only this response"]
+    provider = MockProvider(config={"responses": custom_responses})
+    request = ChatRequest(messages=[Message(role="user", content="Hello")])
+
+    response = await provider.complete(request)
+    assert response.content is not None
+    assert isinstance(response.content, list)
+    assert response.content[0].text == "Only this response"

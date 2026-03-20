@@ -23,13 +23,14 @@ class MockProvider:
 
     name = "mock"
 
-    def __init__(self) -> None:
-        """Initialize Mock provider with default settings."""
-        self.responses = [
+    def __init__(self, config: dict | None = None) -> None:
+        """Initialize Mock provider with optional config dict."""
+        default_responses = [
             "I'll help you with that task.",
             "Task completed successfully.",
             "Here's the result of your request.",
         ]
+        self.responses = (config or {}).get("responses", default_responses)
         self.call_count = 0
         self.debug = False
         self.raw_debug = False
@@ -53,7 +54,9 @@ class MockProvider:
         # Simple pattern matching for tool calls
         tool_calls = []
         if "read" in content.lower():
-            tool_calls.append(ToolCall(id="mock_tool_1", name="read", arguments={"path": "test.txt"}))
+            tool_calls.append(
+                ToolCall(id="mock_tool_1", name="read", arguments={"path": "test.txt"})
+            )
 
         # Generate response
         if tool_calls:
