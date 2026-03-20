@@ -20,3 +20,8 @@ packages = ["src/amplifier_ipc_protocol"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+extraPaths = ["src"]
