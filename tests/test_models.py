@@ -34,7 +34,7 @@ def test_tool_call_basic_construction():
 
 def test_tool_call_name_alias():
     """ToolCall accepts 'tool' as alias for 'name'."""
-    tc = ToolCall(id="call-2", tool="aliased_tool", arguments={})
+    tc = ToolCall(id="call-2", tool="aliased_tool", arguments={})  # type: ignore[call-arg]
     assert tc.name == "aliased_tool"
 
 
@@ -77,14 +77,15 @@ def test_message_with_tool_calls():
     """Message supports tool_calls list."""
     tc = ToolCall(id="c1", name="fn", arguments={"k": "v"})
     msg = Message(role="assistant", tool_calls=[tc])
+    assert msg.tool_calls is not None
     assert len(msg.tool_calls) == 1
     assert msg.tool_calls[0].name == "fn"
 
 
 def test_message_extra_fields_allowed():
     """Message allows extra fields (extra='allow')."""
-    msg = Message(role="user", content="Hi", custom_field="extra_value")
-    assert msg.custom_field == "extra_value"
+    msg = Message(role="user", content="Hi", custom_field="extra_value")  # type: ignore[call-arg]
+    assert msg.custom_field == "extra_value"  # type: ignore[attr-defined]
 
 
 def test_message_json_roundtrip():
@@ -166,8 +167,8 @@ def test_tool_result_get_serialized_output_none():
 
 def test_tool_result_extra_fields_allowed():
     """ToolResult allows extra fields (extra='allow')."""
-    result = ToolResult(success=True, output="ok", extra_meta="some_value")
-    assert result.extra_meta == "some_value"
+    result = ToolResult(success=True, output="ok", extra_meta="some_value")  # type: ignore[call-arg]
+    assert result.extra_meta == "some_value"  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +201,7 @@ def test_hook_result_with_message():
     msg = Message(role="user", content="Inject this")
     hr = HookResult(action=HookAction.INJECT_CONTEXT, message=msg)
     assert hr.action == HookAction.INJECT_CONTEXT
+    assert hr.message is not None
     assert hr.message.content == "Inject this"
 
 
@@ -253,6 +255,7 @@ def test_chat_request_full():
         temperature=0.7,
     )
     assert req.system == "You are a helpful assistant."
+    assert req.tools is not None
     assert len(req.tools) == 1
     assert req.max_output_tokens == 1024
 
@@ -269,6 +272,7 @@ def test_chat_response_with_tool_calls():
     """ChatResponse can contain tool_calls."""
     tc = ToolCall(id="c1", name="search", arguments={"q": "cats"})
     resp = ChatResponse(tool_calls=[tc])
+    assert resp.tool_calls is not None
     assert len(resp.tool_calls) == 1
     assert resp.tool_calls[0].name == "search"
 
