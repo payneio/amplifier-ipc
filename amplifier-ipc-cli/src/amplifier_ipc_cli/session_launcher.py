@@ -5,8 +5,8 @@ from __future__ import annotations
 from amplifier_ipc_host.config import HostSettings, SessionConfig
 from amplifier_ipc_host.host import Host
 
-from amplifier_ipc_cli.definitions import ResolvedAgent, resolve_agent
-from amplifier_ipc_cli.registry import Registry
+from amplifier_ipc_host.definition_registry import Registry
+from amplifier_ipc_host.definitions import ResolvedAgent, resolve_agent
 
 
 def build_session_config(resolved: ResolvedAgent) -> SessionConfig:
