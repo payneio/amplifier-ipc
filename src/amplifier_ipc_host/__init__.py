@@ -9,6 +9,15 @@ from amplifier_ipc_host.config import (
     resolve_service_command,
 )
 from amplifier_ipc_host.content import assemble_system_prompt, resolve_mention
+from amplifier_ipc_host.events import (
+    ApprovalRequestEvent,
+    CompleteEvent,
+    ErrorEvent,
+    HostEvent,
+    StreamThinkingEvent,
+    StreamTokenEvent,
+    StreamToolCallStartEvent,
+)
 from amplifier_ipc_host.host import Host
 from amplifier_ipc_host.lifecycle import ServiceProcess, shutdown_service, spawn_service
 from amplifier_ipc_host.persistence import SessionPersistence
@@ -18,6 +27,14 @@ from amplifier_ipc_host.router import Router
 __all__ = [
     # Host orchestration
     "Host",
+    # Events
+    "HostEvent",
+    "StreamTokenEvent",
+    "StreamThinkingEvent",
+    "StreamToolCallStartEvent",
+    "ApprovalRequestEvent",
+    "ErrorEvent",
+    "CompleteEvent",
     # Config
     "SessionConfig",
     "HostSettings",

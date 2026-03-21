@@ -8,10 +8,9 @@ the orchestrator turn loop, persists the transcript, and tears everything down.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import sys
 import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +20,15 @@ from amplifier_ipc_host.config import (
     resolve_service_command,
 )
 from amplifier_ipc_host.content import assemble_system_prompt
+from amplifier_ipc_host.events import (
+    ApprovalRequestEvent,
+    CompleteEvent,
+    ErrorEvent,
+    HostEvent,
+    StreamThinkingEvent,
+    StreamTokenEvent,
+    StreamToolCallStartEvent,
+)
 from amplifier_ipc_host.lifecycle import ServiceProcess, shutdown_service, spawn_service
 from amplifier_ipc_host.persistence import SessionPersistence
 from amplifier_ipc_host.registry import CapabilityRegistry
@@ -63,8 +71,8 @@ class Host:
     # Public API
     # ------------------------------------------------------------------
 
-    async def run(self, prompt: str) -> str:
-        """Execute a full session turn.
+    async def run(self, prompt: str) -> AsyncIterator[HostEvent]:
+        """Execute a full session turn, yielding events as they occur.
 
         1. Generate a session ID and create :class:`SessionPersistence`.
         2. Spawn all configured services.
@@ -72,14 +80,15 @@ class Host:
         4. Resolve orchestrator / context-manager / provider service keys.
         5. Build a :class:`Router`.
         6. Assemble the system prompt via content resolution.
-        7. Run the orchestrator turn loop.
+        7. Run the orchestrator turn loop, yielding :class:`HostEvent` instances.
         8. Persist metadata and finalize.
 
         Args:
             prompt: The user prompt to pass to the orchestrator.
 
-        Returns:
-            The final text response from the orchestrator.
+        Yields:
+            :class:`HostEvent` subclass instances as they are produced by the
+            orchestrator loop, ending with a :class:`CompleteEvent`.
 
         Raises:
             RuntimeError: If the orchestrator, context manager, or provider
@@ -128,12 +137,13 @@ class Host:
             # 6. Assemble system prompt
             system_prompt = await assemble_system_prompt(self._registry, self._services)
 
-            # 7. Orchestrator turn loop
-            result = await self._orchestrator_loop(
+            # 7. Orchestrator turn loop — yield events as they arrive
+            async for event in self._orchestrator_loop(
                 orchestrator_key=orchestrator_key,
                 prompt=prompt,
                 system_prompt=system_prompt,
-            )
+            ):
+                yield event
 
             # 8. Save metadata + finalize
             self._persistence.save_metadata(
@@ -143,8 +153,6 @@ class Host:
                 }
             )
             self._persistence.finalize()
-
-            return result
 
         finally:
             await self._teardown_services()
@@ -158,24 +166,32 @@ class Host:
         orchestrator_key: str,
         prompt: str,
         system_prompt: str,
-    ) -> str:
-        """Drive the bidirectional orchestrator routing loop.
+    ) -> AsyncIterator[HostEvent]:
+        """Drive the bidirectional orchestrator routing loop, yielding events.
 
         Writes an ``orchestrator.execute`` JSON-RPC request to the orchestrator
         process, then processes messages until the final response arrives:
 
         * ``request.*`` messages are routed via :meth:`_handle_orchestrator_request`
           and the result is written back.
-        * ``stream.*`` notifications are relayed to stdout.
-        * A response whose ``id`` matches the execute request is the final result.
+        * ``stream.token`` notifications yield :class:`StreamTokenEvent`.
+        * ``stream.thinking`` notifications yield :class:`StreamThinkingEvent`.
+        * ``stream.tool_call_start`` notifications yield :class:`StreamToolCallStartEvent`.
+        * ``approval_request`` notifications yield :class:`ApprovalRequestEvent`.
+        * ``error`` notifications yield :class:`ErrorEvent`.
+        * A response whose ``id`` matches the execute request yields :class:`CompleteEvent`.
 
         Args:
             orchestrator_key: Service key for the orchestrator in ``_services``.
             prompt: User prompt to execute.
             system_prompt: Assembled system prompt for this session.
 
-        Returns:
-            The ``result`` field from the orchestrator's final response.
+        Yields:
+            :class:`HostEvent` subclass instances produced during execution.
+
+        Raises:
+            RuntimeError: If the orchestrator process closes the connection or
+                returns a JSON-RPC error response.
         """
         orchestrator_svc: ServiceProcess = self._services[orchestrator_key]
         if (
@@ -238,14 +254,39 @@ class Host:
 
                 await write_message(orchestrator_svc.process.stdin, response)
 
-            # Stream notification — relay to stdout
+            # Stream token notification
+            elif method == "stream.token":
+                token = (message.get("params") or {}).get("token", "")
+                yield StreamTokenEvent(token=token)
+
+            # Stream thinking notification
+            elif method == "stream.thinking":
+                thinking = (message.get("params") or {}).get("thinking", "")
+                yield StreamThinkingEvent(thinking=thinking)
+
+            # Stream tool call start notification
+            elif method == "stream.tool_call_start":
+                tool_name = (message.get("params") or {}).get("tool_name", "")
+                yield StreamToolCallStartEvent(tool_name=tool_name)
+
+            # Approval request notification
+            elif method == "approval_request":
+                params = message.get("params") or {}
+                yield ApprovalRequestEvent(params=params)
+
+            # Error notification (non-fatal)
+            elif method == "error":
+                error_message = (message.get("params") or {}).get("message", "")
+                yield ErrorEvent(message=error_message)
+
+            # Other stream notifications — log and ignore
             elif method is not None and method.startswith("stream."):
-                sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
-                sys.stdout.flush()
+                logger.debug("Unhandled stream notification: %r", method)
 
             # Final response matching execute_id — success
             elif message.get("id") == execute_id and "result" in message:
-                return message["result"]  # type: ignore[return-value]
+                yield CompleteEvent(result=message["result"])
+                return
 
             # Final response matching execute_id — error
             elif message.get("id") == execute_id and "error" in message:
@@ -290,7 +331,7 @@ class Host:
         """Send ``describe`` to each service and register results in the registry.
 
         The IPC protocol server wraps capabilities under a ``capabilities`` key
-        and represents content as ``{"paths": [...]}`` rather than a flat list.
+        and represents content as ``{\"paths\": [...]}`` rather than a flat list.
         This method normalises the nested format into the flat dict expected by
         :meth:`~amplifier_ipc_host.registry.CapabilityRegistry.register`.
 
@@ -314,7 +355,7 @@ class Host:
                 else content_field
             )
 
-            flat: dict = {
+            flat: dict = {  # type: ignore[type-arg]
                 "tools": caps.get("tools", []),
                 "hooks": caps.get("hooks", []),
                 "orchestrators": caps.get("orchestrators", []),

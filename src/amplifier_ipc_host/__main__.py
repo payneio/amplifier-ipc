@@ -15,7 +15,35 @@ import sys
 from pathlib import Path
 
 from amplifier_ipc_host.config import load_settings, parse_session_config
+from amplifier_ipc_host.events import CompleteEvent, StreamTokenEvent
 from amplifier_ipc_host.host import Host
+
+
+async def _consume_events(host: Host, prompt: str) -> None:
+    """Consume the host event stream and print output to stdout.
+
+    Stream tokens are printed immediately as they arrive.  The final
+    :class:`~amplifier_ipc_host.events.CompleteEvent` result is printed if no
+    stream tokens were emitted (i.e. non-streaming orchestrators).
+
+    Args:
+        host: Configured :class:`Host` instance ready to run.
+        prompt: User prompt to send to the orchestrator.
+    """
+    streamed = False
+    async for event in host.run(prompt):
+        if isinstance(event, StreamTokenEvent):
+            sys.stdout.write(event.token)
+            sys.stdout.flush()
+            streamed = True
+        elif isinstance(event, CompleteEvent):
+            if streamed:
+                # End the streaming output with a newline
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+            else:
+                # No streaming tokens — print the complete result
+                print(event.result)
 
 
 def _run_session(config_path: Path, prompt: str | None) -> None:
@@ -44,8 +72,7 @@ def _run_session(config_path: Path, prompt: str | None) -> None:
         sys.exit(1)
 
     host = Host(config=config, settings=settings)
-    response = asyncio.run(host.run(resolved))
-    print(response)
+    asyncio.run(_consume_events(host, resolved))
 
 
 def main() -> None:

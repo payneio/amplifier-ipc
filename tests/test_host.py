@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from amplifier_ipc_host.config import HostSettings, SessionConfig
+from amplifier_ipc_host.events import CompleteEvent, StreamTokenEvent
 from amplifier_ipc_host.host import Host
 from amplifier_ipc_host.registry import CapabilityRegistry
 from amplifier_ipc_host.router import Router
@@ -195,8 +196,81 @@ async def test_orchestrator_loop_raises_on_error_response() -> None:
         patch("amplifier_ipc_host.host.read_message", fake_read),
     ):
         with pytest.raises(RuntimeError, match="Orchestrator returned error"):
-            await host._orchestrator_loop(
+            async for _ in host._orchestrator_loop(
                 orchestrator_key="orch",
                 prompt="hello",
                 system_prompt="be helpful",
-            )
+            ):
+                pass
+
+
+async def test_orchestrator_loop_yields_stream_events() -> None:
+    """_orchestrator_loop yields StreamTokenEvent events then a CompleteEvent."""
+    config = SessionConfig(
+        services=["orch"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+
+    host = Host(config=config, settings=settings)
+
+    fake_process = MagicMock()
+    fake_process.stdin = MagicMock()
+    fake_process.stdout = MagicMock()
+
+    fake_service = MagicMock()
+    fake_service.process = fake_process
+    host._services = {"orch": fake_service}
+
+    captured_id: list[str] = []
+
+    async def fake_write(stream: object, message: dict) -> None:  # type: ignore[type-arg]
+        if message.get("method") == "orchestrator.execute":
+            captured_id.append(message["id"])
+
+    read_call_count = 0
+
+    async def fake_read(stream: object) -> dict | None:  # type: ignore[type-arg]
+        nonlocal read_call_count
+        read_call_count += 1
+        if read_call_count == 1:
+            return {
+                "jsonrpc": "2.0",
+                "method": "stream.token",
+                "params": {"token": "Hello"},
+            }
+        elif read_call_count == 2:
+            return {
+                "jsonrpc": "2.0",
+                "method": "stream.token",
+                "params": {"token": " World"},
+            }
+        else:
+            # Final response matching execute_id
+            return {
+                "jsonrpc": "2.0",
+                "id": captured_id[0],
+                "result": "Hello World",
+            }
+
+    with (
+        patch("amplifier_ipc_host.host.write_message", fake_write),
+        patch("amplifier_ipc_host.host.read_message", fake_read),
+    ):
+        events = []
+        async for event in host._orchestrator_loop(
+            orchestrator_key="orch",
+            prompt="hello",
+            system_prompt="be helpful",
+        ):
+            events.append(event)
+
+    assert len(events) == 3
+    assert isinstance(events[0], StreamTokenEvent)
+    assert events[0].token == "Hello"
+    assert isinstance(events[1], StreamTokenEvent)
+    assert events[1].token == " World"
+    assert isinstance(events[2], CompleteEvent)
+    assert events[2].result == "Hello World"
