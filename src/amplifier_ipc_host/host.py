@@ -185,6 +185,8 @@ class Host:
         * ``stream.token`` notifications yield :class:`StreamTokenEvent`.
         * ``stream.thinking`` notifications yield :class:`StreamThinkingEvent`.
         * ``stream.tool_call_start`` notifications yield :class:`StreamToolCallStartEvent`.
+        * ``stream.content_block_start`` notifications yield :class:`StreamContentBlockStartEvent`.
+        * ``stream.content_block_end`` notifications yield :class:`StreamContentBlockEndEvent`.
         * ``approval_request`` notifications yield :class:`ApprovalRequestEvent`.
         * ``error`` notifications yield :class:`ErrorEvent`.
         * A response whose ``id`` matches the execute request yields :class:`CompleteEvent`.
@@ -286,7 +288,10 @@ class Host:
 
             # Stream content block end notification
             elif method == "stream.content_block_end":
-                yield StreamContentBlockEndEvent()
+                params = message.get("params") or {}
+                block_type = params.get("block_type", "")
+                index = params.get("index", 0)
+                yield StreamContentBlockEndEvent(block_type=block_type, index=index)
 
             # Approval request notification
             elif method == "approval_request":

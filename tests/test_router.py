@@ -352,4 +352,3 @@ async def test_route_state_set_overwrites_existing() -> None:
     await router.route_request("request.state_set", {"key": "counter", "value": 99})
 
     assert router._state["counter"] == 99
-
