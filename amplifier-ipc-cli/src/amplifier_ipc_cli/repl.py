@@ -79,6 +79,11 @@ def _create_prompt_session(history_path: Path | None = None) -> PromptSession:  
         """Ctrl-J inserts a newline (multiline editing)."""
         event.current_buffer.insert_text("\n")
 
+    @bindings.add("enter")
+    def _accept(event: Any) -> None:  # noqa: ANN401
+        """Enter accepts/submits the current input."""
+        event.current_buffer.validate_and_handle()
+
     session: PromptSession = PromptSession(  # type: ignore[type-arg]
         history=history,
         multiline=True,
