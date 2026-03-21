@@ -20,7 +20,7 @@ class TestRegistryIsReExport:
 class TestDefinitionsIsReExport:
     def test_resolved_agent_is_same_class_as_host(self) -> None:
         """CLI ResolvedAgent must be the identical class from amplifier_ipc_host.definitions."""
-        from amplifier_ipc_cli.definitions import ResolvedAgent as CLI_ResolvedAgent
+        from amplifier_ipc_cli.definitions import ResolvedAgent as CLI_ResolvedAgent  # type: ignore[attr-defined]  # sys.modules replacement makes these invisible to Pyright
         from amplifier_ipc_host.definitions import ResolvedAgent as HOST_ResolvedAgent
 
         assert CLI_ResolvedAgent is HOST_ResolvedAgent, (
@@ -30,21 +30,21 @@ class TestDefinitionsIsReExport:
 
     def test_service_entry_is_same_class_as_host(self) -> None:
         """CLI ServiceEntry must be the identical class from amplifier_ipc_host.definitions."""
-        from amplifier_ipc_cli.definitions import ServiceEntry as CLI_ServiceEntry
+        from amplifier_ipc_cli.definitions import ServiceEntry as CLI_ServiceEntry  # type: ignore[attr-defined]  # sys.modules replacement makes these invisible to Pyright
         from amplifier_ipc_host.definitions import ServiceEntry as HOST_ServiceEntry
 
         assert CLI_ServiceEntry is HOST_ServiceEntry
 
     def test_parse_agent_definition_is_same_function_as_host(self) -> None:
         """CLI parse_agent_definition must be identical to host's."""
-        from amplifier_ipc_cli.definitions import parse_agent_definition as CLI_fn
+        from amplifier_ipc_cli.definitions import parse_agent_definition as CLI_fn  # type: ignore[attr-defined]  # sys.modules replacement makes these invisible to Pyright
         from amplifier_ipc_host.definitions import parse_agent_definition as HOST_fn
 
         assert CLI_fn is HOST_fn
 
     def test_resolve_agent_is_same_function_as_host(self) -> None:
         """CLI resolve_agent must be identical to host's."""
-        from amplifier_ipc_cli.definitions import resolve_agent as CLI_fn
+        from amplifier_ipc_cli.definitions import resolve_agent as CLI_fn  # type: ignore[attr-defined]  # sys.modules replacement makes these invisible to Pyright
         from amplifier_ipc_host.definitions import resolve_agent as HOST_fn
 
         assert CLI_fn is HOST_fn
