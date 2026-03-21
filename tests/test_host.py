@@ -358,5 +358,7 @@ async def test_orchestrator_loop_yields_content_block_events() -> None:
     assert isinstance(events[1], StreamTokenEvent)
     assert events[1].token == "Hello"
     assert isinstance(events[2], StreamContentBlockEndEvent)
+    assert events[2].block_type == ""
+    assert events[2].index == 0
     assert isinstance(events[3], CompleteEvent)
     assert events[3].result == "Hello"

@@ -218,7 +218,7 @@ async def test_route_provider_complete() -> None:
     assert call_params == params
 
 
-async def test_provider_complete_with_notification_relay() -> None:
+async def test_route_provider_complete_with_content_blocks() -> None:
     """provider_complete relays the full provider response including streamed content blocks."""
     # Provider returns a response that includes content block data (streaming provider pattern)
     completion = {
