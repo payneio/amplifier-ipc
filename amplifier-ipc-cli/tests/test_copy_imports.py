@@ -103,24 +103,28 @@ def test_commands_version_imports() -> None:
 def test_no_amplifier_lite_cli_imports_in_console() -> None:
     """console.py has no amplifier_lite_cli imports."""
     import importlib
+    import importlib.util
 
     spec = importlib.util.find_spec("amplifier_ipc_cli.console")
     assert spec is not None
     source = spec.origin
     assert source is not None
-    content = open(source).read()
+    with open(source) as f:
+        content = f.read()
     assert "amplifier_lite_cli" not in content
 
 
 def test_no_amplifier_lite_cli_imports_in_ui_message_renderer() -> None:
     """ui/message_renderer.py uses amplifier_ipc_cli.console, not amplifier_lite_cli."""
     import importlib
+    import importlib.util
 
     spec = importlib.util.find_spec("amplifier_ipc_cli.ui.message_renderer")
     assert spec is not None
     source = spec.origin
     assert source is not None
-    content = open(source).read()
+    with open(source) as f:
+        content = f.read()
     assert "amplifier_lite_cli" not in content
     assert "amplifier_ipc_cli.console" in content
 
@@ -128,6 +132,7 @@ def test_no_amplifier_lite_cli_imports_in_ui_message_renderer() -> None:
 def test_no_amplifier_lite_cli_imports_in_commands() -> None:
     """No command file imports from amplifier_lite_cli."""
     import importlib
+    import importlib.util
 
     for mod_name in [
         "amplifier_ipc_cli.commands.notify",
@@ -139,7 +144,8 @@ def test_no_amplifier_lite_cli_imports_in_commands() -> None:
         assert spec is not None, f"Module {mod_name} not found"
         source = spec.origin
         assert source is not None
-        content = open(source).read()
+        with open(source) as f:
+            content = f.read()
         assert "amplifier_lite_cli" not in content, (
             f"{mod_name} still imports from amplifier_lite_cli"
         )
