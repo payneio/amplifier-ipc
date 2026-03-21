@@ -13,7 +13,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from amplifier_ipc_protocol import ChatRequest, ChatResponse, provider
-from amplifier_ipc_protocol.models import TextBlock, ThinkingBlock, ToolCallBlock
+from amplifier_ipc_protocol.models import (
+    TextBlock,
+    ThinkingBlock,
+    ToolCall,
+    ToolCallBlock,
+    ToolSpec,
+    Usage,
+)
 
 __all__ = ["AnthropicProvider"]
 
@@ -362,6 +369,101 @@ class AnthropicProvider:
             blocks.append({"type": "text", "text": ""})
 
         return blocks
+
+    def _convert_tools_from_request(
+        self, tools: list[ToolSpec]
+    ) -> list[dict[str, Any]]:
+        """Convert Amplifier ToolSpec objects to Anthropic tool format.
+
+        Each tool becomes::
+
+            {
+                "name": tool.name,
+                "description": tool.description or "",
+                "input_schema": tool.parameters,
+            }
+
+        An empty tool list returns an empty list.
+        """
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description or "",
+                "input_schema": tool.parameters if tool.parameters is not None else {},
+            }
+            for tool in tools
+        ]
+
+    def _convert_to_chat_response(self, response: Any) -> ChatResponse:
+        """Convert an Anthropic Messages API response to ChatResponse.
+
+        * ``text`` blocks         → :class:`TextBlock`
+        * ``thinking`` blocks     → :class:`ThinkingBlock`
+        * ``tool_use`` blocks     → :class:`ToolCallBlock` in ``content_blocks``
+                                    **and** :class:`ToolCall` in ``tool_calls``
+
+        Usage extraction
+        ----------------
+        ``total_tokens`` is computed as ``input_tokens + output_tokens``.
+        ``cache_read_tokens`` / ``cache_write_tokens`` are ``None`` when zero.
+        """
+        content_blocks: list[Any] = []
+        tool_calls: list[ToolCall] = []
+        text_parts: list[str] = []
+
+        for block in response.content or []:
+            block_type: str | None = getattr(block, "type", None)
+
+            if block_type == "text":
+                text = getattr(block, "text", "")
+                content_blocks.append(TextBlock(text=text))
+                if text:
+                    text_parts.append(text)
+
+            elif block_type == "thinking":
+                thinking = getattr(block, "thinking", "")
+                signature = getattr(block, "signature", None)
+                content_blocks.append(
+                    ThinkingBlock(thinking=thinking, signature=signature)
+                )
+
+            elif block_type == "tool_use":
+                tool_id = getattr(block, "id", "")
+                tool_name = getattr(block, "name", "")
+                tool_input: dict[str, Any] = getattr(block, "input", {}) or {}
+                content_blocks.append(
+                    ToolCallBlock(id=tool_id, name=tool_name, input=tool_input)
+                )
+                tool_calls.append(
+                    ToolCall(id=tool_id, name=tool_name, arguments=tool_input)
+                )
+
+        # --- Usage extraction ---
+        usage_obj = response.usage
+        input_tokens: int = getattr(usage_obj, "input_tokens", 0)
+        output_tokens: int = getattr(usage_obj, "output_tokens", 0)
+        raw_cache_read: int = getattr(usage_obj, "cache_read_input_tokens", 0)
+        raw_cache_write: int = getattr(usage_obj, "cache_creation_input_tokens", 0)
+
+        usage = Usage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+            cache_read_tokens=raw_cache_read if raw_cache_read else None,
+            cache_write_tokens=raw_cache_write if raw_cache_write else None,
+        )
+
+        combined_text = "\n\n".join(text_parts) or None
+
+        return ChatResponse(
+            content_blocks=content_blocks,
+            content=content_blocks,
+            text=combined_text,
+            tool_calls=tool_calls if tool_calls else None,
+            usage=usage,
+            finish_reason=getattr(response, "stop_reason", None),
+            metadata={"model": getattr(response, "model", None)},
+        )
 
     # ------------------------------------------------------------------
     # Public interface
