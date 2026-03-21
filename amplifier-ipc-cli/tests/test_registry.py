@@ -174,3 +174,123 @@ class TestRegisterDefinition:
 
         # Only one entry in agents.yaml for this local_ref
         assert list(agents_data.values()).count(definition_id) == 1
+
+
+class TestResolveAgent:
+    def test_resolve_agent_returns_path(self, registry, home_dir: Path) -> None:
+        """resolve_agent() returns Path to definition file for a known agent."""
+        registry.ensure_home()
+        registry.register_definition(AGENT_YAML)
+
+        result = registry.resolve_agent("my-agent")
+
+        definition_id = "agent_my-agent_12345678"
+        expected = home_dir / "definitions" / f"{definition_id}.yaml"
+        assert result == expected
+        assert result.is_file()
+
+    def test_resolve_agent_unknown_raises_file_not_found(
+        self, registry, home_dir: Path
+    ) -> None:
+        """resolve_agent() raises FileNotFoundError for unknown agent name."""
+        registry.ensure_home()
+
+        with pytest.raises(FileNotFoundError) as exc_info:
+            registry.resolve_agent("nonexistent-agent")
+
+        assert "nonexistent-agent" in str(exc_info.value)
+        assert "Run amplifier-ipc discover" in str(exc_info.value)
+
+
+class TestResolveBehavior:
+    def test_resolve_behavior_returns_path(self, registry, home_dir: Path) -> None:
+        """resolve_behavior() returns Path to definition file for a known behavior."""
+        registry.ensure_home()
+        registry.register_definition(BEHAVIOR_YAML)
+
+        result = registry.resolve_behavior("my-behavior")
+
+        definition_id = "behavior_my-behavior_87654321"
+        expected = home_dir / "definitions" / f"{definition_id}.yaml"
+        assert result == expected
+        assert result.is_file()
+
+    def test_resolve_behavior_unknown_raises_file_not_found(
+        self, registry, home_dir: Path
+    ) -> None:
+        """resolve_behavior() raises FileNotFoundError for unknown behavior name."""
+        registry.ensure_home()
+
+        with pytest.raises(FileNotFoundError) as exc_info:
+            registry.resolve_behavior("nonexistent-behavior")
+
+        assert "nonexistent-behavior" in str(exc_info.value)
+        assert "Run amplifier-ipc discover" in str(exc_info.value)
+
+
+class TestGetEnvironmentPath:
+    def test_get_environment_path_returns_expected_path(
+        self, registry, home_dir: Path
+    ) -> None:
+        """get_environment_path() returns home/environments/<definition_id>."""
+        definition_id = "agent_my-agent_12345678"
+        result = registry.get_environment_path(definition_id)
+        expected = home_dir / "environments" / definition_id
+        assert result == expected
+
+
+class TestIsInstalled:
+    def test_is_installed_false_when_no_env(self, registry, home_dir: Path) -> None:
+        """is_installed() returns False when environment directory does not exist."""
+        registry.ensure_home()
+        definition_id = "agent_my-agent_12345678"
+        assert registry.is_installed(definition_id) is False
+
+    def test_is_installed_true_when_env_exists(self, registry, home_dir: Path) -> None:
+        """is_installed() returns True when environment directory exists."""
+        registry.ensure_home()
+        definition_id = "agent_my-agent_12345678"
+        env_dir = home_dir / "environments" / definition_id
+        env_dir.mkdir(parents=True)
+
+        assert registry.is_installed(definition_id) is True
+
+
+class TestGetSourceMeta:
+    def test_get_source_meta_returns_meta_when_present(
+        self, registry, home_dir: Path
+    ) -> None:
+        """get_source_meta() returns _meta dict when definition has source metadata."""
+        registry.ensure_home()
+        source_url = "https://example.com/agents/my-agent.yaml"
+        registry.register_definition(AGENT_YAML, source_url=source_url)
+
+        definition_id = "agent_my-agent_12345678"
+        meta = registry.get_source_meta(definition_id)
+
+        assert meta is not None
+        assert meta["source_url"] == source_url
+        assert "source_hash" in meta
+        assert "fetched_at" in meta
+
+    def test_get_source_meta_returns_none_when_no_meta(
+        self, registry, home_dir: Path
+    ) -> None:
+        """get_source_meta() returns None when definition has no _meta block."""
+        registry.ensure_home()
+        registry.register_definition(AGENT_YAML)  # no source_url => no _meta
+
+        definition_id = "agent_my-agent_12345678"
+        meta = registry.get_source_meta(definition_id)
+
+        assert meta is None
+
+    def test_get_source_meta_returns_none_for_nonexistent_definition(
+        self, registry, home_dir: Path
+    ) -> None:
+        """get_source_meta() returns None for a definition_id that doesn't exist."""
+        registry.ensure_home()
+
+        meta = registry.get_source_meta("agent_nonexistent_00000000")
+
+        assert meta is None

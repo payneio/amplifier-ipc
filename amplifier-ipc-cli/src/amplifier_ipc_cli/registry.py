@@ -129,3 +129,112 @@ class Registry:
         alias_file.write_text(yaml.dump(alias_data, default_flow_style=False))
 
         return definition_id
+
+    # ------------------------------------------------------------------
+    # Lookup helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_alias(self, name: str, alias_file: Path, kind: str) -> Path:
+        """Resolve a name to a definition file path via the alias file.
+
+        Args:
+            name: The local_ref alias to look up.
+            alias_file: Path to the YAML alias file (agents.yaml or behaviors.yaml).
+            kind: Human-readable kind label used in error messages (e.g. "agent").
+
+        Returns:
+            Path to the definition file.
+
+        Raises:
+            FileNotFoundError: If the alias is not found or the definition file
+                               is missing.
+        """
+        alias_data: dict = {}
+        if alias_file.exists():
+            alias_data = yaml.safe_load(alias_file.read_text()) or {}
+
+        definition_id = alias_data.get(name)
+        if definition_id is None:
+            raise FileNotFoundError(
+                f"{kind} '{name}' not found in registry. "
+                "Run amplifier-ipc discover to populate the registry."
+            )
+
+        def_file = self.home / "definitions" / f"{definition_id}.yaml"
+        if not def_file.exists():
+            raise FileNotFoundError(
+                f"Definition file for {kind} '{name}' (id: {definition_id}) not found. "
+                "Run amplifier-ipc discover to populate the registry."
+            )
+
+        return def_file
+
+    def resolve_agent(self, name: str) -> Path:
+        """Resolve an agent alias to its definition file path.
+
+        Args:
+            name: The agent local_ref alias.
+
+        Returns:
+            Path to the agent definition file.
+
+        Raises:
+            FileNotFoundError: If the agent is not registered.
+        """
+        return self._resolve_alias(name, self.home / "agents.yaml", "agent")
+
+    def resolve_behavior(self, name: str) -> Path:
+        """Resolve a behavior alias to its definition file path.
+
+        Args:
+            name: The behavior local_ref alias.
+
+        Returns:
+            Path to the behavior definition file.
+
+        Raises:
+            FileNotFoundError: If the behavior is not registered.
+        """
+        return self._resolve_alias(name, self.home / "behaviors.yaml", "behavior")
+
+    def get_environment_path(self, definition_id: str) -> Path:
+        """Return the path to the environment directory for a definition.
+
+        Args:
+            definition_id: The definition identifier.
+
+        Returns:
+            Path: home/environments/<definition_id> (may not yet exist).
+        """
+        return self.home / "environments" / definition_id
+
+    def is_installed(self, definition_id: str) -> bool:
+        """Check whether an environment directory exists for a definition.
+
+        Args:
+            definition_id: The definition identifier.
+
+        Returns:
+            True if the environment directory exists, False otherwise.
+        """
+        return self.get_environment_path(definition_id).is_dir()
+
+    def get_source_meta(self, definition_id: str) -> Optional[dict]:
+        """Read the _meta block from a stored definition file.
+
+        Args:
+            definition_id: The definition identifier.
+
+        Returns:
+            The ``_meta`` dict if present, or None if the definition does not
+            exist or has no ``_meta`` block.
+        """
+        def_file = self.home / "definitions" / f"{definition_id}.yaml"
+        if not def_file.exists():
+            return None
+
+        parsed = yaml.safe_load(def_file.read_text())
+        if not isinstance(parsed, dict):
+            return None
+
+        return parsed.get("_meta", None)
