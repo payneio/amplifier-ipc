@@ -1,9 +1,12 @@
 """Dataclasses and parsing functions for agent/behavior definitions."""
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -140,4 +143,95 @@ def parse_behavior_definition(yaml_content: str) -> BehaviorDefinition:
         tools=list(data.get("tools") or []),
         hooks=list(data.get("hooks") or []),
         context=dict(data.get("context") or {}),
+    )
+
+
+async def resolve_agent(
+    registry: Any,
+    agent_name: str,
+    extra_behaviors: list[str] | None = None,
+) -> ResolvedAgent:
+    """Resolve an agent by walking its behavior tree and collecting services.
+
+    Looks up the agent definition, collects its services, then recursively
+    walks the behavior tree collecting and deduplicating services by name.
+
+    Args:
+        registry: Registry instance used to resolve agent and behavior paths.
+        agent_name: The local_ref alias of the agent to resolve.
+        extra_behaviors: Optional additional behavior names to merge into the
+                         resolved agent after its own behavior tree is walked.
+
+    Returns:
+        ResolvedAgent populated with deduplicated services and agent config.
+
+    Raises:
+        FileNotFoundError: If the agent is not found in the registry.
+    """
+    # Step 1: Resolve agent alias to definition file path.
+    agent_path = registry.resolve_agent(agent_name)
+
+    # Step 2: Parse agent definition YAML.
+    agent_def = parse_agent_definition(agent_path.read_text())
+
+    # Step 3: Collect services from agent, keyed by name for deduplication.
+    services_by_name: dict[str, ServiceEntry] = {}
+    for svc in agent_def.services:
+        if svc.name not in services_by_name:
+            services_by_name[svc.name] = svc
+
+    visited_behaviors: set[str] = set()
+
+    # Step 4: Inner recursive function that walks one behavior.
+    def _walk_behavior(behavior_name: str) -> None:
+        """Resolve a behavior, collect its services, and recurse into nested behaviors."""
+        if behavior_name in visited_behaviors:
+            return
+        visited_behaviors.add(behavior_name)
+
+        # Attempt to resolve the behavior from the local registry.
+        try:
+            behavior_path = registry.resolve_behavior(behavior_name)
+        except FileNotFoundError:
+            # If the behavior looks like a URL, URL fetching is deferred to a future task.
+            if "://" in behavior_name:
+                logger.warning(
+                    "Behavior '%s' is a URL reference; skipping (URL fetching not yet supported).",
+                    behavior_name,
+                )
+            else:
+                logger.warning(
+                    "Behavior '%s' not found in local registry; skipping.",
+                    behavior_name,
+                )
+            return
+
+        # Parse the behavior definition.
+        behavior_def = parse_behavior_definition(behavior_path.read_text())
+
+        # Collect services, deduplicating by name.
+        for svc in behavior_def.services:
+            if svc.name not in services_by_name:
+                services_by_name[svc.name] = svc
+
+        # Recurse into nested behaviors.
+        for nested_behavior in behavior_def.behaviors:
+            _walk_behavior(nested_behavior)
+
+    # Walk the agent's declared behaviors.
+    for behavior_name in agent_def.behaviors:
+        _walk_behavior(behavior_name)
+
+    # Step 5: Walk extra_behaviors if provided.
+    if extra_behaviors:
+        for behavior_name in extra_behaviors:
+            _walk_behavior(behavior_name)
+
+    # Step 6: Return ResolvedAgent.
+    return ResolvedAgent(
+        services=list(services_by_name.values()),
+        orchestrator=agent_def.orchestrator,
+        context_manager=agent_def.context_manager,
+        provider=agent_def.provider,
+        component_config=agent_def.component_config,
     )

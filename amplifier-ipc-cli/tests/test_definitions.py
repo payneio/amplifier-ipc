@@ -1,5 +1,8 @@
 """Tests for definitions.py - dataclasses and parsing functions for agent/behavior definitions."""
 
+import asyncio
+from pathlib import Path
+
 import pytest
 
 from amplifier_ipc_cli.definitions import (
@@ -8,6 +11,7 @@ from amplifier_ipc_cli.definitions import (
     _parse_services,
     parse_agent_definition,
     parse_behavior_definition,
+    resolve_agent,
 )
 
 
@@ -272,3 +276,147 @@ class TestResolvedAgentExists:
         assert resolved.context_manager == "simple"
         assert resolved.provider == "anthropic"
         assert resolved.component_config == {"key": "value"}
+
+
+# ---------------------------------------------------------------------------
+# Test suite: resolve_agent() tree walking
+# ---------------------------------------------------------------------------
+
+# YAML definitions for a 3-level hierarchy:
+#   agent "my-test-agent"
+#     -> behavior "amplifier-dev" (which includes services + nested behavior)
+#        -> behavior "design-intelligence"
+# Each level declares the "amplifier-foundation" service (dedup test).
+
+_AGENT_YAML = """\
+type: agent
+local_ref: my-test-agent
+uuid: 11111111-0000-0000-0000-000000000001
+orchestrator: streaming
+context_manager: simple
+provider: anthropic
+component_config:
+  key: value
+behaviors:
+  - amplifier-dev
+services:
+  - name: amplifier-foundation
+    installer: pip
+    source: pip:amplifier-foundation@latest
+"""
+
+_AMPLIFIER_DEV_BEHAVIOR_YAML = """\
+type: behavior
+local_ref: amplifier-dev
+uuid: 22222222-0000-0000-0000-000000000002
+behaviors:
+  - design-intelligence
+services:
+  - name: amplifier-foundation
+    installer: pip
+    source: pip:amplifier-foundation@latest
+"""
+
+_DESIGN_INTELLIGENCE_BEHAVIOR_YAML = """\
+type: behavior
+local_ref: design-intelligence
+uuid: 33333333-0000-0000-0000-000000000003
+services:
+  - name: amplifier-foundation
+    installer: pip
+    source: pip:amplifier-foundation@latest
+"""
+
+
+def _setup_registry_with_definitions(tmp_path: Path):
+    """Create a 3-level hierarchy: agent -> amplifier-dev -> design-intelligence.
+
+    Each level declares 'amplifier-foundation' as a service.
+    Returns a configured Registry instance.
+    """
+    from amplifier_ipc_cli.registry import Registry
+
+    registry = Registry(home=tmp_path / "amplifier_home")
+    registry.ensure_home()
+    registry.register_definition(_AGENT_YAML)
+    registry.register_definition(_AMPLIFIER_DEV_BEHAVIOR_YAML)
+    registry.register_definition(_DESIGN_INTELLIGENCE_BEHAVIOR_YAML)
+    return registry
+
+
+class TestResolveAgentTreeWalking:
+    def test_resolve_agent_basic(self, tmp_path: Path) -> None:
+        """resolve_agent() returns a ResolvedAgent with correct scalar fields."""
+        registry = _setup_registry_with_definitions(tmp_path)
+
+        resolved = asyncio.run(resolve_agent(registry, "my-test-agent"))
+
+        assert isinstance(resolved, ResolvedAgent)
+        assert resolved.orchestrator == "streaming"
+        assert resolved.context_manager == "simple"
+        assert resolved.provider == "anthropic"
+        assert resolved.component_config == {"key": "value"}
+
+    def test_resolve_agent_deduplicates_services(self, tmp_path: Path) -> None:
+        """Services are deduplicated by name even when declared in agent + 2 behaviors."""
+        registry = _setup_registry_with_definitions(tmp_path)
+
+        resolved = asyncio.run(resolve_agent(registry, "my-test-agent"))
+
+        service_names = [s.name for s in resolved.services]
+        assert service_names.count("amplifier-foundation") == 1, (
+            "amplifier-foundation declared in 3 definitions but should appear only once"
+        )
+
+    def test_resolve_agent_walks_nested_behaviors(self, tmp_path: Path) -> None:
+        """resolve_agent() recursively resolves nested behaviors collecting their services."""
+        registry = _setup_registry_with_definitions(tmp_path)
+
+        resolved = asyncio.run(resolve_agent(registry, "my-test-agent"))
+
+        # The only unique service across all 3 levels is amplifier-foundation
+        assert len(resolved.services) == 1
+        assert resolved.services[0].name == "amplifier-foundation"
+        assert resolved.services[0].installer == "pip"
+
+    def test_resolve_agent_with_extra_behaviors(self, tmp_path: Path) -> None:
+        """Extra behaviors passed to resolve_agent() are merged into the result."""
+        from amplifier_ipc_cli.registry import Registry
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+
+        # A simple agent with no behaviors/services
+        simple_agent_yaml = """\
+type: agent
+local_ref: simple-agent
+uuid: 44444444-0000-0000-0000-000000000004
+"""
+        # An extra behavior that brings in a unique service
+        extra_behavior_yaml = """\
+type: behavior
+local_ref: extra-behavior
+uuid: 55555555-0000-0000-0000-000000000005
+services:
+  - name: extra-service
+    installer: npm
+"""
+        registry.register_definition(simple_agent_yaml)
+        registry.register_definition(extra_behavior_yaml)
+
+        resolved = asyncio.run(
+            resolve_agent(registry, "simple-agent", extra_behaviors=["extra-behavior"])
+        )
+
+        service_names = [s.name for s in resolved.services]
+        assert "extra-service" in service_names
+
+    def test_resolve_agent_unknown_agent_raises(self, tmp_path: Path) -> None:
+        """resolve_agent() raises FileNotFoundError for an agent not in the registry."""
+        from amplifier_ipc_cli.registry import Registry
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+
+        with pytest.raises(FileNotFoundError):
+            asyncio.run(resolve_agent(registry, "nonexistent-agent"))
