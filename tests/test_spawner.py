@@ -168,17 +168,20 @@ def test_filter_hooks_no_default_excludes() -> None:
 
 
 def test_check_self_delegation_depth_raises_at_limit() -> None:
-    """Raises ValueError when current_depth >= max_depth; allows below limit."""
-    # At limit — must raise
+    """Raises ValueError when current_depth equals max_depth."""
     with pytest.raises(ValueError):
         check_self_delegation_depth(current_depth=3, max_depth=3)
 
-    # Beyond limit — must raise
+
+def test_check_self_delegation_depth_raises_beyond_limit() -> None:
+    """Raises ValueError when current_depth exceeds max_depth."""
     with pytest.raises(ValueError):
         check_self_delegation_depth(current_depth=5, max_depth=3)
 
-    # Below limit — must not raise
-    check_self_delegation_depth(current_depth=2, max_depth=3)
+
+def test_check_self_delegation_depth_allows_below_limit() -> None:
+    """Does not raise when current_depth is below max_depth."""
+    check_self_delegation_depth(current_depth=2, max_depth=3)  # must not raise
 
 
 # ---------------------------------------------------------------------------

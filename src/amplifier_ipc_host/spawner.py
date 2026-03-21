@@ -7,7 +7,7 @@ and formatting parent conversation context for child instructions.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
@@ -290,12 +290,12 @@ class SpawnRequest:
     context_depth: str = "none"
     context_scope: str = "conversation"
     context_turns: int | None = None
-    exclude_tools: list[str] | None = field(default=None)
-    inherit_tools: list[str] | None = field(default=None)
-    exclude_hooks: list[str] | None = field(default=None)
-    inherit_hooks: list[str] | None = field(default=None)
-    agents: str | list[str] | None = field(default=None)
-    provider_preferences: list[dict] | None = field(default=None)
+    exclude_tools: list[str] | None = None
+    inherit_tools: list[str] | None = None
+    exclude_hooks: list[str] | None = None
+    inherit_hooks: list[str] | None = None
+    agents: str | list[str] | None = None
+    provider_preferences: list[dict[str, Any]] | None = None
     model_role: str | None = None
 
 
@@ -382,7 +382,7 @@ def spawn_child_session(
     )
 
     # 5. Format parent context
-    context_turns = request.context_turns or 0
+    context_turns = request.context_turns if request.context_turns is not None else 0
     context_str = format_parent_context(
         transcript,
         request.context_depth,
