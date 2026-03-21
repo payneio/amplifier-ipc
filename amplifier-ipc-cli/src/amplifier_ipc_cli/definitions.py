@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,7 +24,7 @@ async def _fetch_url(url: str) -> str:
     Returns:
         The response body decoded as UTF-8 text.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _blocking_fetch() -> str:
         with urllib.request.urlopen(url) as response:  # noqa: S310
@@ -226,22 +227,12 @@ async def resolve_agent(
                 url = behavior_name
                 try:
                     yaml_content = await _fetch_url(url)
-                    definition_id = registry.register_definition(
-                        yaml_content, source_url=url
-                    )
-                    # Also cache the URL itself as an alias so the next resolve
-                    # skips the network fetch entirely.
-                    alias_file = registry.home / "behaviors.yaml"
-                    alias_data: dict[str, str] = (
-                        yaml.safe_load(alias_file.read_text()) or {}
-                    )
-                    alias_data[url] = definition_id
-                    alias_file.write_text(
-                        yaml.dump(alias_data, default_flow_style=False)
-                    )
-                    # Resolve again now that the behavior is registered.
+                    # register_definition also writes source_url as an alias,
+                    # so the next call to resolve_behavior(url) will find it
+                    # locally without re-fetching.
+                    registry.register_definition(yaml_content, source_url=url)
                     behavior_path = registry.resolve_behavior(url)
-                except Exception:
+                except (OSError, urllib.error.URLError, yaml.YAMLError, ValueError):
                     logger.warning(
                         "Failed to fetch behavior '%s' from URL; skipping.",
                         behavior_name,

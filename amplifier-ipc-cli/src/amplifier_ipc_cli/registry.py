@@ -126,6 +126,10 @@ class Registry:
 
         alias_data = yaml.safe_load(alias_file.read_text()) or {}
         alias_data[local_ref] = definition_id
+        if source_url is not None:
+            # Also register the source URL as a resolvable alias so callers
+            # can resolve the definition by its original URL without re-fetching.
+            alias_data[source_url] = definition_id
         alias_file.write_text(yaml.dump(alias_data, default_flow_style=False))
 
         return definition_id
