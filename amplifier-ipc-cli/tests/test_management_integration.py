@@ -17,6 +17,7 @@ import yaml
 from click.testing import CliRunner
 
 from amplifier_ipc_cli.main import cli
+from amplifier_ipc_cli.registry import Registry
 
 
 # ---------------------------------------------------------------------------
@@ -202,8 +203,6 @@ class TestInstallAgentWithMockedUv:
         - Exit code is 0.
         - ``_run_uv`` is called exactly twice: once for venv, once for pip install.
         """
-        from amplifier_ipc_cli.registry import Registry
-
         home_dir = tmp_path / "amplifier_home"
 
         # Pre-register the agent so the install command can resolve it
@@ -244,8 +243,6 @@ class TestUpdateCheckAfterRegister:
         - Exit code is 0.
         - Output confirms that no behaviors with remote source URLs were found.
         """
-        from amplifier_ipc_cli.registry import Registry
-
         home_dir = tmp_path / "amplifier_home"
 
         registry = Registry(home=home_dir)
@@ -284,6 +281,13 @@ class TestSessionLifecycle:
         - ``cli session --sessions-dir <dir> list`` shows the truncated session ID.
         - ``cli session --sessions-dir <dir> show <prefix>`` shows the full session ID.
         - ``cli session --sessions-dir <dir> delete <prefix> --force`` removes the directory.
+
+        Note: The three steps (list, show, delete) are intentionally in a single test
+        method because they are causally coupled — show and delete depend on first
+        confirming that list returns a valid truncated prefix, and delete must verify
+        the directory is gone after the session was found by show.  Splitting them
+        into independent tests would require duplicating the fixture setup and would
+        obscure the sequential dependency between steps.
         """
         sessions_dir = tmp_path / "sessions"
         sessions_dir.mkdir()
@@ -311,7 +315,7 @@ class TestSessionLifecycle:
             f"Output: {result_list.output}\n"
             f"Exception: {result_list.exception}"
         )
-        # Truncated ID is first 8 chars + "..." → "integrat..."
+        # Truncated ID is first 8 chars of the full ID (e.g. "integrat")
         truncated_prefix = session_id[:8]
         assert truncated_prefix in result_list.output, (
             f"Expected truncated ID prefix '{truncated_prefix}' in list output:\n"
