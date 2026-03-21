@@ -89,3 +89,37 @@ def test_load_transcript_empty(tmp_path: Path) -> None:
     # Don't append anything
     result = persistence.load_transcript()
     assert result == []
+
+
+def test_state_file_path(tmp_path: Path) -> None:
+    """state_path is set to <base_dir>/<session_id>/state.json on init."""
+    session_id = "sess-state-path"
+    persistence = SessionPersistence(session_id=session_id, base_dir=tmp_path)
+    expected = tmp_path / session_id / "state.json"
+    assert persistence.state_path == expected
+
+
+def test_load_state_returns_empty_dict_when_no_file(tmp_path: Path) -> None:
+    """load_state returns {} when state.json does not exist."""
+    persistence = SessionPersistence(session_id="sess-no-state", base_dir=tmp_path)
+    result = persistence.load_state()
+    assert result == {}
+
+
+def test_save_and_load_state_round_trip(tmp_path: Path) -> None:
+    """save_state followed by load_state returns the original data."""
+    persistence = SessionPersistence(session_id="sess-round-trip", base_dir=tmp_path)
+    state = {"counter": 42, "name": "Alice", "active": True}
+    persistence.save_state(state)
+    result = persistence.load_state()
+    assert result == state
+
+
+def test_save_state_overwrites_previous(tmp_path: Path) -> None:
+    """save_state replaces the entire previous state.json content."""
+    persistence = SessionPersistence(session_id="sess-overwrite", base_dir=tmp_path)
+    persistence.save_state({"key": "old_value"})
+    persistence.save_state({"key": "new_value"})
+    result = persistence.load_state()
+    assert result == {"key": "new_value"}
+    assert "old_value" not in json.dumps(result)
