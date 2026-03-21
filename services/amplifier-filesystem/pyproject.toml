@@ -26,5 +26,10 @@ pythonpath = ["src"]
 pythonVersion = "3.11"
 extraPaths = ["src"]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
 [tool.uv.sources]
 amplifier-ipc-protocol = { path = "../../amplifier-ipc-protocol" }
