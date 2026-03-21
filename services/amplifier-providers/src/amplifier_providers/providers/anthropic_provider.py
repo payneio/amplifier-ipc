@@ -457,7 +457,7 @@ class AnthropicProvider:
 
         return ChatResponse(
             content_blocks=content_blocks,
-            content=content_blocks,
+            content=content_blocks,  # content mirrors content_blocks for backward compat
             text=combined_text,
             tool_calls=tool_calls if tool_calls else None,
             usage=usage,

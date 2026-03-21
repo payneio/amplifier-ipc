@@ -379,3 +379,12 @@ class TestConvertToChatResponse:
         result = self.provider._convert_to_chat_response(response)
 
         assert result.finish_reason == "end_turn"
+
+    def test_no_content_response(self) -> None:
+        """Empty content list produces empty content_blocks, no tool_calls, text=None."""
+        response = _make_anthropic_response(content=[])
+        result = self.provider._convert_to_chat_response(response)
+
+        assert result.content_blocks == []
+        assert result.tool_calls is None
+        assert result.text is None
