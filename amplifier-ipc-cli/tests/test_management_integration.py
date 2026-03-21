@@ -21,6 +21,13 @@ from amplifier_ipc_cli.registry import Registry
 
 
 # ---------------------------------------------------------------------------
+# Display constants
+# ---------------------------------------------------------------------------
+
+# Number of characters shown when a session ID is truncated in list output.
+_TRUNCATED_DISPLAY_LEN = 8
+
+# ---------------------------------------------------------------------------
 # YAML sample definitions
 # ---------------------------------------------------------------------------
 
@@ -315,8 +322,8 @@ class TestSessionLifecycle:
             f"Output: {result_list.output}\n"
             f"Exception: {result_list.exception}"
         )
-        # Truncated ID is first 8 chars of the full ID (e.g. "integrat")
-        truncated_prefix = session_id[:8]
+        # Truncated ID is first _TRUNCATED_DISPLAY_LEN chars of the full ID (e.g. "integrat")
+        truncated_prefix = session_id[:_TRUNCATED_DISPLAY_LEN]
         assert truncated_prefix in result_list.output, (
             f"Expected truncated ID prefix '{truncated_prefix}' in list output:\n"
             f"{result_list.output!r}"
