@@ -371,8 +371,9 @@ class TestResetDryRun:
     def test_dry_run_does_not_delete(self, tmp_path):
         from amplifier_ipc_cli.commands.reset import reset_cmd
 
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
+        amp_dir = tmp_path / ".amplifier"
+        sessions_dir = amp_dir / "sessions"
+        sessions_dir.mkdir(parents=True)
         (sessions_dir / "my_session.txt").write_text("data")
 
         runner = CliRunner()
