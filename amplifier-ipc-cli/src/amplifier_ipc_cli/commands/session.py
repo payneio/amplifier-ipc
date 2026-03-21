@@ -11,6 +11,7 @@ import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import click
 from rich.panel import Panel
@@ -108,6 +109,85 @@ def _find_session(sessions_dir: Path, prefix: str) -> str | None:
         return matches[0]
 
     return None
+
+
+def _fork_session(
+    sessions_dir: Path, source_id: str, *, turn: int | None = None
+) -> tuple[str, int]:
+    """Snapshot a session transcript and create a new forked session.
+
+    Parameters
+    ----------
+    sessions_dir:
+        Root sessions directory.
+    source_id:
+        The exact session ID to fork.
+    turn:
+        1-indexed user turn at which to truncate.  When specified, the
+        transcript is cut after the assistant response that follows the
+        *turn*-th user message.  When ``None`` the full transcript is copied.
+
+    Returns
+    -------
+    tuple[str, int]
+        ``(new_session_id, message_count)``
+    """
+    source_dir = sessions_dir / source_id
+
+    # --- read messages -------------------------------------------------------
+    transcript_file = source_dir / "transcript.jsonl"
+    messages: list[dict] = []
+    if transcript_file.exists():
+        for line in transcript_file.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                messages.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+    # --- truncate at turn ----------------------------------------------------
+    if turn is not None:
+        kept: list[dict] = []
+        user_turns_seen = 0
+        for msg in messages:
+            kept.append(msg)
+            if msg.get("role") == "user":
+                user_turns_seen += 1
+                if user_turns_seen >= turn:
+                    # include the next assistant response if present
+                    idx = messages.index(msg)
+                    if (
+                        idx + 1 < len(messages)
+                        and messages[idx + 1].get("role") == "assistant"
+                    ):
+                        kept.append(messages[idx + 1])
+                    break
+        messages = kept
+
+    # --- create new session directory ----------------------------------------
+    new_id = f"fork_{uuid4().hex[:12]}"
+    new_dir = sessions_dir / new_id
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- write transcript.jsonl with compact separators ----------------------
+    lines = [json.dumps(m, separators=(",", ":")) for m in messages]
+    (new_dir / "transcript.jsonl").write_text("\n".join(lines))
+
+    # --- copy and update metadata --------------------------------------------
+    source_metadata = _load_metadata(source_dir)
+    new_metadata = dict(source_metadata)
+    new_metadata["session_id"] = new_id
+    original_name = source_metadata.get("name", source_id)
+    new_metadata["name"] = f"{original_name} (fork)"
+    new_metadata["forked_from"] = source_id
+    new_metadata["status"] = "active"
+    if turn is not None:
+        new_metadata["forked_at_turn"] = turn
+    (new_dir / "metadata.json").write_text(json.dumps(new_metadata))
+
+    return new_id, len(messages)
 
 
 # -- Session group ------------------------------------------------------------
@@ -291,3 +371,34 @@ def cleanup_sessions(ctx: click.Context, days: int, force: bool) -> None:
         removed += 1
 
     console.print(f"Removed [yellow]{removed}[/yellow] session(s).")
+
+
+# -- fork ---------------------------------------------------------------------
+
+
+@session_group.command(name="fork")
+@click.argument("session_id")
+@click.option(
+    "--at-turn",
+    "-t",
+    "at_turn",
+    default=None,
+    type=int,
+    help="Fork at this user turn (1-indexed). Omit to copy the full transcript.",
+)
+@click.pass_context
+def session_fork(ctx: click.Context, session_id: str, at_turn: int | None) -> None:
+    """Fork SESSION_ID into a new session, optionally truncating at a turn."""
+    sessions_dir: Path = ctx.obj["sessions_dir"]
+
+    matched = _find_session(sessions_dir, session_id)
+    if matched is None:
+        raise click.ClickException(f"Session not found: {session_id}")
+
+    new_id, msg_count = _fork_session(sessions_dir, matched, turn=at_turn)
+
+    console.print(f"Forked [cyan]{matched}[/cyan] → [green]{new_id}[/green]")
+    console.print(f"Messages copied: [yellow]{msg_count}[/yellow]")
+    if at_turn is not None:
+        console.print(f"Truncated at user turn [yellow]{at_turn}[/yellow]")
+    console.print(f"Resume with: [bold]amplifier session resume {new_id}[/bold]")

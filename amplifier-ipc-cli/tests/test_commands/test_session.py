@@ -190,3 +190,130 @@ class TestSessionCleanupRemovesOld:
         )
         assert not old_session.exists(), "Old session should have been deleted"
         assert new_session.exists(), "New session should NOT have been deleted"
+
+
+# ---------------------------------------------------------------------------
+# test_session_fork_creates_new_session
+# ---------------------------------------------------------------------------
+
+
+class TestSessionForkCreatesNewSession:
+    def test_session_fork_creates_new_session(self, tmp_path: Path) -> None:
+        """session fork creates a new session directory with forked transcript."""
+        from amplifier_ipc_cli.commands.session import session_group
+
+        session_id = "abc123def456"
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there"},
+            {"role": "user", "content": "How are you?"},
+            {"role": "assistant", "content": "I'm doing well"},
+        ]
+        _create_session(
+            tmp_path, session_id, name="Original Session", messages=messages
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            session_group, ["--sessions-dir", str(tmp_path), "fork", session_id]
+        )
+
+        assert result.exit_code == 0, (
+            f"Exit code: {result.exit_code}\nOutput: {result.output}\n"
+            f"Exception: {result.exception}"
+        )
+
+        # Two session directories should exist now
+        session_dirs = [d for d in tmp_path.iterdir() if d.is_dir()]
+        assert len(session_dirs) == 2, (
+            f"Expected 2 session dirs, got {len(session_dirs)}: "
+            f"{[d.name for d in session_dirs]}"
+        )
+
+        # One dir should start with "fork_"
+        fork_dirs = [d for d in session_dirs if d.name.startswith("fork_")]
+        assert len(fork_dirs) == 1, "Expected exactly one fork_ directory"
+
+        # Fork should have all 4 messages
+        fork_dir = fork_dirs[0]
+        transcript_file = fork_dir / "transcript.jsonl"
+        assert transcript_file.exists(), "Fork should have a transcript.jsonl"
+        lines = [ln for ln in transcript_file.read_text().splitlines() if ln.strip()]
+        assert len(lines) == 4, f"Expected 4 messages in fork, got {len(lines)}"
+
+        # Metadata should reflect fork
+        metadata_file = fork_dir / "metadata.json"
+        assert metadata_file.exists()
+        metadata = json.loads(metadata_file.read_text())
+        assert metadata["forked_from"] == session_id
+        assert "(fork)" in metadata["name"]
+        assert metadata["status"] == "active"
+        assert metadata["session_id"] == fork_dir.name
+
+
+# ---------------------------------------------------------------------------
+# test_session_fork_at_turn
+# ---------------------------------------------------------------------------
+
+
+class TestSessionForkAtTurn:
+    def test_session_fork_at_turn(self, tmp_path: Path) -> None:
+        """session fork --at-turn 1 truncates transcript to the first user turn."""
+        from amplifier_ipc_cli.commands.session import session_group
+
+        session_id = "abc123def456"
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there"},
+            {"role": "user", "content": "How are you?"},
+            {"role": "assistant", "content": "I'm doing well"},
+        ]
+        _create_session(
+            tmp_path, session_id, name="Original Session", messages=messages
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            session_group,
+            ["--sessions-dir", str(tmp_path), "fork", "--at-turn", "1", session_id],
+        )
+
+        assert result.exit_code == 0, (
+            f"Exit code: {result.exit_code}\nOutput: {result.output}\n"
+            f"Exception: {result.exception}"
+        )
+
+        # Find the fork directory
+        fork_dirs = [
+            d for d in tmp_path.iterdir() if d.is_dir() and d.name.startswith("fork_")
+        ]
+        assert len(fork_dirs) == 1, "Expected exactly one fork_ directory"
+
+        fork_dir = fork_dirs[0]
+        transcript_file = fork_dir / "transcript.jsonl"
+        lines = [ln for ln in transcript_file.read_text().splitlines() if ln.strip()]
+        assert len(lines) == 2, (
+            f"Expected 2 messages when forking at turn 1, got {len(lines)}"
+        )
+
+        # Metadata should record forked_at_turn
+        metadata = json.loads((fork_dir / "metadata.json").read_text())
+        assert metadata.get("forked_at_turn") == 1
+
+
+# ---------------------------------------------------------------------------
+# test_session_fork_unknown_id
+# ---------------------------------------------------------------------------
+
+
+class TestSessionForkUnknownId:
+    def test_session_fork_unknown_id(self, tmp_path: Path) -> None:
+        """session fork shows an error for unknown session IDs."""
+        from amplifier_ipc_cli.commands.session import session_group
+
+        runner = CliRunner()
+        result = runner.invoke(
+            session_group, ["--sessions-dir", str(tmp_path), "fork", "nonexistent"]
+        )
+
+        assert result.exit_code != 0 or "not found" in result.output.lower()
