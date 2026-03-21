@@ -36,12 +36,14 @@ class Router:
         context_manager_key: str,
         provider_key: str,
         state: dict[str, Any] | None = None,
+        on_provider_notification: Any | None = None,
     ) -> None:
         self._registry = registry
         self._services = services
         self._context_manager_key = context_manager_key
         self._provider_key = provider_key
         self._state: dict[str, Any] = state if state is not None else {}
+        self._on_provider_notification = on_provider_notification
 
     async def route_request(self, method: str, params: Any) -> Any:
         """Route a request to the appropriate service handler.
@@ -79,9 +81,13 @@ class Router:
             )
 
         if method == "request.provider_complete":
-            return await self._services[self._provider_key].client.request(
-                "provider.complete", params
-            )
+            provider_client = self._services[self._provider_key].client
+            prev_callback = getattr(provider_client, "on_notification", None)
+            try:
+                provider_client.on_notification = self._on_provider_notification
+                return await provider_client.request("provider.complete", params)
+            finally:
+                provider_client.on_notification = prev_callback
 
         if method == "request.state_get":
             key: str | None = params.get("key") if isinstance(params, dict) else None

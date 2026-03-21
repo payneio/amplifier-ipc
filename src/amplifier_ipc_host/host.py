@@ -69,6 +69,9 @@ class Host:
         self._router: Router | None = None
         self._persistence: SessionPersistence | None = None
         self._state: dict[str, Any] = {}
+        self._provider_notification_queue: asyncio.Queue[dict[str, Any]] = (
+            asyncio.Queue()
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -133,12 +136,19 @@ class Host:
                 )
 
             # 5. Build router
+            def _queue_provider_notification(msg: dict[str, Any]) -> None:
+                """Sync callback that enqueues stream.provider.* notifications."""
+                method: str = msg.get("method", "") if isinstance(msg, dict) else ""
+                if method.startswith("stream.provider."):
+                    self._provider_notification_queue.put_nowait(msg)
+
             self._router = Router(
                 registry=self._registry,
                 services=self._services,
                 context_manager_key=context_manager_key,
                 provider_key=provider_key,
                 state=self._state,
+                on_provider_notification=_queue_provider_notification,
             )
 
             # 6. Assemble system prompt
@@ -230,6 +240,11 @@ class Host:
             message = await read_message(orchestrator_svc.process.stdout)
             if message is None:
                 raise RuntimeError("Orchestrator connection closed unexpectedly")
+
+            # Drain provider notification queue and forward to orchestrator
+            while not self._provider_notification_queue.empty():
+                notification = self._provider_notification_queue.get_nowait()
+                await write_message(orchestrator_svc.process.stdin, notification)
 
             method: str | None = message.get("method")
 

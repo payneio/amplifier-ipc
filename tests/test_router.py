@@ -352,3 +352,67 @@ async def test_route_state_set_overwrites_existing() -> None:
     await router.route_request("request.state_set", {"key": "counter", "value": 99})
 
     assert router._state["counter"] == 99
+
+
+async def test_provider_streaming_notifications_relayed() -> None:
+    """Router accepts on_provider_notification and installs/restores it on the provider client."""
+
+    def notification_callback(msg: dict) -> None:
+        pass
+
+    class FakeClientWithNotification(FakeClient):
+        """FakeClient that tracks notification callback installed during request."""
+
+        def __init__(self, responses: dict[str, Any] | None = None) -> None:
+            super().__init__(responses)
+            self.on_notification: Any = None
+            self.notification_during_call: Any = None
+
+        async def request(self, method: str, params: Any = None) -> Any:
+            # Capture the callback that was installed when the request was made
+            self.notification_during_call = self.on_notification
+            return await super().request(method, params)
+
+    registry = CapabilityRegistry()
+    registry.register(
+        "providers",
+        {
+            "tools": [],
+            "hooks": [],
+            "orchestrators": [],
+            "context_managers": [],
+            "providers": [{"name": "anthropic"}],
+            "content": [],
+        },
+    )
+
+    provider_client = FakeClientWithNotification(
+        responses={"provider.complete": {"content": "Hello"}}
+    )
+
+    services: dict[str, Any] = {
+        "providers": FakeService(provider_client),
+    }
+
+    router = Router(
+        registry=registry,
+        services=services,
+        context_manager_key="providers",
+        provider_key="providers",
+        on_provider_notification=notification_callback,
+    )
+
+    # Verify callback is stored
+    assert router._on_provider_notification is notification_callback
+
+    # Call provider_complete
+    result = await router.route_request(
+        "request.provider_complete",
+        {"messages": [{"role": "user", "content": "Hello"}]},
+    )
+
+    assert result == {"content": "Hello"}
+    # The callback was installed on the client during the request
+    assert provider_client.notification_during_call is notification_callback
+    # After the call, the callback is restored to None (previous value)
+    assert provider_client.on_notification is None
