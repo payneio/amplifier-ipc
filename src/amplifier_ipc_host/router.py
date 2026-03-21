@@ -12,6 +12,7 @@ based on method name.  Supports:
 
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 from amplifier_ipc_host.registry import CapabilityRegistry
@@ -27,6 +28,13 @@ class Router:
             with an async ``request(method, params)`` method).
         context_manager_key: Key in *services* for the context manager service.
         provider_key: Key in *services* for the provider service.
+        state: Optional shared state dict (persisted across turns).
+        on_provider_notification: Sync callback invoked for each
+            ``stream.provider.*`` notification during provider completion.
+        spawn_handler: Async callable that handles ``request.session_spawn``
+            requests.  Receives the raw params dict; returns a result dict.
+        resume_handler: Async callable that handles ``request.session_resume``
+            requests.  Receives the raw params dict; returns a result dict.
     """
 
     def __init__(
@@ -37,6 +45,8 @@ class Router:
         provider_key: str,
         state: dict[str, Any] | None = None,
         on_provider_notification: Any | None = None,
+        spawn_handler: Callable[..., Coroutine[Any, Any, Any]] | None = None,
+        resume_handler: Callable[..., Coroutine[Any, Any, Any]] | None = None,
     ) -> None:
         self._registry = registry
         self._services = services
@@ -44,6 +54,8 @@ class Router:
         self._provider_key = provider_key
         self._state: dict[str, Any] = state if state is not None else {}
         self._on_provider_notification = on_provider_notification
+        self._spawn_handler = spawn_handler
+        self._resume_handler = resume_handler
 
     async def route_request(self, method: str, params: Any) -> Any:
         """Route a request to the appropriate service handler.
@@ -101,6 +113,22 @@ class Router:
                 )
             self._state[params["key"]] = params.get("value")
             return {"ok": True}
+
+        if method == "request.session_spawn":
+            if self._spawn_handler is None:
+                raise JsonRpcError(
+                    code=METHOD_NOT_FOUND,
+                    message="Sub-session spawning is not configured",
+                )
+            return await self._spawn_handler(params)
+
+        if method == "request.session_resume":
+            if self._resume_handler is None:
+                raise JsonRpcError(
+                    code=METHOD_NOT_FOUND,
+                    message="Sub-session resume is not configured",
+                )
+            return await self._resume_handler(params)
 
         raise JsonRpcError(
             code=METHOD_NOT_FOUND,

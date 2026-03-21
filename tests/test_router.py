@@ -354,6 +354,88 @@ async def test_route_state_set_overwrites_existing() -> None:
     assert router._state["counter"] == 99
 
 
+# ---------------------------------------------------------------------------
+# Sub-session spawning routing tests
+# ---------------------------------------------------------------------------
+
+
+async def test_route_session_spawn() -> None:
+    """request.session_spawn is routed to the spawn handler."""
+    router, _, _ = _build_router_with_two_services()
+
+    spawn_result = {
+        "session_id": "parent-child1_explorer",
+        "response": "Done",
+        "turn_count": 1,
+        "metadata": {},
+    }
+
+    async def mock_spawn_handler(params: Any) -> Any:
+        return spawn_result
+
+    router._spawn_handler = mock_spawn_handler
+
+    result = await router.route_request(
+        "request.session_spawn",
+        {
+            "agent": "explorer",
+            "instruction": "Find files",
+            "context_depth": "none",
+        },
+    )
+
+    assert result == spawn_result
+
+
+async def test_route_session_resume() -> None:
+    """request.session_resume is routed to the resume handler."""
+    router, _, _ = _build_router_with_two_services()
+
+    resume_result = {
+        "session_id": "parent-child1_explorer",
+        "response": "Continued",
+        "turn_count": 2,
+        "metadata": {},
+    }
+
+    async def mock_resume_handler(params: Any) -> Any:
+        return resume_result
+
+    router._resume_handler = mock_resume_handler
+
+    result = await router.route_request(
+        "request.session_resume",
+        {
+            "session_id": "parent-child1_explorer",
+            "instruction": "Continue",
+        },
+    )
+
+    assert result == resume_result
+
+
+async def test_route_session_spawn_no_handler_raises() -> None:
+    """request.session_spawn raises METHOD_NOT_FOUND when no handler configured."""
+    router, _, _ = _build_router_with_two_services()
+
+    with pytest.raises(JsonRpcError) as exc_info:
+        await router.route_request("request.session_spawn", {"agent": "explorer"})
+
+    assert exc_info.value.code == METHOD_NOT_FOUND
+
+
+async def test_route_session_resume_no_handler_raises() -> None:
+    """request.session_resume raises METHOD_NOT_FOUND when no handler configured."""
+    router, _, _ = _build_router_with_two_services()
+
+    with pytest.raises(JsonRpcError) as exc_info:
+        await router.route_request(
+            "request.session_resume", {"session_id": "old-session"}
+        )
+
+    assert exc_info.value.code == METHOD_NOT_FOUND
+
+
 async def test_provider_streaming_notifications_relayed() -> None:
     """Router accepts on_provider_notification and installs/restores it on the provider client."""
 
