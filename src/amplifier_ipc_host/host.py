@@ -25,6 +25,8 @@ from amplifier_ipc_host.events import (
     CompleteEvent,
     ErrorEvent,
     HostEvent,
+    StreamContentBlockEndEvent,
+    StreamContentBlockStartEvent,
     StreamThinkingEvent,
     StreamTokenEvent,
     StreamToolCallStartEvent,
@@ -274,6 +276,17 @@ class Host:
             elif method == "stream.tool_call_start":
                 tool_name = (message.get("params") or {}).get("tool_name", "")
                 yield StreamToolCallStartEvent(tool_name=tool_name)
+
+            # Stream content block start notification
+            elif method == "stream.content_block_start":
+                params = message.get("params") or {}
+                block_type = params.get("block_type", "")
+                index = params.get("index", 0)
+                yield StreamContentBlockStartEvent(block_type=block_type, index=index)
+
+            # Stream content block end notification
+            elif method == "stream.content_block_end":
+                yield StreamContentBlockEndEvent()
 
             # Approval request notification
             elif method == "approval_request":

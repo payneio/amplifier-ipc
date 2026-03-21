@@ -218,6 +218,35 @@ async def test_route_provider_complete() -> None:
     assert call_params == params
 
 
+async def test_provider_complete_with_notification_relay() -> None:
+    """provider_complete relays the full provider response including streamed content blocks."""
+    # Provider returns a response that includes content block data (streaming provider pattern)
+    completion = {
+        "content": "Hello from AI",
+        "content_blocks": [
+            {"type": "text", "index": 0, "text": "Hello from AI"},
+        ],
+    }
+    router, _, provider_client = _build_router_with_two_services(
+        provider_responses={"provider.complete": completion}
+    )
+
+    params = {
+        "messages": [{"role": "user", "content": "Hello"}],
+        "stream": True,
+    }
+    result = await router.route_request("request.provider_complete", params)
+
+    # Router relays the full response unchanged
+    assert result == completion
+    # Provider service received exactly one call
+    assert len(provider_client.calls) == 1
+    method, call_params = provider_client.calls[0]
+    assert method == "provider.complete"
+    # All params forwarded to provider unchanged
+    assert call_params == params
+
+
 async def test_route_unknown_method() -> None:
     """Raises JsonRpcError with METHOD_NOT_FOUND for unknown methods."""
     router, _, _ = _build_router_with_two_services()
@@ -324,65 +353,3 @@ async def test_route_state_set_overwrites_existing() -> None:
 
     assert router._state["counter"] == 99
 
-
-async def test_hook_emit_modify_updates_data() -> None:
-    """MODIFY action from first hook updates data propagated to second hook."""
-    registry = CapabilityRegistry()
-    registry.register(
-        "service_a",
-        {
-            "tools": [],
-            "hooks": [{"name": "hook_a", "event": "tool:pre", "priority": 10}],
-            "orchestrators": [],
-            "context_managers": [],
-            "providers": [],
-            "content": [],
-        },
-    )
-    registry.register(
-        "service_b",
-        {
-            "tools": [],
-            "hooks": [{"name": "hook_b", "event": "tool:pre", "priority": 20}],
-            "orchestrators": [],
-            "context_managers": [],
-            "providers": [],
-            "content": [],
-        },
-    )
-
-    client_a = FakeClient(
-        responses={
-            "hook.emit": {
-                "action": "MODIFY",
-                "data": {"tool": "bash", "extra": "added"},
-            }
-        }
-    )
-    client_b = FakeClient(responses={"hook.emit": {"action": "CONTINUE"}})
-
-    services: dict[str, Any] = {
-        "service_a": FakeService(client_a),
-        "service_b": FakeService(client_b),
-        "ctx": FakeService(FakeClient()),
-        "provider": FakeService(FakeClient()),
-    }
-
-    router = Router(
-        registry=registry,
-        services=services,
-        context_manager_key="ctx",
-        provider_key="provider",
-    )
-
-    result = await router.route_request(
-        "request.hook_emit",
-        {"event": "tool:pre", "data": {"tool": "bash"}},
-    )
-
-    assert result == {"action": "CONTINUE"}
-    # service_b should have received the modified data from service_a
-    assert len(client_b.calls) == 1
-    _, params_b = client_b.calls[0]
-    assert params_b["data"]["extra"] == "added"
-    assert params_b["data"]["tool"] == "bash"

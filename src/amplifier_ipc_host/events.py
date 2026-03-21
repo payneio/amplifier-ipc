@@ -36,6 +36,22 @@ class StreamToolCallStartEvent(HostEvent):
 
 
 @dataclass
+class StreamContentBlockStartEvent(HostEvent):
+    """Emitted when the provider starts a new content block (stream.content_block_start)."""
+
+    block_type: str = ""
+    index: int = 0
+
+
+@dataclass
+class StreamContentBlockEndEvent(HostEvent):
+    """Emitted when the provider ends a content block (stream.content_block_end)."""
+
+    block_type: str = ""
+    index: int = 0
+
+
+@dataclass
 class ApprovalRequestEvent(HostEvent):
     """Emitted when the orchestrator requests user approval (approval_request)."""
 
