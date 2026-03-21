@@ -330,7 +330,10 @@ class TestSessionLifecycle:
         )
 
         # -- Step 2: show session by prefix — full ID should appear ------------
-        prefix = session_id[:10]  # Unambiguous prefix (only one session exists)
+        # Deliberately longer than _TRUNCATED_DISPLAY_LEN (8): this is a lookup
+        # key that must be unambiguous, not a display artefact.  Any length > 8
+        # that stays within the UUID works; 10 is a readable round number.
+        prefix = session_id[:10]
         result_show = runner.invoke(
             cli,
             ["session", "--sessions-dir", str(sessions_dir), "show", prefix],
