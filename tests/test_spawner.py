@@ -310,3 +310,21 @@ def test_spawn_child_session_self_delegation() -> None:
     assert "delegate" not in tool_names
     assert "bash" in tool_names
     assert "grep" in tool_names
+
+
+def test_spawn_child_session_recent_depth_requires_context_turns() -> None:
+    """Raises ValueError when context_depth='recent' but context_turns is not set."""
+    request = SpawnRequest(
+        agent="self",
+        instruction="Do something",
+        context_depth="recent",
+        context_turns=None,  # not set — should be caught
+    )
+    with pytest.raises(ValueError, match="context_turns"):
+        spawn_child_session(
+            parent_session_id="parent-123",
+            parent_config={"tools": []},
+            transcript=[{"role": "user", "content": "hi"}],
+            request=request,
+            current_depth=0,
+        )

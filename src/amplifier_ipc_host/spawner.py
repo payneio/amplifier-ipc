@@ -382,6 +382,8 @@ def spawn_child_session(
     )
 
     # 5. Format parent context
+    if request.context_depth == "recent" and request.context_turns is None:
+        raise ValueError("context_turns must be set when context_depth='recent'")
     context_turns = request.context_turns if request.context_turns is not None else 0
     context_str = format_parent_context(
         transcript,
