@@ -78,7 +78,10 @@ The host DOES:
 - Fan out hook emits to all registered hook services and chain results
 - Persist transcript messages as they flow through
 - Resolve content from services and assemble system prompts
-- Relay streaming notifications from the orchestrator to the CLI
+- Relay streaming notifications from providers to the orchestrator, and from the orchestrator to the CLI
+- Manage cross-service shared state (`state.json` — loaded at turn start, persisted at turn end)
+- Resolve agent/behavior definitions and spawn child sessions for sub-session delegation
+- Own the definition registry (agents, behaviors, environments) — the CLI delegates to the host for session lifecycle
 
 ### Orchestrator Drives All Logic
 
@@ -392,6 +395,8 @@ These are requests the host sends to services:
 | `orchestrator.execute` | `{prompt, system_prompt, tools, hooks, config}` | Final response | Host starting the loop |
 | `content.read` | `{path}` | `{content: "..."}` | Host during prompt assembly |
 | `content.list` | `{prefix?}` | `{paths: [...]}` | Host discovering content |
+| `state.get` | `{key}` | `{value}` | Host serving state to any service |
+| `state.set` | `{key, value}` | `{ok: true}` | Host accepting state from any service |
 
 ### Orchestrator-to-Host Requests
 
@@ -405,6 +410,10 @@ These are requests the orchestrator sends back to the host for routing:
 | `request.context_get_messages` | `{provider_info}` | Route to context manager service | `{messages: [...]}` |
 | `request.context_clear` | none | Route to context manager service | `{ok: true}` |
 | `request.provider_complete` | `{request}` | Route to provider service | `ChatResponse` |
+| `request.state_get` | `{key}` | Return value from host state dict | `{value}` |
+| `request.state_set` | `{key, value}` | Update host state dict | `{ok: true}` |
+| `request.session_spawn` | See [Sub-Session Spawning](#sub-session-spawning) | Resolve child agent, spawn child session, return result | `{session_id, response, turn_count, metadata}` |
+| `request.session_resume` | `{session_id, instruction}` | Resume existing child session | `{session_id, response, turn_count, metadata}` |
 
 ### Orchestrator-to-Host Streaming Notifications
 
@@ -415,6 +424,74 @@ Fire-and-forget notifications (no `id` field, no response expected):
 | `stream.token` | `{text}` | Relay to CLI |
 | `stream.tool_call_start` | `{name, id}` | Relay to CLI |
 | `stream.thinking` | `{text}` | Relay to CLI |
+| `stream.content_block_start` | `{type, index}` | Relay to CLI |
+| `stream.content_block_end` | `{type, index}` | Relay to CLI |
+
+### Provider-to-Host Streaming Notifications
+
+Fire-and-forget notifications emitted by the provider service during `provider.complete` processing:
+
+| Method | Params | Host Action |
+|---|---|---|
+| `stream.provider.token` | `{text}` | Relay to orchestrator |
+| `stream.provider.thinking` | `{text}` | Relay to orchestrator |
+| `stream.provider.content_block_start` | `{type, index}` | Relay to orchestrator |
+| `stream.provider.content_block_end` | `{type, index}` | Relay to orchestrator |
+
+The host relays these to the orchestrator, which processes them (fires content_block hooks, accumulates text) and re-emits as `stream.*` notifications. Non-streaming providers return the `ChatResponse` directly with no notifications. The provider decides whether to stream based on its config.
+
+**Full streaming data flow:**
+```
+Provider → stream.provider.token → Host → relay → Orchestrator → stream.token → Host → event → CLI
+```
+
+The final `ChatResponse` (with full content, usage, tool_calls) is still returned as the normal JSON-RPC response to the `provider.complete` request.
+
+### Sub-Session Spawning
+
+The host handles sub-session spawning directly when the orchestrator sends `request.session_spawn`. The host resolves child agent definitions, builds child config, spawns child services, runs the child orchestrator, and returns the result.
+
+**`request.session_spawn` params:**
+
+```json
+{
+    "agent": "string",
+    "instruction": "string",
+    "context_depth": "none | recent | all",
+    "context_scope": "conversation | agents | full",
+    "context_turns": "int | null",
+    "exclude_tools": ["string"] | null,
+    "inherit_tools": ["string"] | null,
+    "exclude_hooks": ["string"] | null,
+    "inherit_hooks": ["string"] | null,
+    "agents": "all | none | [\"agent1\", \"agent2\"]",
+    "provider_preferences": [{"provider": "string", "model": "string"}] | null,
+    "model_role": "string | null"
+}
+```
+
+**Host spawn flow:**
+1. Generate child session ID with lineage (`{parent_span}-{child_span}_{agent}`)
+2. If `agent="self"`, clone parent config; otherwise resolve child agent definitions
+3. Merge configs — child overrides parent, tool/hook lists merge by ID
+4. Apply tool/hook filtering (`exclude_tools` removes delegate tool by default)
+5. Apply provider preferences
+6. Format parent context according to depth/scope params
+7. Spawn child services, run child orchestrator with instruction
+8. Propagate cancellation from parent to child
+9. Persist child transcript for resume
+10. Return `{session_id, response, turn_count, metadata}`
+
+Self-delegation (`agent="self"`) reuses parent config with depth tracking. `max_self_delegation_depth=3`, enforced by host.
+
+### Cross-Service Shared State
+
+The host manages a per-session state dict, loaded at turn start and persisted at turn end as `state.json` alongside the transcript.
+
+- Services call `state.get`/`state.set` as JSON-RPC requests to the host
+- The orchestrator calls `request.state_get`/`request.state_set`
+- `state.get` for a nonexistent key returns `{value: null}`
+- `state.set` with non-JSON-serializable values returns a JSON-RPC error
 
 ### Bidirectional Communication
 
@@ -713,7 +790,7 @@ class ProviderProtocol(Protocol):
 ```
 **Wire method:** `provider.complete` with params `{request}` → returns `ChatResponse`
 
-Provider streaming uses JSON-RPC notifications flowing back through the host to the orchestrator. The initial implementation uses non-streaming request/response; full streaming support is a future enhancement.
+Provider streaming uses `stream.provider.*` JSON-RPC notifications flowing from the provider through the host to the orchestrator. The provider emits `stream.provider.token`, `stream.provider.thinking`, `stream.provider.content_block_start`, and `stream.provider.content_block_end` notifications during `provider.complete` processing. The host relays these to the orchestrator, which processes them (fires content_block hooks, accumulates text) and re-emits as `stream.*` notifications. Non-streaming providers simply return the `ChatResponse` directly with no notifications — the orchestrator handles both cases transparently.
 
 ### Content
 
@@ -933,11 +1010,13 @@ class SessionPersistence:
     def __init__(self, session_id: str, base_dir: Path)
     def append_message(self, message: dict) -> None      # Append to transcript.jsonl
     def save_metadata(self, metadata: dict) -> None       # Write metadata.json
+    def load_state(self) -> dict[str, Any]                # Load state.json (empty dict if missing)
+    def save_state(self, state: dict[str, Any]) -> None   # Write state.json
     def finalize(self) -> None                            # Mark session as completed
     def load_transcript(self) -> list[dict]               # Read back all messages
 ```
 
-Files are stored at `<base_dir>/<session_id>/transcript.jsonl` and `<base_dir>/<session_id>/metadata.json`.
+Files are stored at `<base_dir>/<session_id>/transcript.jsonl`, `<base_dir>/<session_id>/metadata.json`, and `<base_dir>/<session_id>/state.json`.
 
 ### Event Model
 
@@ -952,6 +1031,8 @@ The Host does NOT know about terminals, Rich consoles, or any UI concerns — it
 | `stream.token` | `{text}` | Text chunk from LLM |
 | `stream.thinking` | `{text}` | Thinking/reasoning text |
 | `stream.tool_call_start` | `{name, id}` | Tool call beginning |
+| `stream.content_block_start` | `{type, index}` | Streaming content block begins |
+| `stream.content_block_end` | `{type, index}` | Streaming content block ends |
 | `approval_request` | `{prompt, options, timeout, default}` | Hook requested user approval |
 | `complete` | `{response}` | Turn finished, final response available |
 
@@ -1509,15 +1590,18 @@ amplifier-ipc/
 | Remote behavior fetching | Definitions fetched from URLs are cached in `$AMPLIFIER_HOME/definitions/` with a `_meta` block containing `source_url`, `source_hash` (SHA-256 of raw bytes), and `fetched_at`. Auto-registered on first encounter during definition resolution. See Section 12 (CLI — Cached Definition Metadata). |
 | Definition versioning | `source_hash` in `_meta` enables `amplifier-ipc update <agent>` to re-fetch URLs, compare hashes, and update only if changed. `amplifier-ipc update --check` does a dry-run. `amplifier-ipc run` does NOT check freshness — uses cached definitions as-is. See Section 12 (CLI — Cached Definition Metadata). |
 | Approval flow over IPC | Approval requests surface through the Host's event stream as `approval_request` events. The CLI handles the interactive dialog and sends the result back via `host.send_approval()`. The Host does not know about terminals or UI. See Section 9 (Host — Event Model) and Section 12 (CLI — CLI ↔ Host Relationship). |
+| Provider streaming | Provider emits `stream.provider.*` notifications during `provider.complete`. Host relays to orchestrator, which processes them (fires hooks, accumulates text) and re-emits as `stream.*` to host/CLI. Orchestrator stays in streaming path. Non-streaming providers return response directly. See Section 5 (Wire Protocol — Provider-to-Host Streaming Notifications). |
+| Cross-service shared state | Host manages a per-session state dict (`state.json`). Services call `state.get`/`state.set`; orchestrator calls `request.state_get`/`request.state_set`. Loaded at turn start, persisted at turn end. See Section 5 (Wire Protocol — Cross-Service Shared State). |
+| Sub-session spawning | Host handles `request.session_spawn`/`request.session_resume` directly. Resolves child agent definitions, spawns child services, runs child orchestrator. Carries all 10 essential v1 features (config merge, tool filtering, context depth, self-delegation depth limit, cancellation propagation, session resume, provider preferences, session ID lineage). Registry and definitions move from CLI to host. See Section 5 (Wire Protocol — Sub-Session Spawning). |
 
 ### Open
 
 | Question | Status |
 |---|---|
-| **Provider streaming** | The current orchestrator calls `provider.stream()` returning an async iterator. Over IPC, this needs JSON-RPC notifications flowing back through the host. Initial implementation uses non-streaming `provider.complete`. Full streaming protocol TBD. |
-| **Cross-service shared state** | Hooks like `todo_display` and `todo_reminder` previously accessed `session.state["todo_state"]` directly. Over IPC, there's no shared state between services. Solutions: (a) request-based state access through the host, (b) state service, (c) hook-specific state passed in event data. TBD. |
-| **Sub-session spawning** | `DelegateTool` and `TaskTool` spawn sub-sessions. Over IPC, this requires the host to support nested session creation. Currently stubbed — implementation TBD. |
-| **CLI↔Host error propagation** | How do service crashes surface through the Host's event stream? The host detects EOF on service stdout, but the event type and payload for propagating this to the CLI (and whether the REPL can recover gracefully) is unspecified. |
+| **CLI↔Host error propagation** | How do service crashes surface through the Host's event stream? The host detects EOF on service stdout, but the event type and payload for propagating this to the CLI (and whether the REPL can recover gracefully) is unspecified. Particularly important for streaming providers that crash mid-stream. |
+| **Provider config injection** | How the host passes provider-specific config (model name, temperature, etc.) from the session config to the provider's `__init__`. The `@provider` decorator receives `config: dict | None` but the exact shape per provider needs definition. |
+| **Streaming backpressure** | If the CLI can't consume events fast enough, what happens? Probably not an issue with stdio, but worth noting for future networked transports. |
+| **Registry/definitions migration plan** | Exact refactoring steps for moving registry and definitions modules from CLI to host without breaking existing CLI tests. The host needs definition resolution for sub-session spawning; the CLI retains `$AMPLIFIER_HOME` filesystem management. |
 
 ### Future Enhancements
 
