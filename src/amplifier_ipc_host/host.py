@@ -66,6 +66,7 @@ class Host:
         self._registry: CapabilityRegistry = CapabilityRegistry()
         self._router: Router | None = None
         self._persistence: SessionPersistence | None = None
+        self._state: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -98,6 +99,9 @@ class Host:
         self._persistence = SessionPersistence(session_id, self._session_dir)
 
         try:
+            # 1b. Load shared state from persistence
+            self._state = self._persistence.load_state()
+
             # 2. Spawn services
             await self._spawn_services()
 
@@ -132,6 +136,7 @@ class Host:
                 services=self._services,
                 context_manager_key=context_manager_key,
                 provider_key=provider_key,
+                state=self._state,
             )
 
             # 6. Assemble system prompt
@@ -145,7 +150,8 @@ class Host:
             ):
                 yield event
 
-            # 8. Save metadata + finalize
+            # 8. Save state, metadata, and finalize
+            self._persistence.save_state(self._state)
             self._persistence.save_metadata(
                 {
                     "session_id": session_id,

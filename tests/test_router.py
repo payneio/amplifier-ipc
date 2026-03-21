@@ -282,6 +282,49 @@ async def test_hook_fanout_deny_short_circuits() -> None:
     assert len(client_b.calls) == 0  # Short-circuited!
 
 
+async def test_route_state_get_returns_value() -> None:
+    """state_get returns the stored value for an existing key."""
+    router, _, _ = _build_router_with_two_services()
+    router._state = {"my_key": "my_value"}
+
+    result = await router.route_request("request.state_get", {"key": "my_key"})
+
+    assert result == {"value": "my_value"}
+
+
+async def test_route_state_get_missing_key_returns_null() -> None:
+    """state_get returns {"value": None} when the key does not exist."""
+    router, _, _ = _build_router_with_two_services()
+    router._state = {}
+
+    result = await router.route_request("request.state_get", {"key": "nonexistent"})
+
+    assert result == {"value": None}
+
+
+async def test_route_state_set_stores_value() -> None:
+    """state_set stores the value in state and returns {"ok": True}."""
+    router, _, _ = _build_router_with_two_services()
+    router._state = {}
+
+    result = await router.route_request(
+        "request.state_set", {"key": "counter", "value": 42}
+    )
+
+    assert result == {"ok": True}
+    assert router._state["counter"] == 42
+
+
+async def test_route_state_set_overwrites_existing() -> None:
+    """state_set replaces a pre-existing value for the same key."""
+    router, _, _ = _build_router_with_two_services()
+    router._state = {"counter": 1}
+
+    await router.route_request("request.state_set", {"key": "counter", "value": 99})
+
+    assert router._state["counter"] == 99
+
+
 async def test_hook_emit_modify_updates_data() -> None:
     """MODIFY action from first hook updates data propagated to second hook."""
     registry = CapabilityRegistry()

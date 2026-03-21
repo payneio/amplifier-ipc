@@ -35,11 +35,13 @@ class Router:
         services: dict[str, Any],
         context_manager_key: str,
         provider_key: str,
+        state: dict[str, Any] | None = None,
     ) -> None:
         self._registry = registry
         self._services = services
         self._context_manager_key = context_manager_key
         self._provider_key = provider_key
+        self._state: dict[str, Any] = state if state is not None else {}
 
     async def route_request(self, method: str, params: Any) -> Any:
         """Route a request to the appropriate service handler.
@@ -80,6 +82,19 @@ class Router:
             return await self._services[self._provider_key].client.request(
                 "provider.complete", params
             )
+
+        if method == "request.state_get":
+            key: str | None = params.get("key") if isinstance(params, dict) else None
+            return {"value": self._state.get(key)}  # type: ignore[arg-type]
+
+        if method == "request.state_set":
+            if not isinstance(params, dict) or "key" not in params:
+                raise JsonRpcError(
+                    code=INVALID_PARAMS,
+                    message="state_set requires a 'key' parameter",
+                )
+            self._state[params["key"]] = params.get("value")
+            return {"ok": True}
 
         raise JsonRpcError(
             code=METHOD_NOT_FOUND,
