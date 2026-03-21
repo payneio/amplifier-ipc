@@ -1,12 +1,35 @@
 """Dataclasses and parsing functions for agent/behavior definitions."""
 
+import asyncio
 import logging
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
 import yaml
 
 logger = logging.getLogger(__name__)
+
+
+async def _fetch_url(url: str) -> str:
+    """Fetch a URL and return its content as a UTF-8 string.
+
+    Runs the blocking ``urllib.request.urlopen`` call in a thread-pool executor
+    so that the async event loop is not blocked.
+
+    Args:
+        url: The HTTP/HTTPS URL to fetch.
+
+    Returns:
+        The response body decoded as UTF-8 text.
+    """
+    loop = asyncio.get_event_loop()
+
+    def _blocking_fetch() -> str:
+        with urllib.request.urlopen(url) as response:  # noqa: S310
+            return response.read().decode("utf-8")
+
+    return await loop.run_in_executor(None, _blocking_fetch)
 
 
 @dataclass
@@ -182,9 +205,14 @@ async def resolve_agent(
 
     visited_behaviors: set[str] = set()
 
-    # Step 4: Inner recursive function that walks one behavior.
-    def _walk_behavior(behavior_name: str) -> None:
-        """Resolve a behavior, collect its services, and recurse into nested behaviors."""
+    # Step 4: Inner recursive coroutine that walks one behavior.
+    async def _walk_behavior(behavior_name: str) -> None:
+        """Resolve a behavior, collect its services, and recurse into nested behaviors.
+
+        When a behavior is not found locally and the name looks like a URL,
+        the behavior YAML is fetched, auto-registered (with a ``_meta`` block),
+        and the URL is cached as an alias so subsequent calls skip the fetch.
+        """
         if behavior_name in visited_behaviors:
             return
         visited_behaviors.add(behavior_name)
@@ -193,18 +221,39 @@ async def resolve_agent(
         try:
             behavior_path = registry.resolve_behavior(behavior_name)
         except FileNotFoundError:
-            # If the behavior looks like a URL, URL fetching is deferred to a future task.
             if "://" in behavior_name:
-                logger.warning(
-                    "Behavior '%s' is a URL reference; skipping (URL fetching not yet supported).",
-                    behavior_name,
-                )
+                # Fetch the remote behavior and register it locally.
+                url = behavior_name
+                try:
+                    yaml_content = await _fetch_url(url)
+                    definition_id = registry.register_definition(
+                        yaml_content, source_url=url
+                    )
+                    # Also cache the URL itself as an alias so the next resolve
+                    # skips the network fetch entirely.
+                    alias_file = registry.home / "behaviors.yaml"
+                    alias_data: dict[str, str] = (
+                        yaml.safe_load(alias_file.read_text()) or {}
+                    )
+                    alias_data[url] = definition_id
+                    alias_file.write_text(
+                        yaml.dump(alias_data, default_flow_style=False)
+                    )
+                    # Resolve again now that the behavior is registered.
+                    behavior_path = registry.resolve_behavior(url)
+                except Exception:
+                    logger.warning(
+                        "Failed to fetch behavior '%s' from URL; skipping.",
+                        behavior_name,
+                        exc_info=True,
+                    )
+                    return
             else:
                 logger.warning(
                     "Behavior '%s' not found in local registry; skipping.",
                     behavior_name,
                 )
-            return
+                return
 
         # Parse the behavior definition.
         behavior_def = parse_behavior_definition(behavior_path.read_text())
@@ -216,16 +265,16 @@ async def resolve_agent(
 
         # Recurse into nested behaviors.
         for nested_behavior in behavior_def.behaviors:
-            _walk_behavior(nested_behavior)
+            await _walk_behavior(nested_behavior)
 
     # Walk the agent's declared behaviors.
     for behavior_name in agent_def.behaviors:
-        _walk_behavior(behavior_name)
+        await _walk_behavior(behavior_name)
 
     # Step 5: Walk extra_behaviors if provided.
     if extra_behaviors:
         for behavior_name in extra_behaviors:
-            _walk_behavior(behavior_name)
+            await _walk_behavior(behavior_name)
 
     # Step 6: Return ResolvedAgent.
     return ResolvedAgent(

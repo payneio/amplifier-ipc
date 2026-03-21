@@ -420,3 +420,85 @@ services:
 
         with pytest.raises(FileNotFoundError):
             asyncio.run(resolve_agent(registry, "nonexistent-agent"))
+
+
+# ---------------------------------------------------------------------------
+# Test suite: resolve_agent() URL fetching
+# ---------------------------------------------------------------------------
+
+_REMOTE_BEHAVIOR_YAML = """\
+type: behavior
+local_ref: remote-service-behavior
+uuid: 88888888-0000-0000-0000-000000000008
+services:
+  - name: remote-service
+    installer: npm
+    source: npm:remote-service@1.0
+"""
+
+_AGENT_WITH_URL_BEHAVIOR_YAML = """\
+type: agent
+local_ref: url-test-agent
+uuid: 99999999-0000-0000-0000-000000000009
+behaviors:
+  - https://example.com/behaviors/remote-behavior.yaml
+"""
+
+
+class TestResolveAgentURLFetching:
+    def test_resolve_agent_fetches_url_behavior(self, tmp_path: Path) -> None:
+        """resolve_agent() fetches and auto-registers URL behaviors not found locally."""
+        from unittest.mock import AsyncMock, patch
+
+        from amplifier_ipc_cli.registry import Registry
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+        registry.register_definition(_AGENT_WITH_URL_BEHAVIOR_YAML)
+
+        url = "https://example.com/behaviors/remote-behavior.yaml"
+
+        with patch(
+            "amplifier_ipc_cli.definitions._fetch_url", new_callable=AsyncMock
+        ) as mock_fetch:
+            mock_fetch.return_value = _REMOTE_BEHAVIOR_YAML
+
+            resolved = asyncio.run(resolve_agent(registry, "url-test-agent"))
+
+        # Remote service should be included in resolved services.
+        service_names = [s.name for s in resolved.services]
+        assert "remote-service" in service_names
+
+        # _fetch_url must have been called with the correct URL.
+        mock_fetch.assert_called_once_with(url)
+
+        # Behavior should now be registered locally (resolvable by URL alias).
+        behavior_path = registry.resolve_behavior(url)
+        assert behavior_path.exists()
+
+    def test_resolve_agent_uses_cached_behavior_on_second_call(
+        self, tmp_path: Path
+    ) -> None:
+        """Second resolve_agent() call uses the cached local copy without re-fetching."""
+        from unittest.mock import AsyncMock, patch
+
+        from amplifier_ipc_cli.registry import Registry
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+        registry.register_definition(_AGENT_WITH_URL_BEHAVIOR_YAML)
+
+        with patch(
+            "amplifier_ipc_cli.definitions._fetch_url", new_callable=AsyncMock
+        ) as mock_fetch:
+            mock_fetch.return_value = _REMOTE_BEHAVIOR_YAML
+
+            # First call – should fetch the remote behavior.
+            asyncio.run(resolve_agent(registry, "url-test-agent"))
+            assert mock_fetch.call_count == 1
+
+            # Second call – should NOT fetch again; uses the registered copy.
+            asyncio.run(resolve_agent(registry, "url-test-agent"))
+            assert mock_fetch.call_count == 1, (
+                "Second resolve must not re-fetch URL behavior"
+            )
