@@ -21,6 +21,7 @@ from amplifier_ipc_host.events import (
 from amplifier_ipc_host.host import Host
 from amplifier_ipc_host.lifecycle import ServiceProcess, shutdown_service, spawn_service
 from amplifier_ipc_host.persistence import SessionPersistence
+from amplifier_ipc_host.definition_registry import Registry
 from amplifier_ipc_host.registry import CapabilityRegistry
 from amplifier_ipc_host.router import Router
 
@@ -46,6 +47,8 @@ __all__ = [
     "ServiceProcess",
     "spawn_service",
     "shutdown_service",
+    # Definition registry
+    "Registry",
     # Registry
     "CapabilityRegistry",
     # Router
