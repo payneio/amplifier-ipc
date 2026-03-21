@@ -5,12 +5,14 @@ from __future__ import annotations
 import hashlib
 import urllib.request
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import click
 import yaml
 
 from amplifier_ipc_cli.registry import Registry
+
+_FETCH_TIMEOUT_SECS: int = 30
 
 
 def _fetch_url_sync(url: str) -> str:
@@ -25,7 +27,7 @@ def _fetch_url_sync(url: str) -> str:
     Raises:
         OSError: If the request fails or times out.
     """
-    with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310
+    with urllib.request.urlopen(url, timeout=_FETCH_TIMEOUT_SECS) as response:  # noqa: S310
         return response.read().decode("utf-8")
 
 
@@ -79,7 +81,7 @@ def check_for_updates(registry: Any, agent_name: str) -> list[dict[str, Any]]:
             source_url: str = meta["source_url"]
             old_hash: str = meta.get("source_hash", "")
             definition_id: str = behavior_path.stem
-            local_ref: Optional[str] = behavior_def.get("local_ref")
+            local_ref: str | None = behavior_def.get("local_ref")
 
             try:
                 new_content = _fetch_url_sync(source_url)
@@ -99,8 +101,18 @@ def check_for_updates(registry: Any, agent_name: str) -> list[dict[str, Any]]:
                     entry["new_content"] = new_content
 
                 results.append(entry)
-            except OSError:
-                pass
+            except OSError as exc:
+                results.append(
+                    {
+                        "definition_id": definition_id,
+                        "local_ref": local_ref,
+                        "source_url": source_url,
+                        "changed": False,
+                        "old_hash": old_hash,
+                        "new_hash": "",
+                        "fetch_error": str(exc),
+                    }
+                )
 
         # Recurse into nested behaviors
         for nested in list(behavior_def.get("behaviors") or []):
@@ -125,7 +137,7 @@ def check_for_updates(registry: Any, agent_name: str) -> list[dict[str, Any]]:
     default=None,
     help="Override $AMPLIFIER_HOME path (useful for testing).",
 )
-def update(agent: str, check: bool, home: Optional[str]) -> None:
+def update(agent: str, check: bool, home: str | None) -> None:
     """Re-fetch behavior URLs and update cached definitions for AGENT.
 
     Walks the agent's behavior tree and checks each behavior whose definition
@@ -150,7 +162,12 @@ def update(agent: str, check: bool, home: Optional[str]) -> None:
     changed_count = sum(1 for u in updates if u["changed"])
 
     for entry in updates:
-        status = "CHANGED" if entry["changed"] else "up-to-date"
+        if "fetch_error" in entry:
+            status = f"ERROR ({entry['fetch_error']})"
+        elif entry["changed"]:
+            status = "CHANGED"
+        else:
+            status = "up-to-date"
         click.echo(f"  {entry['definition_id']}: {status}")
 
     if check:

@@ -201,3 +201,58 @@ class TestCheckForUpdatesChangedMeta:
         assert result["new_content"] == new_content, (
             "new_content should contain the fetched content when changed=True"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests for check_for_updates() — OSError during URL fetch
+# ---------------------------------------------------------------------------
+
+
+class TestCheckForUpdatesOSError:
+    def test_check_for_updates_fetch_oserror(
+        self,
+        tmp_path: Path,
+        agent_yaml_with_behaviors: str,
+        behavior_content: str,
+    ) -> None:
+        """check_for_updates records fetch_error entry when _fetch_url_sync raises OSError."""
+        from amplifier_ipc_cli.commands.update import check_for_updates
+
+        # Create agent file
+        agent_file = tmp_path / "agent_definition.yaml"
+        agent_file.write_text(agent_yaml_with_behaviors)
+
+        # Build behavior YAML with a _meta block
+        source_url = "https://example.com/my-behavior.yaml"
+        import yaml as _yaml  # noqa: PLC0415
+
+        parsed = _yaml.safe_load(behavior_content)
+        parsed["_meta"] = {
+            "source_url": source_url,
+            "source_hash": "sha256:oldhash",
+            "fetched_at": "2024-01-01T00:00:00+00:00",
+        }
+        behavior_file = tmp_path / "behavior_abcd1234.yaml"
+        behavior_file.write_text(_yaml.dump(parsed, default_flow_style=False))
+
+        mock_registry = MagicMock()
+        mock_registry.resolve_agent.return_value = agent_file
+        mock_registry.resolve_behavior.return_value = behavior_file
+
+        # _fetch_url_sync raises a network error
+        with patch(
+            "amplifier_ipc_cli.commands.update._fetch_url_sync",
+            side_effect=OSError("connection refused"),
+        ):
+            results = check_for_updates(mock_registry, "my-agent")
+
+        assert len(results) == 1, f"Expected 1 error entry, got: {results}"
+        result = results[0]
+        assert "fetch_error" in result, (
+            f"Expected fetch_error key in result when OSError occurs, got: {result}"
+        )
+        assert result["changed"] is False, (
+            f"Expected changed=False on fetch error, got: {result['changed']}"
+        )
+        assert result["source_url"] == source_url
+        assert "connection refused" in result["fetch_error"]
