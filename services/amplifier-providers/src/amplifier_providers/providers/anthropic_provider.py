@@ -133,14 +133,14 @@ class AnthropicProvider:
                     tool_call_id: str | None = getattr(cur, "tool_call_id", None) or (
                         cur.get("tool_call_id") if isinstance(cur, dict) else None
                     )
-                    content: Any = getattr(cur, "content", "") or (
+                    tool_content: Any = getattr(cur, "content", "") or (
                         cur.get("content", "") if isinstance(cur, dict) else ""
                     )
                     tool_results.append(
                         {
                             "type": "tool_result",
                             "tool_use_id": tool_call_id or "",
-                            "content": content or "",
+                            "content": tool_content or "",
                         }
                     )
                     i += 1
@@ -168,13 +168,13 @@ class AnthropicProvider:
                 continue
 
             if role == "user":
-                content = getattr(msg, "content", None) or (
+                user_content = getattr(msg, "content", None) or (
                     msg.get("content") if isinstance(msg, dict) else None
                 )
-                if isinstance(content, list):
+                if isinstance(user_content, list):
                     # Structured content blocks (text, image, …)
                     blocks: list[dict[str, Any]] = []
-                    for block in content:
+                    for block in user_content:
                         if isinstance(block, dict):
                             btype = block.get("type")
                             if btype == "text":
@@ -213,8 +213,12 @@ class AnthropicProvider:
                                 )
                     if blocks:
                         result.append({"role": "user", "content": blocks})
+                    else:
+                        logger.warning(
+                            "User message had a content list but no recognised blocks — skipping"
+                        )
                 else:
-                    result.append({"role": "user", "content": content or ""})
+                    result.append({"role": "user", "content": user_content or ""})
                 i += 1
                 continue
 
@@ -277,16 +281,7 @@ class AnthropicProvider:
                         if "signature" in item:
                             tb["signature"] = item["signature"]
                         blocks.append(tb)
-                    elif btype == "tool_use":
-                        blocks.append(
-                            {
-                                "type": "tool_use",
-                                "id": item.get("id", ""),
-                                "name": item.get("name", ""),
-                                "input": item.get("input", {}),
-                            }
-                        )
-                    elif btype == "tool_call":
+                    elif btype in ("tool_use", "tool_call"):
                         blocks.append(
                             {
                                 "type": "tool_use",
