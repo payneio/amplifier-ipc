@@ -1,5 +1,6 @@
 """Tests for Registry class - manages $AMPLIFIER_HOME filesystem layout."""
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -150,10 +151,10 @@ class TestRegisterDefinition:
             "source_hash should have hex digest"
         )
         assert "fetched_at" in meta, "_meta should have fetched_at timestamp"
-        # fetched_at should be a valid ISO timestamp string
+        # fetched_at should be a valid ISO timestamp string — parse strictly
         fetched_at = meta["fetched_at"]
         assert isinstance(fetched_at, str)
-        assert "T" in fetched_at or "-" in fetched_at, "fetched_at should be ISO format"
+        datetime.fromisoformat(fetched_at)  # raises ValueError if not valid ISO
 
     def test_register_same_definition_twice_is_idempotent(
         self, registry, home_dir: Path

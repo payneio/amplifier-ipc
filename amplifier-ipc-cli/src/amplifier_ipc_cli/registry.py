@@ -77,7 +77,15 @@ class Registry:
 
         Raises:
             ValueError: If required fields (type, local_ref, uuid) are missing.
+
+        Note:
+            Requires ``ensure_home()`` to have been called first so that the
+            home directory structure and alias files exist.
         """
+        # Self-defending: initialise home if it hasn't been set up yet.
+        if not (self.home / "agents.yaml").exists():
+            self.ensure_home()
+
         parsed = yaml.safe_load(yaml_content)
         if not isinstance(parsed, dict):
             raise ValueError("YAML content must be a mapping")
@@ -113,6 +121,7 @@ class Registry:
         if def_type == "agent":
             alias_file = self.home / "agents.yaml"
         else:
+            # Non-agent types (e.g. "behavior") go to behaviors.yaml
             alias_file = self.home / "behaviors.yaml"
 
         alias_data = yaml.safe_load(alias_file.read_text()) or {}
