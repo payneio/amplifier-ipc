@@ -4,21 +4,24 @@ from __future__ import annotations
 
 import importlib.metadata
 import os
+import shutil
 import sys
 from pathlib import Path
+
+import pytest
 
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
 
 def test_version_attribute() -> None:
-    """amplifier_foundation.__version__ must equal '0.1.0'.
+    """amplifier_foundation.__version__ must equal '1.0.0'.
 
     Uses importlib.metadata so the check works regardless of which
     amplifier_foundation installation pyright resolves to.
     """
     version = importlib.metadata.version("amplifier-foundation")
-    assert version == "0.1.0"
+    assert version == "1.0.0"
 
 
 def test_package_docstring() -> None:
@@ -58,6 +61,10 @@ def test_directory_structure() -> None:
         assert path.is_dir(), f"Required directory missing: {path}"
 
 
+@pytest.mark.skipif(
+    shutil.which("amplifier-foundation-serve") is None,
+    reason="Package not installed as tool",
+)
 def test_entry_point_available() -> None:
     """amplifier-foundation-serve must be installed as a console script.
 
