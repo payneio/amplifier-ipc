@@ -62,7 +62,12 @@ def _translate_anthropic_error(error: Exception) -> dict[str, Any]:
     try:
         import anthropic  # noqa: PLC0415
     except ImportError:
-        return {"message": str(error), "retryable": True, "status_code": None, "retry_after": None}
+        return {
+            "message": str(error),
+            "retryable": True,
+            "status_code": None,
+            "retry_after": None,
+        }
 
     message = str(error)
     retry_after: float | None = None
@@ -181,6 +186,51 @@ class _RateLimitState:
     tokens_remaining: int | None = None
     tokens_reset: str | None = None
     retry_after: float | None = None
+
+    async def maybe_throttle(self) -> None:
+        """Sleep if retry_after > 0, then clear the value."""
+        if self.retry_after and self.retry_after > 0:
+            await asyncio.sleep(self.retry_after)
+            self.retry_after = None
+
+    def update_from_response(self, response: Any) -> None:
+        """Extract rate-limit headers from an Anthropic API response.
+
+        Looks for headers on ``response.http_response``, ``response._response``,
+        or directly on ``response`` (whichever is available).
+        """
+        raw_headers: Any = None
+        for attr in ("http_response", "_response", "response"):
+            candidate = getattr(response, attr, None)
+            if candidate is not None:
+                raw_headers = getattr(candidate, "headers", None)
+                if raw_headers is not None:
+                    break
+        if raw_headers is None:
+            raw_headers = getattr(response, "headers", None)
+        if raw_headers is None:
+            return
+
+        def _get(key: str) -> str | None:
+            try:
+                return raw_headers.get(key)
+            except Exception:
+                return None
+
+        mapping: list[tuple[str, str, type]] = [
+            ("anthropic-ratelimit-requests-limit", "requests_limit", int),
+            ("anthropic-ratelimit-requests-remaining", "requests_remaining", int),
+            ("anthropic-ratelimit-tokens-limit", "tokens_limit", int),
+            ("anthropic-ratelimit-tokens-remaining", "tokens_remaining", int),
+            ("retry-after", "retry_after", float),
+        ]
+        for header, attr, cast in mapping:
+            val = _get(header)
+            if val is not None:
+                try:
+                    setattr(self, attr, cast(val))
+                except (TypeError, ValueError):
+                    pass
 
 
 @provider
@@ -603,12 +653,243 @@ class AnthropicProvider:
         )
 
     # ------------------------------------------------------------------
+    # Tool-result repair helpers
+    # ------------------------------------------------------------------
+
+    def _find_missing_tool_results(
+        self, messages: list[Any]
+    ) -> list[tuple[int, str, str, dict]]:
+        """Scan messages for assistant tool_call blocks without matching tool results.
+
+        Returns a list of ``(msg_idx, call_id, tool_name, tool_input)`` tuples
+        for every tool call that lacks a corresponding tool-result message.
+        Call IDs already in ``self._repaired_tool_ids`` are excluded to prevent
+        infinite repair loops.
+        """
+        # Collect all tool-result IDs that are already present.
+        result_ids: set[str] = set()
+        for msg in messages:
+            role: str = getattr(msg, "role", "") or (
+                msg.get("role", "") if isinstance(msg, dict) else ""
+            )
+            if role == "tool":
+                tcid: str | None = getattr(msg, "tool_call_id", None) or (
+                    msg.get("tool_call_id") if isinstance(msg, dict) else None
+                )
+                if tcid:
+                    result_ids.add(tcid)
+
+        missing: list[tuple[int, str, str, dict]] = []
+
+        for idx, msg in enumerate(messages):
+            role = getattr(msg, "role", "") or (
+                msg.get("role", "") if isinstance(msg, dict) else ""
+            )
+            if role != "assistant":
+                continue
+
+            content: Any = getattr(msg, "content", None) or (
+                msg.get("content") if isinstance(msg, dict) else None
+            )
+            tool_calls_field: Any = getattr(msg, "tool_calls", None) or (
+                msg.get("tool_calls") if isinstance(msg, dict) else None
+            )
+
+            # Check content list for ToolCallBlock / dict tool_use items.
+            if isinstance(content, list):
+                for block in content:
+                    call_id: str = ""
+                    tool_name: str = ""
+                    tool_input: dict = {}
+
+                    if hasattr(block, "type") and getattr(block, "type", None) in (
+                        "tool_call",
+                        "tool_use",
+                    ):
+                        call_id = getattr(block, "id", "")
+                        tool_name = getattr(block, "name", "")
+                        tool_input = getattr(block, "input", {}) or {}
+                    elif isinstance(block, dict) and block.get("type") in (
+                        "tool_use",
+                        "tool_call",
+                    ):
+                        call_id = block.get("id", "")
+                        tool_name = block.get("name", "")
+                        tool_input = block.get("input", {}) or {}
+                    else:
+                        continue
+
+                    if (
+                        call_id
+                        and call_id not in result_ids
+                        and call_id not in self._repaired_tool_ids
+                    ):
+                        missing.append((idx, call_id, tool_name, tool_input))
+
+            # Check the tool_calls field (context-storage serialisation).
+            if tool_calls_field:
+                for tc in tool_calls_field:
+                    if isinstance(tc, dict):
+                        call_id = tc.get("id", "")
+                        tool_name = tc.get("name") or tc.get("tool", "")
+                        tool_input = tc.get("arguments") or tc.get("input") or {}
+                    else:
+                        call_id = getattr(tc, "id", "")
+                        tool_name = getattr(tc, "name", "") or getattr(tc, "tool", "")
+                        tool_input = (
+                            getattr(tc, "arguments", None) or getattr(tc, "input", {})
+                        ) or {}
+
+                    if (
+                        call_id
+                        and call_id not in result_ids
+                        and call_id not in self._repaired_tool_ids
+                    ):
+                        missing.append((idx, call_id, tool_name, tool_input))
+
+        return missing
+
+    def _create_synthetic_result(self, call_id: str, tool_name: str) -> Any:
+        """Create a synthetic error tool-result Message for a missing tool call.
+
+        The content contains a structured error explaining what happened and
+        instructing the model to retry.
+        """
+        from amplifier_ipc_protocol import Message  # noqa: PLC0415
+
+        content = (
+            f"[SYSTEM ERROR: Tool result missing from conversation history] "
+            f"Tool '{tool_name}' (call_id={call_id}) did not return a result. "
+            f"Please retry the tool call."
+        )
+        return Message(role="tool", content=content, tool_call_id=call_id)
+
+    # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
 
     async def complete(self, request: ChatRequest, **kwargs: Any) -> ChatResponse:
-        """Not yet implemented — full streaming API call is in Task 4."""
-        raise NotImplementedError(
-            "AnthropicProvider.complete() is not yet implemented. "
-            "Full streaming implementation is handled in a later task."
+        """Call the Anthropic Messages API and return a ChatResponse.
+
+        Orchestrates: tool-result repair → message separation → system block
+        construction → API call with retry → response conversion.
+        """
+        from collections import defaultdict  # noqa: PLC0415
+
+        messages: list[Any] = list(request.messages)
+
+        # 1. REPAIR: inject synthetic tool results for any missing tool calls.
+        missing = self._find_missing_tool_results(messages)
+        if missing:
+            grouped: dict[int, list[tuple[int, str, str, dict]]] = defaultdict(list)
+            for item in missing:
+                grouped[item[0]].append(item)
+                self._repaired_tool_ids.add(item[1])
+
+            offset = 0
+            for msg_idx in sorted(grouped.keys()):
+                insert_pos = msg_idx + 1 + offset
+                for _, call_id, tool_name, _ in grouped[msg_idx]:
+                    synthetic = self._create_synthetic_result(call_id, tool_name)
+                    messages.insert(insert_pos, synthetic)
+                    insert_pos += 1
+                    offset += 1
+
+        # 2. Separate system messages from the conversation.
+        def _role(m: Any) -> str:
+            return getattr(m, "role", "") or (
+                m.get("role", "") if isinstance(m, dict) else ""
+            )
+
+        system_msgs = [m for m in messages if _role(m) == "system"]
+        conversation = [m for m in messages if _role(m) != "system"]
+
+        # 3. Build system parameter with cache_control for prompt caching.
+        system_blocks: list[dict[str, Any]] = []
+        if request.system:
+            system_blocks.append(
+                {
+                    "type": "text",
+                    "text": request.system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            )
+        elif system_msgs:
+            for smsg in system_msgs:
+                text: str = (
+                    getattr(smsg, "content", "")
+                    or (smsg.get("content", "") if isinstance(smsg, dict) else "")
+                    or ""
+                )
+                if text:
+                    system_blocks.append(
+                        {
+                            "type": "text",
+                            "text": text,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    )
+
+        # 4. Convert messages to Anthropic wire format.
+        api_messages = self._convert_messages(conversation)
+
+        # 5. Build core API parameters.
+        model: str = kwargs.get("model", self.model)
+        max_tokens_val: int = int(
+            request.max_output_tokens or kwargs.get("max_tokens") or self.max_tokens
         )
+        api_params: dict[str, Any] = {
+            "model": model,
+            "messages": api_messages,
+            "max_tokens": max_tokens_val,
+        }
+
+        # 6. Add system param if present.
+        if system_blocks:
+            api_params["system"] = system_blocks
+
+        # 7. Temperature: request field takes priority over config.
+        api_params["temperature"] = (
+            request.temperature if request.temperature is not None else self.temperature
+        )
+
+        # 8. Tools.
+        if request.tools:
+            api_params["tools"] = self._convert_tools_from_request(request.tools)
+
+        # 9. Extended thinking.
+        thinking_budget: int | None = (
+            kwargs.get("thinking_budget") or self.thinking_budget
+        )
+        if thinking_budget:
+            api_params["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": int(thinking_budget),
+            }
+            min_max = int(thinking_budget) + 1024
+            if api_params["max_tokens"] < min_max:
+                api_params["max_tokens"] = min_max
+
+        # 10. Pre-emptive rate-limit throttle.
+        await self._rate_limit_state.maybe_throttle()
+
+        # 11. API call wrapped in retry_with_backoff.
+        async def _call() -> Any:
+            try:
+                return await self.client.messages.create(**api_params)
+            except Exception as exc:
+                meta = _translate_anthropic_error(exc)
+                raise ProviderError(
+                    meta["message"],
+                    retryable=meta["retryable"],
+                    status_code=meta["status_code"],
+                    retry_after=meta["retry_after"],
+                ) from exc
+
+        response = await retry_with_backoff(_call)
+
+        # 12. Update rate-limit state from response headers.
+        self._rate_limit_state.update_from_response(response)
+
+        # 13. Convert and return.
+        return self._convert_to_chat_response(response)

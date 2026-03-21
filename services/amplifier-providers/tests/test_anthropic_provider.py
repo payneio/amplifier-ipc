@@ -6,7 +6,7 @@ import anthropic
 import httpx
 import pytest
 
-from amplifier_ipc_protocol import Message
+from amplifier_ipc_protocol import ChatRequest, ChatResponse, Message
 from amplifier_ipc_protocol.models import (
     TextBlock,
     ThinkingBlock,
@@ -410,7 +410,9 @@ def _make_anthropic_request() -> httpx.Request:
     return httpx.Request("POST", "https://api.anthropic.com/v1/messages")
 
 
-def _make_httpx_response(status_code: int, headers: dict | None = None) -> httpx.Response:
+def _make_httpx_response(
+    status_code: int, headers: dict | None = None
+) -> httpx.Response:
     """Create an httpx.Response with an attached request."""
     return httpx.Response(
         status_code,
@@ -536,3 +538,169 @@ class TestRetryWithBackoff:
             await retry_with_backoff(fn, max_retries=5, initial_delay=0.0)
 
         assert call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# TestComplete
+# ---------------------------------------------------------------------------
+
+
+class TestComplete:
+    """Tests for AnthropicProvider.complete() — uses mocked Anthropic client."""
+
+    def setup_method(self) -> None:
+        """Create provider with a fake API key; real client is injected per test."""
+        self.provider = AnthropicProvider(config={"api_key": "test-key"})
+
+    async def test_complete_returns_chat_response(self) -> None:
+        """complete() returns a ChatResponse with correct text content."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_response = _make_anthropic_response(
+            content=[MockTextBlock("Hello from Claude!")],
+        )
+        mock_client = MagicMock()
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+        self.provider._client = mock_client
+
+        request = ChatRequest(messages=[Message(role="user", content="Hello")])
+        result = await self.provider.complete(request)
+
+        assert isinstance(result, ChatResponse)
+        assert result.text == "Hello from Claude!"
+
+    async def test_complete_with_tools(self) -> None:
+        """Passes tools to Anthropic API; result has tool_calls populated."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_response = _make_anthropic_response(
+            content=[
+                MockToolUseBlock("tc_abc", "read_file", {"path": "/tmp/test.txt"}),
+            ],
+        )
+        mock_client = MagicMock()
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+        self.provider._client = mock_client
+
+        tools = [
+            ToolSpec(
+                name="read_file",
+                description="Read file",
+                parameters={"type": "object"},
+            )
+        ]
+        request = ChatRequest(
+            messages=[Message(role="user", content="Read a file")],
+            tools=tools,
+        )
+        result = await self.provider.complete(request)
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert "tools" in call_kwargs
+
+        assert result.tool_calls is not None
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "read_file"
+
+    async def test_complete_system_passed_as_system_param(self) -> None:
+        """System message goes to system parameter, NOT into messages list."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_response = _make_anthropic_response(
+            content=[MockTextBlock("Sure!")],
+        )
+        mock_client = MagicMock()
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+        self.provider._client = mock_client
+
+        request = ChatRequest(
+            messages=[
+                Message(role="system", content="You are helpful."),
+                Message(role="user", content="Hello"),
+            ],
+        )
+        await self.provider.complete(request)
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert "system" in call_kwargs
+        for msg in call_kwargs["messages"]:
+            assert msg["role"] != "system"
+
+    async def test_complete_usage_populated(self) -> None:
+        """usage has input_tokens=200, output_tokens=100, total_tokens=300."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_response = _make_anthropic_response(
+            content=[MockTextBlock("Response")],
+            input_tokens=200,
+            output_tokens=100,
+        )
+        mock_client = MagicMock()
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+        self.provider._client = mock_client
+
+        request = ChatRequest(messages=[Message(role="user", content="Hello")])
+        result = await self.provider.complete(request)
+
+        assert result.usage is not None
+        assert result.usage.input_tokens == 200
+        assert result.usage.output_tokens == 100
+        assert result.usage.total_tokens == 300
+
+
+# ---------------------------------------------------------------------------
+# TestToolResultRepair
+# ---------------------------------------------------------------------------
+
+
+class TestToolResultRepair:
+    """Tests for _find_missing_tool_results() and _create_synthetic_result()."""
+
+    def setup_method(self) -> None:
+        self.provider = AnthropicProvider(config={})
+
+    def test_find_missing_tool_results(self) -> None:
+        """Detects missing tool result and returns tuple with call_id='tc_1'."""
+        messages = [
+            Message(
+                role="assistant",
+                content=[
+                    ToolCallBlock(
+                        id="tc_1",
+                        name="read_file",
+                        input={"path": "/tmp/x"},
+                    )
+                ],
+            )
+        ]
+        result = self.provider._find_missing_tool_results(messages)
+
+        assert len(result) == 1
+        msg_idx, call_id, tool_name, tool_input = result[0]
+        assert call_id == "tc_1"
+        assert tool_name == "read_file"
+        assert tool_input == {"path": "/tmp/x"}
+
+    def test_no_missing_when_result_present(self) -> None:
+        """Returns empty list when all tool calls have matching results."""
+        messages = [
+            Message(
+                role="assistant",
+                content=[ToolCallBlock(id="tc_1", name="read_file", input={})],
+            ),
+            Message(role="tool", content="File contents", tool_call_id="tc_1"),
+        ]
+        result = self.provider._find_missing_tool_results(messages)
+        assert result == []
+
+    def test_repaired_ids_not_detected_again(self) -> None:
+        """IDs already in _repaired_tool_ids are excluded from detection."""
+        self.provider._repaired_tool_ids.add("tc_1")
+        messages = [
+            Message(
+                role="assistant",
+                content=[ToolCallBlock(id="tc_1", name="read_file", input={})],
+            )
+        ]
+        result = self.provider._find_missing_tool_results(messages)
+        assert result == []
