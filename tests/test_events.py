@@ -7,6 +7,8 @@ from amplifier_ipc_host.events import (
     CompleteEvent,
     ErrorEvent,
     HostEvent,
+    StreamContentBlockEndEvent,
+    StreamContentBlockStartEvent,
     StreamThinkingEvent,
     StreamTokenEvent,
     StreamToolCallStartEvent,
@@ -53,6 +55,22 @@ def test_error_event() -> None:
     event = ErrorEvent(message="Something went wrong")
     assert isinstance(event, HostEvent)
     assert event.message == "Something went wrong"
+
+
+def test_stream_content_block_start_event() -> None:
+    """StreamContentBlockStartEvent holds block_type and index and is a HostEvent subclass."""
+    event = StreamContentBlockStartEvent(block_type="text", index=0)
+    assert isinstance(event, HostEvent)
+    assert event.block_type == "text"
+    assert event.index == 0
+
+
+def test_stream_content_block_end_event() -> None:
+    """StreamContentBlockEndEvent holds block_type and index and is a HostEvent subclass."""
+    event = StreamContentBlockEndEvent(block_type="text", index=0)
+    assert isinstance(event, HostEvent)
+    assert event.block_type == "text"
+    assert event.index == 0
 
 
 def test_complete_event() -> None:
