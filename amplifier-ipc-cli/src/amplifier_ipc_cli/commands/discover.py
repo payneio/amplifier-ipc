@@ -53,14 +53,18 @@ def _try_parse_definition(yaml_path: Path, results: list[dict[str, Any]]) -> Non
     )
 
 
-def _clone_git_location(location: str) -> str:
-    """Clone a git URL to a temporary directory and return the directory path.
+def _clone_git_location(location: str, tmp_dir: str) -> str:
+    """Clone a git URL into an existing directory and return the path to scan.
 
     Supports ``#subdirectory=<subdir>`` fragment to point to a subdirectory
     within the cloned repository.
 
+    The caller is responsible for creating *and* cleaning up ``tmp_dir``
+    (e.g. via ``tempfile.TemporaryDirectory`` as a context manager).
+
     Args:
         location: git URL, possibly with a ``#subdirectory=`` fragment.
+        tmp_dir: Pre-created temporary directory to clone into.
 
     Returns:
         Absolute path to the (sub)directory to scan.
@@ -76,7 +80,6 @@ def _clone_git_location(location: str) -> str:
     if fragment.startswith("subdirectory="):
         subdir = fragment[len("subdirectory=") :]
 
-    tmp_dir = tempfile.mkdtemp(prefix="amplifier_discover_")
     subprocess.run(
         ["git", "clone", "--depth", "1", url, tmp_dir],
         check=True,
@@ -153,20 +156,23 @@ def discover(location: str, register: bool, install: bool, home: str | None) -> 
     (prefixed with ``git+`` or an https://github.com… URL).
     """
     # Resolve location: handle git URLs
-    scan_path = location
     is_git = location.startswith("git+") or (
         location.startswith("https://") and "github" in location
     )
     if is_git:
         console.print(f"[bold]Cloning[/bold] {location} …")
         try:
-            scan_path = _clone_git_location(location)
+            with tempfile.TemporaryDirectory(prefix="amplifier_discover_") as tmp_dir:
+                scan_path = _clone_git_location(location, tmp_dir)
+                console.print(f"[bold]Scanning[/bold] {scan_path} …")
+                definitions = scan_location(scan_path)
         except subprocess.CalledProcessError as exc:
             console.print(f"[red]Failed to clone repository:[/red] {exc}")
             raise click.Abort() from exc
-
-    console.print(f"[bold]Scanning[/bold] {scan_path} …")
-    definitions = scan_location(scan_path)
+    else:
+        scan_path = location
+        console.print(f"[bold]Scanning[/bold] {scan_path} …")
+        definitions = scan_location(scan_path)
 
     count = len(definitions)
     if count == 0:

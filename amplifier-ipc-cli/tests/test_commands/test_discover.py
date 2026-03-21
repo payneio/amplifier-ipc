@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -194,6 +195,35 @@ class TestDiscoverWithRegister:
         mock_registry.ensure_home.assert_called_once()
         # register_definition called for each found item
         mock_registry.register_definition.assert_called_once()
+
+
+class TestDiscoverGitUrlCleansUp:
+    def test_discover_git_url_cleans_up_temp_dir(self, agent_yaml_content: str) -> None:
+        """discover cleans up the temporary clone directory after scanning a git URL."""
+        from amplifier_ipc_cli.commands.discover import discover
+
+        captured_dirs: list[str] = []
+
+        def fake_git_run(cmd: list[Any], **_: Any) -> None:
+            # cmd = ["git", "clone", "--depth", "1", url, tmp_dir]
+            tmp_dir = cmd[-1]
+            captured_dirs.append(tmp_dir)
+            Path(tmp_dir).mkdir(parents=True, exist_ok=True)
+            (Path(tmp_dir) / "agent.yaml").write_text(agent_yaml_content)
+
+        runner = CliRunner()
+        with patch("subprocess.run", side_effect=fake_git_run):
+            result = runner.invoke(discover, ["git+https://github.com/example/repo"])
+
+        assert result.exit_code == 0, (
+            f"Exit code: {result.exit_code}\nOutput: {result.output}\n"
+            f"Exception: {result.exception}"
+        )
+        assert captured_dirs, "No temp directory was created during git clone"
+        for tmp_dir in captured_dirs:
+            assert not Path(tmp_dir).exists(), (
+                f"Temp directory {tmp_dir} was not cleaned up after discover"
+            )
 
 
 class TestDiscoverNoDefinitions:
