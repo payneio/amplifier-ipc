@@ -109,6 +109,11 @@ class AnthropicProvider:
         result: list[dict[str, Any]] = []
         i = 0
 
+        # A `while` loop (rather than `for`) is used because the tool-result
+        # branch needs to consume multiple messages in a single iteration
+        # (batching consecutive tool messages).  All other branches are simple
+        # single-step increments — they just use `i += 1; continue` to keep
+        # the structure consistent.
         while i < len(messages):
             msg = messages[i]
             role: str = getattr(msg, "role", "") or (
@@ -162,6 +167,11 @@ class AnthropicProvider:
                 )
                 if isinstance(raw, str):
                     raw_content = raw
+                elif raw is not None:
+                    logger.warning(
+                        "Developer message has non-string content type %s — converting to empty string",
+                        type(raw).__name__,
+                    )
                 wrapped = f"<context_file>\n{raw_content}\n</context_file>"
                 result.append({"role": "user", "content": wrapped})
                 i += 1
