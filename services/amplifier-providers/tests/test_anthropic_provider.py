@@ -386,5 +386,6 @@ class TestConvertToChatResponse:
         result = self.provider._convert_to_chat_response(response)
 
         assert result.content_blocks == []
+        assert result.content == []
         assert result.tool_calls is None
         assert result.text is None
