@@ -35,6 +35,7 @@ from amplifier_ipc_host.lifecycle import ServiceProcess, shutdown_service, spawn
 from amplifier_ipc_host.persistence import SessionPersistence
 from amplifier_ipc_host.registry import CapabilityRegistry
 from amplifier_ipc_host.router import Router
+from amplifier_ipc_host.spawner import SpawnRequest, spawn_child_session
 from amplifier_ipc_protocol.errors import JsonRpcError, make_error_response
 from amplifier_ipc_protocol.framing import read_message, write_message
 
@@ -142,6 +143,33 @@ class Host:
                 if method.startswith("stream.provider."):
                     self._provider_notification_queue.put_nowait(msg)
 
+            async def _handle_spawn(params: Any) -> Any:
+                """Handle request.session_spawn from the orchestrator."""
+                p = params if isinstance(params, dict) else {}
+                spawn_request = SpawnRequest(
+                    agent=p.get("agent", "self"),
+                    instruction=p.get("instruction", ""),
+                    context_depth=p.get("context_depth", "none"),
+                    context_scope=p.get("context_scope", "conversation"),
+                    context_turns=p.get("context_turns"),
+                    exclude_tools=p.get("exclude_tools"),
+                    inherit_tools=p.get("inherit_tools"),
+                    exclude_hooks=p.get("exclude_hooks"),
+                    inherit_hooks=p.get("inherit_hooks"),
+                    agents=p.get("agents"),
+                    provider_preferences=p.get("provider_preferences"),
+                    model_role=p.get("model_role"),
+                )
+                transcript = (
+                    self._persistence.load_transcript() if self._persistence else []
+                )
+                return spawn_child_session(
+                    parent_session_id=session_id,
+                    parent_config={},  # TODO: expose full SessionConfig as dict
+                    transcript=transcript,
+                    request=spawn_request,
+                )
+
             self._router = Router(
                 registry=self._registry,
                 services=self._services,
@@ -149,6 +177,7 @@ class Host:
                 provider_key=provider_key,
                 state=self._state,
                 on_provider_notification=_queue_provider_notification,
+                spawn_handler=_handle_spawn,
             )
 
             # 6. Assemble system prompt

@@ -281,6 +281,67 @@ async def test_orchestrator_loop_yields_stream_events() -> None:
     assert events[2].result == "Hello World"
 
 
+async def test_host_routes_session_spawn_to_spawner() -> None:
+    """_handle_orchestrator_request routes request.session_spawn to the spawn handler."""
+    registry = CapabilityRegistry()
+    registry.register(
+        "foundation",
+        {
+            "tools": [{"name": "bash", "description": "Run bash"}],
+            "hooks": [],
+            "orchestrators": [],
+            "context_managers": [],
+            "providers": [],
+            "content": [],
+        },
+    )
+
+    services: dict[str, Any] = {
+        "foundation": FakeService(FakeClient()),
+        "ctx": FakeService(FakeClient()),
+        "provider": FakeService(FakeClient()),
+    }
+
+    config = SessionConfig(
+        services=["foundation"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+
+    host = Host(config=config, settings=settings)
+    host._registry = registry
+    host._services = services
+
+    spawn_called_with: list[Any] = []
+
+    async def mock_spawn(params: Any) -> Any:
+        spawn_called_with.append(params)
+        return {
+            "session_id": "parent-child_explorer",
+            "response": "Done",
+            "turn_count": 1,
+            "metadata": {},
+        }
+
+    host._router = Router(
+        registry=registry,
+        services=services,
+        context_manager_key="ctx",
+        provider_key="provider",
+        spawn_handler=mock_spawn,
+    )
+
+    result = await host._handle_orchestrator_request(
+        "request.session_spawn",
+        {"agent": "explorer", "instruction": "Find files"},
+    )
+
+    assert result["response"] == "Done"
+    assert len(spawn_called_with) == 1
+
+
 async def test_orchestrator_loop_yields_content_block_events() -> None:
     """_orchestrator_loop yields StreamContentBlockStartEvent, StreamTokenEvent,
     StreamContentBlockEndEvent, then CompleteEvent for a full content-block sequence."""

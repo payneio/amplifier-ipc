@@ -35,6 +35,14 @@ from amplifier_ipc_host.lifecycle import ServiceProcess, shutdown_service, spawn
 from amplifier_ipc_host.persistence import SessionPersistence
 from amplifier_ipc_host.registry import CapabilityRegistry
 from amplifier_ipc_host.router import Router
+from amplifier_ipc_host.spawner import (
+    SpawnRequest,
+    filter_hooks,
+    filter_tools,
+    generate_child_session_id,
+    merge_configs,
+    spawn_child_session,
+)
 
 __all__ = [
     # Host orchestration
@@ -79,4 +87,11 @@ __all__ = [
     "assemble_system_prompt",
     # Persistence
     "SessionPersistence",
+    # Spawner
+    "SpawnRequest",
+    "filter_hooks",
+    "filter_tools",
+    "generate_child_session_id",
+    "merge_configs",
+    "spawn_child_session",
 ]
