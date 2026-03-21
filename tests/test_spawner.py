@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import re
+from unittest.mock import patch
 
 import pytest
 
 from amplifier_ipc_host.spawner import (
+    SpawnRequest,
     check_self_delegation_depth,
     filter_hooks,
     filter_tools,
     format_parent_context,
     generate_child_session_id,
     merge_configs,
+    spawn_child_session,
 )
 
 
@@ -209,3 +212,98 @@ def test_format_parent_context_depth_and_scope() -> None:
     assert "Let me help" in result_recent
     # Earlier messages should not appear
     assert "Hello" not in result_recent
+
+
+# ---------------------------------------------------------------------------
+# format_parent_context — additional focused tests (3)
+# ---------------------------------------------------------------------------
+
+
+def test_format_parent_context_none_returns_empty() -> None:
+    """depth='none' always returns empty string regardless of transcript content."""
+    transcript = [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Hi there"},
+    ]
+    result = format_parent_context(transcript, "none", "conversation", 10)
+    assert result == ""
+
+
+def test_format_parent_context_recent_limits_turns() -> None:
+    """depth='recent' returns only the last context_turns messages after scope filter."""
+    transcript = [
+        {"role": "user", "content": "msg1"},
+        {"role": "assistant", "content": "msg2"},
+        {"role": "user", "content": "msg3"},
+        {"role": "assistant", "content": "msg4"},
+        {"role": "user", "content": "msg5"},
+    ]
+    result = format_parent_context(transcript, "recent", "conversation", 2)
+    assert "msg5" in result
+    assert "msg4" in result
+    assert "msg3" not in result
+    assert "msg1" not in result
+
+
+def test_format_parent_context_all_includes_everything() -> None:
+    """depth='all' includes all messages that pass the scope filter."""
+    transcript = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+        {"role": "tool_result", "content": "third"},
+    ]
+    # scope=conversation filters out tool_result; depth=all keeps all that remain
+    result = format_parent_context(transcript, "all", "conversation", 0)
+    assert "first" in result
+    assert "second" in result
+    assert "third" not in result
+
+
+# ---------------------------------------------------------------------------
+# spawn_child_session (2 tests)
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_child_session_depth_limit_exceeded() -> None:
+    """Raises ValueError when current_depth >= 3 (default max_depth)."""
+    request = SpawnRequest(agent="self", instruction="Do something")
+    with pytest.raises(ValueError):
+        spawn_child_session(
+            parent_session_id="parent-123",
+            parent_config={"tools": []},
+            transcript=[],
+            request=request,
+            current_depth=3,
+        )
+
+
+def test_spawn_child_session_self_delegation() -> None:
+    """Self-delegation clones parent config, excludes delegate tool, calls _run_child_session."""
+    parent_config = {
+        "tools": [
+            {"name": "bash"},
+            {"name": "delegate"},
+            {"name": "grep"},
+        ],
+        "hooks": [{"name": "pre-request"}],
+    }
+    request = SpawnRequest(agent="self", instruction="Do something")
+
+    with patch("amplifier_ipc_host.spawner._run_child_session") as mock_run:
+        mock_run.return_value = "result"
+        spawn_child_session(
+            parent_session_id="parent-123",
+            parent_config=parent_config,
+            transcript=[],
+            request=request,
+            current_depth=0,
+        )
+
+    assert mock_run.called
+    # Extract child_config — second positional argument to _run_child_session
+    positional_args = mock_run.call_args[0]
+    child_config = positional_args[1]
+    tool_names = [t["name"] for t in child_config.get("tools", [])]
+    assert "delegate" not in tool_names
+    assert "bash" in tool_names
+    assert "grep" in tool_names

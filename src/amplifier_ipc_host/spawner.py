@@ -7,6 +7,7 @@ and formatting parent conversation context for child instructions.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
@@ -250,3 +251,150 @@ def format_parent_context(
         lines.append(f"{role}: {content}")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# SpawnRequest dataclass
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SpawnRequest:
+    """Parameters for spawning a child session.
+
+    Attributes:
+        agent:                Agent identifier to spawn (``'self'`` clones the
+                              parent config; any other value is a named agent).
+        instruction:          The instruction to pass to the child session.
+        context_depth:        How much parent context to include: ``'none'``,
+                              ``'recent'``, or ``'all'``.
+        context_scope:        Which messages to include: ``'conversation'``
+                              keeps only user/assistant turns; any other value
+                              keeps all messages.
+        context_turns:        Number of recent turns to include when
+                              *context_depth* is ``'recent'``.
+        exclude_tools:        Tool names to remove from the child config
+                              (blocklist mode).
+        inherit_tools:        Tool names to keep in the child config
+                              (allowlist mode).
+        exclude_hooks:        Hook names to remove from the child config.
+        inherit_hooks:        Hook names to keep in the child config.
+        agents:               Agent bundle(s) to make available in the child
+                              session.
+        provider_preferences: Ordered provider/model preference list.
+        model_role:           Override the child agent's default model role.
+    """
+
+    agent: str
+    instruction: str
+    context_depth: str = "none"
+    context_scope: str = "conversation"
+    context_turns: int | None = None
+    exclude_tools: list[str] | None = field(default=None)
+    inherit_tools: list[str] | None = field(default=None)
+    exclude_hooks: list[str] | None = field(default=None)
+    inherit_hooks: list[str] | None = field(default=None)
+    agents: str | list[str] | None = field(default=None)
+    provider_preferences: list[dict] | None = field(default=None)
+    model_role: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Child session execution (Phase 2 placeholder)
+# ---------------------------------------------------------------------------
+
+
+def _run_child_session(
+    child_session_id: str,
+    child_config: dict[str, Any],
+    instruction: str,
+    request: SpawnRequest,
+) -> Any:
+    """Execute a child session.
+
+    .. note::
+        This is a placeholder.  Full implementation is deferred to Phase 2.
+
+    Raises:
+        NotImplementedError: Always.
+    """
+    raise NotImplementedError("Full implementation deferred to Phase 2")
+
+
+# ---------------------------------------------------------------------------
+# spawn_child_session — orchestration entry point
+# ---------------------------------------------------------------------------
+
+
+def spawn_child_session(
+    parent_session_id: str,
+    parent_config: dict[str, Any],
+    transcript: list[dict[str, Any]],
+    request: SpawnRequest,
+    current_depth: int = 0,
+) -> Any:
+    """Orchestrate spawning of a child session.
+
+    Steps:
+    1. Check self-delegation depth (raises :class:`ValueError` at the limit).
+    2. Generate a unique child session ID.
+    3. Build the child config: clone parent for ``agent='self'``, else a
+       placeholder dict.
+    4. Filter tools and hooks according to *request* settings.
+    5. Format the parent conversation context.
+    6. Build the final instruction with an optional context prefix.
+    7. Delegate to :func:`_run_child_session`.
+
+    Args:
+        parent_session_id: Session ID of the spawning (parent) session.
+        parent_config:     Parent session configuration (tools, hooks, …).
+        transcript:        Parent conversation transcript for context
+                           extraction.
+        request:           Spawn parameters.
+        current_depth:     Current self-delegation nesting depth (0-based).
+
+    Returns:
+        Whatever :func:`_run_child_session` returns.
+
+    Raises:
+        ValueError: When *current_depth* has reached the recursion limit.
+    """
+    # 1. Enforce recursion depth limit
+    check_self_delegation_depth(current_depth)
+
+    # 2. Generate child session ID
+    child_session_id = generate_child_session_id(parent_session_id, request.agent)
+
+    # 3. Build child config
+    if request.agent == "self":
+        child_config: dict[str, Any] = dict(parent_config)
+    else:
+        child_config = {"agent": request.agent}
+
+    # 4. Filter tools and hooks
+    tools: list[dict[str, Any]] = child_config.get("tools", [])
+    hooks: list[dict[str, Any]] = child_config.get("hooks", [])
+    child_config["tools"] = filter_tools(
+        tools, request.exclude_tools, request.inherit_tools
+    )
+    child_config["hooks"] = filter_hooks(
+        hooks, request.exclude_hooks, request.inherit_hooks
+    )
+
+    # 5. Format parent context
+    context_turns = request.context_turns or 0
+    context_str = format_parent_context(
+        transcript,
+        request.context_depth,
+        request.context_scope,
+        context_turns,
+    )
+
+    # 6. Build instruction with optional context prefix
+    if context_str:
+        instruction = f"{context_str}\n\n{request.instruction}"
+    else:
+        instruction = request.instruction
+
+    # 7. Execute child session (Phase 2 implementation)
+    return _run_child_session(child_session_id, child_config, instruction, request)
