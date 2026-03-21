@@ -302,6 +302,63 @@ class TestSessionForkAtTurn:
 
 
 # ---------------------------------------------------------------------------
+# test_session_fork_at_turn_duplicate_content
+# ---------------------------------------------------------------------------
+
+
+class TestSessionForkAtTurnDuplicateContent:
+    def test_fork_at_turn_selects_correct_assistant_when_user_messages_are_identical(
+        self, tmp_path: Path
+    ) -> None:
+        """Fork --at-turn 2 includes the second assistant reply, not the first.
+
+        When two user messages share identical content, the truncation loop must
+        use the *current* index (not messages.index which finds the first
+        occurrence) so it appends the assistant response that actually follows
+        the target user turn.
+        """
+        from amplifier_ipc_cli.commands.session import _fork_session
+
+        session_id = "dup_content_session"
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+            {"role": "user", "content": "Hello"},  # duplicate content
+            {"role": "assistant", "content": "Goodbye"},
+        ]
+        session_dir = tmp_path / session_id
+        session_dir.mkdir()
+        import json as _json
+
+        (session_dir / "transcript.jsonl").write_text(
+            "\n".join(_json.dumps(m) for m in messages)
+        )
+        (session_dir / "metadata.json").write_text(
+            _json.dumps(
+                {"session_id": session_id, "name": "Dup Test", "status": "active"}
+            )
+        )
+
+        new_id, msg_count = _fork_session(tmp_path, session_id, turn=2)
+
+        fork_dir = tmp_path / new_id
+        lines = [
+            ln
+            for ln in (fork_dir / "transcript.jsonl").read_text().splitlines()
+            if ln.strip()
+        ]
+        assert msg_count == 4, f"Expected 4 messages, got {msg_count}"
+        assert len(lines) == 4, f"Expected 4 lines in transcript, got {len(lines)}"
+
+        last_msg = _json.loads(lines[-1])
+        assert last_msg["content"] == "Goodbye", (
+            f"Expected last message to be 'Goodbye' (the second assistant reply), "
+            f"got {last_msg['content']!r}. "
+            "This indicates messages.index() found the first 'Hello' instead of the second."
+        )
+
+
+# ---------------------------------------------------------------------------
 # test_session_fork_unknown_id
 # ---------------------------------------------------------------------------
 

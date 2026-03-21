@@ -151,18 +151,17 @@ def _fork_session(
     if turn is not None:
         kept: list[dict] = []
         user_turns_seen = 0
-        for msg in messages:
+        for i, msg in enumerate(messages):
             kept.append(msg)
             if msg.get("role") == "user":
                 user_turns_seen += 1
                 if user_turns_seen >= turn:
                     # include the next assistant response if present
-                    idx = messages.index(msg)
                     if (
-                        idx + 1 < len(messages)
-                        and messages[idx + 1].get("role") == "assistant"
+                        i + 1 < len(messages)
+                        and messages[i + 1].get("role") == "assistant"
                     ):
-                        kept.append(messages[idx + 1])
+                        kept.append(messages[i + 1])
                     break
         messages = kept
 
