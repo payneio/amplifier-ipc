@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import anthropic
+import httpx
+import pytest
+
 from amplifier_ipc_protocol import Message
 from amplifier_ipc_protocol.models import (
     TextBlock,
@@ -10,7 +14,12 @@ from amplifier_ipc_protocol.models import (
     ToolSpec,
 )
 
-from amplifier_providers.providers.anthropic_provider import AnthropicProvider
+from amplifier_providers.providers.anthropic_provider import (
+    AnthropicProvider,
+    ProviderError,
+    _translate_anthropic_error,
+    retry_with_backoff,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -389,3 +398,141 @@ class TestConvertToChatResponse:
         assert result.content == []
         assert result.tool_calls is None
         assert result.text is None
+
+
+# ---------------------------------------------------------------------------
+# Helper for creating mock Anthropic SDK errors
+# ---------------------------------------------------------------------------
+
+
+def _make_anthropic_request() -> httpx.Request:
+    """Create a minimal httpx.Request for Anthropic error construction."""
+    return httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+
+def _make_httpx_response(status_code: int, headers: dict | None = None) -> httpx.Response:
+    """Create an httpx.Response with an attached request."""
+    return httpx.Response(
+        status_code,
+        headers=headers or {},
+        request=_make_anthropic_request(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# TestErrorTranslation
+# ---------------------------------------------------------------------------
+
+
+class TestErrorTranslation:
+    """Tests for _translate_anthropic_error()."""
+
+    def test_translate_rate_limit_error(self) -> None:
+        """RateLimitError → retryable=True, status_code=429."""
+        response = _make_httpx_response(429, headers={"retry-after": "5.0"})
+        error = anthropic.RateLimitError("rate limited", response=response, body=None)
+
+        result = _translate_anthropic_error(error)
+
+        assert result["retryable"] is True
+        assert result["status_code"] == 429
+
+    def test_translate_auth_error(self) -> None:
+        """AuthenticationError → retryable=False, status_code=401."""
+        response = _make_httpx_response(401)
+        error = anthropic.AuthenticationError(
+            "unauthorized", response=response, body=None
+        )
+
+        result = _translate_anthropic_error(error)
+
+        assert result["retryable"] is False
+        assert result["status_code"] == 401
+
+    def test_translate_bad_request_error(self) -> None:
+        """BadRequestError → retryable=False, status_code=400."""
+        response = _make_httpx_response(400)
+        error = anthropic.BadRequestError("bad request", response=response, body=None)
+
+        result = _translate_anthropic_error(error)
+
+        assert result["retryable"] is False
+        assert result["status_code"] == 400
+
+    def test_translate_overloaded_error(self) -> None:
+        """APIStatusError with status_code=529 → retryable=True, status_code=529."""
+        response = _make_httpx_response(529)
+        error = anthropic.APIStatusError("overloaded", response=response, body=None)
+
+        result = _translate_anthropic_error(error)
+
+        assert result["retryable"] is True
+        assert result["status_code"] == 529
+
+
+# ---------------------------------------------------------------------------
+# TestRetryWithBackoff
+# ---------------------------------------------------------------------------
+
+
+class TestRetryWithBackoff:
+    """Tests for retry_with_backoff()."""
+
+    async def test_succeeds_first_try(self) -> None:
+        """If the callable succeeds on first call, call_count=1."""
+        call_count = 0
+
+        async def fn() -> str:
+            nonlocal call_count
+            call_count += 1
+            return "ok"
+
+        result = await retry_with_backoff(fn, max_retries=2, initial_delay=0.0)
+
+        assert result == "ok"
+        assert call_count == 1
+
+    async def test_retries_on_retryable_error(self) -> None:
+        """Fails twice with retryable=True, succeeds on 3rd attempt → call_count=3."""
+        call_count = 0
+
+        async def fn() -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise ProviderError("temporary", retryable=True)
+            return "ok"
+
+        result = await retry_with_backoff(fn, max_retries=5, initial_delay=0.0)
+
+        assert result == "ok"
+        assert call_count == 3
+
+    async def test_gives_up_after_max_retries(self) -> None:
+        """Always fails with retryable=True → raises ProviderError after max_retries=2."""
+        call_count = 0
+
+        async def fn() -> str:
+            nonlocal call_count
+            call_count += 1
+            raise ProviderError("always fails", retryable=True)
+
+        with pytest.raises(ProviderError):
+            await retry_with_backoff(fn, max_retries=2, initial_delay=0.0)
+
+        # Initial attempt + 2 retries = 3 total calls
+        assert call_count == 3
+
+    async def test_non_retryable_error_not_retried(self) -> None:
+        """retryable=False → raises immediately, call_count=1."""
+        call_count = 0
+
+        async def fn() -> str:
+            nonlocal call_count
+            call_count += 1
+            raise ProviderError("fatal", retryable=False)
+
+        with pytest.raises(ProviderError):
+            await retry_with_backoff(fn, max_retries=5, initial_delay=0.0)
+
+        assert call_count == 1

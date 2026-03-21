@@ -7,8 +7,10 @@ complete() is a placeholder; full streaming implementation is in Task 4.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import random
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,6 +30,141 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-sonnet-4-20250514"
 DEFAULT_MAX_TOKENS = 16384
+
+
+# ---------------------------------------------------------------------------
+# Error types
+# ---------------------------------------------------------------------------
+
+
+class ProviderError(Exception):
+    """Minimal LLM provider error with retry metadata."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        status_code: int | None = None,
+        retry_after: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.status_code = status_code
+        self.retry_after = retry_after
+
+
+def _translate_anthropic_error(error: Exception) -> dict[str, Any]:
+    """Translate an Anthropic SDK exception into a dict of error metadata.
+
+    Returns a dict with keys: message, retryable, status_code, retry_after.
+    """
+    try:
+        import anthropic  # noqa: PLC0415
+    except ImportError:
+        return {"message": str(error), "retryable": True, "status_code": None, "retry_after": None}
+
+    message = str(error)
+    retry_after: float | None = None
+
+    if isinstance(error, anthropic.RateLimitError):
+        ra = getattr(getattr(error, "response", None), "headers", {}).get("retry-after")
+        if ra is not None:
+            try:
+                retry_after = float(ra)
+            except (TypeError, ValueError):
+                pass
+        return {
+            "message": message,
+            "retryable": True,
+            "status_code": 429,
+            "retry_after": retry_after,
+        }
+
+    if isinstance(error, anthropic.AuthenticationError):
+        return {
+            "message": message,
+            "retryable": False,
+            "status_code": 401,
+            "retry_after": None,
+        }
+
+    if isinstance(error, anthropic.BadRequestError):
+        return {
+            "message": message,
+            "retryable": False,
+            "status_code": 400,
+            "retry_after": None,
+        }
+
+    if isinstance(error, anthropic.APIStatusError):
+        sc: int = getattr(error, "status_code", 0)
+        retryable = sc >= 500 or sc == 529
+        ra = getattr(getattr(error, "response", None), "headers", {}).get("retry-after")
+        if ra is not None:
+            try:
+                retry_after = float(ra)
+            except (TypeError, ValueError):
+                pass
+        return {
+            "message": message,
+            "retryable": retryable,
+            "status_code": sc,
+            "retry_after": retry_after,
+        }
+
+    # Generic / unknown errors are retryable
+    return {
+        "message": message,
+        "retryable": True,
+        "status_code": None,
+        "retry_after": None,
+    }
+
+
+async def retry_with_backoff(
+    fn: Any,
+    max_retries: int = 5,
+    initial_delay: float = 1.0,
+    max_delay: float = 60.0,
+    jitter: bool = True,
+) -> Any:
+    """Retry an async callable with exponential backoff.
+
+    - ``ProviderError`` with ``retryable=True`` → retry with backoff
+    - ``ProviderError`` with ``retryable=False`` → raise immediately
+    - Generic exceptions → retried up to ``max_retries``
+    """
+    attempt = 0
+    delay = initial_delay
+
+    while True:
+        try:
+            return await fn()
+        except ProviderError as exc:
+            if not exc.retryable:
+                raise
+            if attempt >= max_retries:
+                raise
+            wait = exc.retry_after if exc.retry_after is not None else delay
+            if jitter:
+                wait = wait * (0.5 + random.random())
+            wait = min(wait, max_delay)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            delay = min(delay * 2, max_delay)
+            attempt += 1
+        except Exception:
+            if attempt >= max_retries:
+                raise
+            wait = delay
+            if jitter:
+                wait = wait * (0.5 + random.random())
+            wait = min(wait, max_delay)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            delay = min(delay * 2, max_delay)
+            attempt += 1
 
 
 @dataclass
