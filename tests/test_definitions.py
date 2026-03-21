@@ -17,20 +17,20 @@ from amplifier_ipc_host.definition_registry import Registry
 
 def test_parse_agent_definition_basic() -> None:
     """parse_agent_definition() correctly parses a minimal agent YAML."""
-    yaml_content = (
-        "type: agent\n"
-        "local_ref: my-agent\n"
-        "uuid: 12345678-abcd-ef00-0000-000000000000\n"
-        "version: 1\n"
-        "description: A test agent\n"
-        "orchestrator: default\n"
-        "provider: anthropic\n"
-        "behaviors:\n"
-        "  - some-behavior\n"
-        "services:\n"
-        "  - name: my-service\n"
-        "    installer: pip\n"
-    )
+    yaml_content = """\
+type: agent
+local_ref: my-agent
+uuid: 12345678-abcd-ef00-0000-000000000000
+version: 1
+description: A test agent
+orchestrator: default
+provider: anthropic
+behaviors:
+  - some-behavior
+services:
+  - name: my-service
+    installer: pip
+"""
 
     result = parse_agent_definition(yaml_content)
 
@@ -50,19 +50,19 @@ def test_parse_agent_definition_basic() -> None:
 
 def test_parse_behavior_definition_basic() -> None:
     """parse_behavior_definition() correctly parses a minimal behavior YAML."""
-    yaml_content = (
-        "type: behavior\n"
-        "local_ref: my-behavior\n"
-        "uuid: abcdefab-0000-0000-0000-000000000000\n"
-        "version: 2\n"
-        "description: A test behavior\n"
-        "services:\n"
-        "  - name: behavior-service\n"
-        "    source: https://example.com/service\n"
-        "tools:\n"
-        "  - bash\n"
-        "  - read_file\n"
-    )
+    yaml_content = """\
+type: behavior
+local_ref: my-behavior
+uuid: abcdefab-0000-0000-0000-000000000000
+version: 2
+description: A test behavior
+services:
+  - name: behavior-service
+    source: https://example.com/service
+tools:
+  - bash
+  - read_file
+"""
 
     result = parse_behavior_definition(yaml_content)
 
@@ -84,28 +84,28 @@ async def test_resolve_agent_deduplicates_services(tmp_path) -> None:
     registry.ensure_home()
 
     # Register a behavior with a service
-    behavior_yaml = (
-        "type: behavior\n"
-        "local_ref: my-behavior\n"
-        "uuid: bbbbbbbb-0000-0000-0000-000000000000\n"
-        "services:\n"
-        "  - name: shared-service\n"
-        "    installer: pip\n"
-        "  - name: behavior-only-service\n"
-    )
+    behavior_yaml = """\
+type: behavior
+local_ref: my-behavior
+uuid: bbbbbbbb-0000-0000-0000-000000000000
+services:
+  - name: shared-service
+    installer: pip
+  - name: behavior-only-service
+"""
     registry.register_definition(behavior_yaml)
 
     # Register an agent that also declares the same shared-service
-    agent_yaml = (
-        "type: agent\n"
-        "local_ref: my-agent\n"
-        "uuid: aaaaaaaa-0000-0000-0000-000000000000\n"
-        "behaviors:\n"
-        "  - my-behavior\n"
-        "services:\n"
-        "  - name: shared-service\n"
-        "    installer: pip\n"
-    )
+    agent_yaml = """\
+type: agent
+local_ref: my-agent
+uuid: aaaaaaaa-0000-0000-0000-000000000000
+behaviors:
+  - my-behavior
+services:
+  - name: shared-service
+    installer: pip
+"""
     registry.register_definition(agent_yaml)
 
     result = await resolve_agent(registry, "my-agent")

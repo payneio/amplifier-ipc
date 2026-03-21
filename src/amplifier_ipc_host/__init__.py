@@ -9,6 +9,16 @@ from amplifier_ipc_host.config import (
     resolve_service_command,
 )
 from amplifier_ipc_host.content import assemble_system_prompt, resolve_mention
+from amplifier_ipc_host.definition_registry import Registry
+from amplifier_ipc_host.definitions import (
+    AgentDefinition,
+    BehaviorDefinition,
+    ResolvedAgent,
+    ServiceEntry,
+    parse_agent_definition,
+    parse_behavior_definition,
+    resolve_agent,
+)
 from amplifier_ipc_host.events import (
     ApprovalRequestEvent,
     CompleteEvent,
@@ -21,16 +31,6 @@ from amplifier_ipc_host.events import (
 from amplifier_ipc_host.host import Host
 from amplifier_ipc_host.lifecycle import ServiceProcess, shutdown_service, spawn_service
 from amplifier_ipc_host.persistence import SessionPersistence
-from amplifier_ipc_host.definition_registry import Registry
-from amplifier_ipc_host.definitions import (
-    AgentDefinition,
-    BehaviorDefinition,
-    ResolvedAgent,
-    ServiceEntry,
-    parse_agent_definition,
-    parse_behavior_definition,
-    resolve_agent,
-)
 from amplifier_ipc_host.registry import CapabilityRegistry
 from amplifier_ipc_host.router import Router
 
