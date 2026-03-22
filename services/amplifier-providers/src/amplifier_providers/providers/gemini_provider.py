@@ -519,6 +519,7 @@ def _dict_to_schema(params: dict[str, Any], protos: Any) -> Any:
 
     required: list[str] = params.get("required", [])
     description: str = params.get("description", "")
+    # Note: "enum" and "items" JSON Schema keys are not yet mapped; extend here if needed
 
     return protos.Schema(
         type=schema_type,

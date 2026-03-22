@@ -32,7 +32,9 @@ class MockPart:
     ) -> None:
         self.text = text
         self.function_call = function_call
-        # thought attribute indicates thinking parts
+        # thought attribute is deliberately absent when False,
+        # matching real Gemini SDK behaviour (production code uses
+        # getattr(part, "thought", False) to check for presence).
         if thought:
             self.thought = True
 
