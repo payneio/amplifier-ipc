@@ -1,0 +1,13 @@
+type: behavior
+local_ref: modes
+uuid: 6d239fcc-e53b-4a6d-a81c-3b3a5a8fc139
+version: 1
+description: Generic mode system for runtime behavior modification
+
+tools: true
+hooks: true
+context: true
+
+services:
+  - name: amplifier-modes-serve
+    source: ..

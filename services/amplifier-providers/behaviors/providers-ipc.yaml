@@ -1,0 +1,9 @@
+type: behavior
+local_ref: providers
+uuid: 9c3e6e6e-7770-4747-87ab-e1e0c994c2c1
+version: 1
+description: LLM provider adapters (Anthropic, OpenAI, Azure, etc.)
+
+services:
+  - name: amplifier-providers-serve
+    source: ..
