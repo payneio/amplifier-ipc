@@ -119,3 +119,55 @@ class TestInteractiveReplExists:
         from amplifier_ipc_cli.repl import interactive_repl
 
         assert callable(interactive_repl)
+
+
+# ---------------------------------------------------------------------------
+# Test: ApprovalRequestEvent handling calls host.send_approval
+# ---------------------------------------------------------------------------
+
+
+class TestHandleHostEventApprovalCallsSendApproval:
+    def test_handle_host_event_approval_calls_send_approval(self) -> None:
+        """ApprovalRequestEvent handling in interactive_repl calls host.send_approval."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from amplifier_ipc_host.events import ApprovalRequestEvent
+
+        from amplifier_ipc_cli.repl import interactive_repl
+
+        event = ApprovalRequestEvent(params={})
+
+        host = MagicMock()
+
+        async def mock_run(message: str):  # type: ignore[no-untyped-def]
+            yield event
+
+        host.run = mock_run
+        host.send_approval = MagicMock()
+
+        call_count = 0
+
+        async def mock_prompt_async(*args, **kwargs):  # type: ignore[no-untyped-def]
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return "hello"
+            raise EOFError()
+
+        mock_session = MagicMock()
+        mock_session.prompt_async = mock_prompt_async
+
+        with patch("amplifier_ipc_cli.repl.CLIApprovalHandler") as mock_handler_class:
+            mock_handler = MagicMock()
+            mock_handler.handle_approval = AsyncMock(return_value=True)
+            mock_handler_class.return_value = mock_handler
+
+            with patch(
+                "amplifier_ipc_cli.repl._create_prompt_session",
+                return_value=mock_session,
+            ):
+                console = MagicMock()
+                asyncio.run(interactive_repl(host, console=console))
+
+        host.send_approval.assert_called_once_with(True)

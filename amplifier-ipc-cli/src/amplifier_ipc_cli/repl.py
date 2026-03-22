@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from amplifier_ipc_host.events import (
+    ApprovalRequestEvent,
     CompleteEvent,
     ErrorEvent,
     HostEvent,
@@ -24,6 +25,7 @@ from amplifier_ipc_host.events import (
 )
 from amplifier_ipc_host.host import Host
 
+from amplifier_ipc_cli.approval_provider import CLIApprovalHandler
 from amplifier_ipc_cli.ui.message_renderer import render_message
 
 
@@ -168,7 +170,12 @@ async def interactive_repl(
         # Execute the prompt and stream events
         state: dict[str, Any] = {}
         async for event in host.run(user_input):
-            handle_host_event(event, state=state)
+            if isinstance(event, ApprovalRequestEvent):
+                handler = CLIApprovalHandler(console)
+                approved = await handler.handle_approval(event)
+                host.send_approval(approved)
+            else:
+                handle_host_event(event, state=state)
 
         # Render the final response if available
         response = state.get("response")

@@ -10,6 +10,7 @@ import click
 from amplifier_ipc_cli.key_manager import KeyManager
 from amplifier_ipc_cli.session_launcher import launch_session
 from amplifier_ipc_host.events import (
+    ApprovalRequestEvent,
     CompleteEvent,
     HostEvent,
     StreamThinkingEvent,
@@ -54,7 +55,10 @@ async def _run_agent(
     if message is not None:
         # Single-shot mode: run one prompt and stream events
         async for event in host.run(message):
-            _handle_event(event)
+            if isinstance(event, ApprovalRequestEvent):
+                host.send_approval(True)
+            else:
+                _handle_event(event)
     else:
         # Interactive REPL mode
         from amplifier_ipc_cli.repl import interactive_repl
