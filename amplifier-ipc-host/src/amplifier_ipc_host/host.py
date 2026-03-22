@@ -144,32 +144,7 @@ class Host:
                 if method.startswith("stream.provider."):
                     self._provider_notification_queue.put_nowait(msg)
 
-            async def _handle_spawn(params: Any) -> Any:
-                """Handle request.session_spawn from the orchestrator."""
-                p = params if isinstance(params, dict) else {}
-                spawn_request = SpawnRequest(
-                    agent=p.get("agent", "self"),
-                    instruction=p.get("instruction", ""),
-                    context_depth=p.get("context_depth", "none"),
-                    context_scope=p.get("context_scope", "conversation"),
-                    context_turns=p.get("context_turns"),
-                    exclude_tools=p.get("exclude_tools"),
-                    inherit_tools=p.get("inherit_tools"),
-                    exclude_hooks=p.get("exclude_hooks"),
-                    inherit_hooks=p.get("inherit_hooks"),
-                    agents=p.get("agents"),
-                    provider_preferences=p.get("provider_preferences"),
-                    model_role=p.get("model_role"),
-                )
-                transcript = (
-                    self._persistence.load_transcript() if self._persistence else []
-                )
-                return await spawn_child_session(
-                    parent_session_id=session_id,
-                    parent_config={},  # TODO: expose full SessionConfig as dict
-                    transcript=transcript,
-                    request=spawn_request,
-                )
+            _handle_spawn = self._build_spawn_handler(session_id)
 
             self._router = Router(
                 registry=self._registry,
@@ -222,6 +197,67 @@ class Host:
 
         finally:
             await self._teardown_services()
+
+    # ------------------------------------------------------------------
+    # Spawn handler factory
+    # ------------------------------------------------------------------
+
+    def _build_spawn_handler(self, session_id: str) -> Any:
+        """Build and return the async ``_handle_spawn`` closure for *session_id*.
+
+        The returned coroutine function handles ``request.session_spawn`` by
+        building a ``parent_config`` dict populated from the host's resolved
+        configuration and capability registry, then delegating to
+        :func:`~amplifier_ipc_host.spawner.spawn_child_session`.
+
+        Extracting this into a factory method makes the spawn logic directly
+        testable without running the full :meth:`run` lifecycle.
+
+        Args:
+            session_id: The current session's ID (captured in the closure).
+
+        Returns:
+            An async callable ``(params: Any) -> Any`` suitable for passing
+            as the ``spawn_handler`` argument to :class:`~amplifier_ipc_host.router.Router`.
+        """
+
+        async def _handle_spawn(params: Any) -> Any:
+            """Handle request.session_spawn from the orchestrator."""
+            p = params if isinstance(params, dict) else {}
+            spawn_request = SpawnRequest(
+                agent=p.get("agent", "self"),
+                instruction=p.get("instruction", ""),
+                context_depth=p.get("context_depth", "none"),
+                context_scope=p.get("context_scope", "conversation"),
+                context_turns=p.get("context_turns"),
+                exclude_tools=p.get("exclude_tools"),
+                inherit_tools=p.get("inherit_tools"),
+                exclude_hooks=p.get("exclude_hooks"),
+                inherit_hooks=p.get("inherit_hooks"),
+                agents=p.get("agents"),
+                provider_preferences=p.get("provider_preferences"),
+                model_role=p.get("model_role"),
+            )
+            transcript = (
+                self._persistence.load_transcript() if self._persistence else []
+            )
+            parent_config: dict[str, Any] = {
+                "services": list(self._config.services),
+                "orchestrator": self._config.orchestrator,
+                "context_manager": self._config.context_manager,
+                "provider": self._config.provider,
+                "component_config": dict(self._config.component_config),
+                "tools": self._registry.get_all_tool_specs(),
+                "hooks": self._registry.get_all_hook_descriptors(),
+            }
+            return await spawn_child_session(
+                parent_session_id=session_id,
+                parent_config=parent_config,
+                transcript=transcript,
+                request=spawn_request,
+            )
+
+        return _handle_spawn
 
     # ------------------------------------------------------------------
     # Orchestrator turn loop

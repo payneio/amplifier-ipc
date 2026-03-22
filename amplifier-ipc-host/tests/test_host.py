@@ -342,6 +342,78 @@ async def test_host_routes_session_spawn_to_spawner() -> None:
     assert len(spawn_called_with) == 1
 
 
+async def test_host_spawn_handler_passes_parent_config() -> None:
+    """_build_spawn_handler builds a closure that passes actual parent_config to spawn_child_session.
+
+    Verifies that parent_config contains real data from _config and _registry,
+    not an empty dict.
+    """
+    from unittest.mock import patch
+
+    from amplifier_ipc_host.spawner import SpawnRequest
+
+    registry = CapabilityRegistry()
+    registry.register(
+        "foundation",
+        {
+            "tools": [{"name": "bash", "description": "Run bash"}],
+            "hooks": [{"name": "pre_tool", "event": "tool:pre", "priority": 0}],
+            "orchestrators": [{"name": "loop"}],
+            "context_managers": [{"name": "simple"}],
+            "providers": [{"name": "anthropic"}],
+            "content": [],
+        },
+    )
+
+    config = SessionConfig(
+        services=["foundation"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+
+    host = Host(config=config, settings=settings)
+    host._registry = registry
+    host._persistence = None  # No persistence
+
+    captured: list[dict] = []
+
+    async def mock_spawn_child_session(
+        parent_session_id: str,
+        parent_config: dict,
+        transcript: list,
+        request: SpawnRequest,
+        current_depth: int = 0,
+    ) -> dict:
+        captured.append(parent_config)
+        return {
+            "session_id": "child-123",
+            "response": "done",
+            "turn_count": 1,
+            "metadata": {},
+        }
+
+    # _build_spawn_handler returns the _handle_spawn closure
+    spawn_handler = host._build_spawn_handler("test-session-id")
+
+    with patch("amplifier_ipc_host.host.spawn_child_session", mock_spawn_child_session):
+        result = await spawn_handler({"agent": "explorer", "instruction": "Find files"})
+
+    assert result["response"] == "done"
+    assert len(captured) == 1
+    pc = captured[0]
+    # Verify actual parent_config is passed (not empty dict)
+    assert pc["services"] == ["foundation"]
+    assert pc["orchestrator"] == "loop"
+    assert pc["context_manager"] == "simple"
+    assert pc["provider"] == "anthropic"
+    assert pc["component_config"] == {}
+    # tools and hooks come from the registry
+    assert any(t["name"] == "bash" for t in pc["tools"])
+    assert any(h["name"] == "pre_tool" for h in pc["hooks"])
+
+
 async def test_orchestrator_loop_yields_content_block_events() -> None:
     """_orchestrator_loop yields StreamContentBlockStartEvent, StreamTokenEvent,
     StreamContentBlockEndEvent, then CompleteEvent for a full content-block sequence."""
