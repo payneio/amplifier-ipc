@@ -144,3 +144,73 @@ services:
 
         # launch_session should return the Host instance
         assert result is mock_host_instance
+
+
+# ---------------------------------------------------------------------------
+# Test 5: test_launch_session_loads_settings_from_files
+# ---------------------------------------------------------------------------
+
+
+class TestLaunchSessionLoadsSettings:
+    def test_launch_session_loads_settings_from_project_file(
+        self, tmp_path: Path
+    ) -> None:
+        """launch_session passes HostSettings loaded from the project settings file.
+
+        When a project-level settings file contains service_overrides, those
+        overrides must be present in the HostSettings passed to the Host so that
+        resolve_service_command() can find custom commands.
+        """
+        from amplifier_ipc_cli.registry import Registry
+        from amplifier_ipc_cli.session_launcher import launch_session
+
+        # Set up a real registry with a minimal agent definition
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+
+        agent_yaml = """\
+type: agent
+local_ref: test-agent
+uuid: aaaaaaaa-0000-0000-0000-000000000002
+orchestrator: streaming
+context_manager: simple
+provider: anthropic
+services:
+  - name: my-service
+"""
+        registry.register_definition(agent_yaml)
+
+        # Create a project settings file with a service override
+        project_settings_dir = tmp_path / ".amplifier"
+        project_settings_dir.mkdir()
+        project_settings_path = project_settings_dir / "settings.yaml"
+        project_settings_path.write_text(
+            "amplifier_ipc:\n"
+            "  service_overrides:\n"
+            "    my-service:\n"
+            "      command: [python, -m, my_service]\n"
+            "      working_dir: /tmp/my-service\n"
+        )
+
+        mock_host_instance = MagicMock()
+
+        with patch("amplifier_ipc_cli.session_launcher.Host") as mock_host_class:
+            mock_host_class.return_value = mock_host_instance
+
+            result = asyncio.run(
+                launch_session(
+                    "test-agent",
+                    registry=registry,
+                    project_settings_path=project_settings_path,
+                )
+            )
+
+        assert mock_host_class.call_count == 1
+        call_args = mock_host_class.call_args
+        host_settings = call_args[0][1]  # second positional arg
+
+        # The override should have been loaded
+        assert "my-service" in host_settings.service_overrides
+        override = host_settings.service_overrides["my-service"]
+        assert override.command == ["python", "-m", "my_service"]
+        assert override.working_dir == "/tmp/my-service"
