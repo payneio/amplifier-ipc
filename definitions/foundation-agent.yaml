@@ -1,0 +1,18 @@
+agent:
+  local_ref: foundation
+  uuid: 3898a638-71de-427a-8183-b80eba8b26be
+  version: 1
+  description: Foundation agent — core orchestrator, tools, hooks, and content.
+
+  orchestrator: foundation:streaming
+  context_manager: foundation:simple
+  provider: providers:anthropic
+
+  tools: true
+  hooks: true
+  agents: true
+  context: true
+
+  service:
+    installer: uv
+    source: git+https://github.com/microsoft/amplifier-ipc@main#subdirectory=/services/amplifier-foundation
