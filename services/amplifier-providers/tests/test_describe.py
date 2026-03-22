@@ -107,7 +107,7 @@ def test_stub_providers_raise_not_implemented() -> None:
         instance = cls()
 
         try:
-            asyncio.get_event_loop().run_until_complete(instance.complete(request))
+            asyncio.run(instance.complete(request))
             raise AssertionError(
                 f"{class_name}.complete() did not raise NotImplementedError"
             )
