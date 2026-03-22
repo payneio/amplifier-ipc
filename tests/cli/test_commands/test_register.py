@@ -17,22 +17,22 @@ from click.testing import CliRunner
 @pytest.fixture()
 def agent_yaml_content() -> str:
     return """\
-type: agent
-local_ref: my-agent
-uuid: 12345678-abcd-efgh-ijkl-mnopqrstuvwx
-name: My Test Agent
-description: A test agent definition
+agent:
+  ref: my-agent
+  uuid: 12345678-abcd-efgh-ijkl-mnopqrstuvwx
+  name: My Test Agent
+  description: A test agent definition
 """
 
 
 @pytest.fixture()
 def behavior_yaml_content() -> str:
     return """\
-type: behavior
-local_ref: my-behavior
-uuid: 87654321-dcba-hgfe-lkji-xwvutsrqponm
-name: My Test Behavior
-description: A test behavior definition
+behavior:
+  ref: my-behavior
+  uuid: 87654321-dcba-hgfe-lkji-xwvutsrqponm
+  name: My Test Behavior
+  description: A test behavior definition
 """
 
 

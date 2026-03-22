@@ -62,21 +62,27 @@ class Registry:
     ) -> str:
         """Register a definition from YAML content.
 
-        Parses the YAML, computes a definition ID, writes the definition to
-        definitions/<id>.yaml, and updates the appropriate alias file.
+        Parses the YAML, detects the definition type from the top-level key
+        (``agent`` or ``behavior``), extracts ``ref`` and ``uuid`` from the
+        inner dict, then writes the definition to definitions/<id>.yaml and
+        updates the appropriate alias file.
 
         Args:
-            yaml_content: Raw YAML string containing the definition.
+            yaml_content: Raw YAML string containing the definition.  The
+                          top-level key must be ``agent`` or ``behavior`` and
+                          its value must be a mapping with at least ``ref`` and
+                          ``uuid`` fields.
             source_url: Optional URL where the definition was fetched from.
                         If provided, a ``_meta`` block is added to the stored
-                        file with source_url, source_hash (sha256:<hex>), and
-                        fetched_at (ISO timestamp).
+                        file with source_url, sha256 hash, and fetched_at
+                        timestamp.  The source_url is also added as an alias.
 
         Returns:
-            The computed definition_id: '<type>_<local_ref>_<uuid_first_8>'.
+            The computed definition_id: '<type>_<ref>_<full-uuid>'.
 
         Raises:
-            ValueError: If required fields (type, local_ref, uuid) are missing.
+            ValueError: If the top-level key is not ``agent`` or ``behavior``,
+                        or if the inner dict is missing ``ref`` or ``uuid``.
 
         Note:
             Requires ``ensure_home()`` to have been called first so that the
@@ -90,17 +96,28 @@ class Registry:
         if not isinstance(parsed, dict):
             raise ValueError("YAML content must be a mapping")
 
-        def_type = parsed.get("type")
-        local_ref = parsed.get("local_ref")
-        uuid_value = parsed.get("uuid")
-
-        if not def_type or not local_ref or not uuid_value:
+        # Detect type from top-level key
+        if "agent" in parsed:
+            def_type = "agent"
+            inner = parsed["agent"] if isinstance(parsed["agent"], dict) else {}
+        elif "behavior" in parsed:
+            def_type = "behavior"
+            inner = parsed["behavior"] if isinstance(parsed["behavior"], dict) else {}
+        else:
             raise ValueError(
-                "YAML content must contain 'type', 'local_ref', and 'uuid' fields"
+                "YAML content must have a top-level 'agent' or 'behavior' key"
             )
 
-        uuid_first_8 = str(uuid_value)[:8]
-        definition_id = f"{def_type}_{local_ref}_{uuid_first_8}"
+        ref = inner.get("ref")
+        uuid_value = inner.get("uuid")
+
+        if not ref:
+            raise ValueError("Definition inner dict must contain a 'ref' field")
+        if not uuid_value:
+            raise ValueError("Definition inner dict must contain a 'uuid' field")
+
+        # Full UUID (not truncated) in definition_id
+        definition_id = f"{def_type}_{ref}_{uuid_value}"
 
         # Build the data to store (copy original + optional _meta)
         stored_data = dict(parsed)
@@ -109,7 +126,7 @@ class Registry:
             sha256_hex = hashlib.sha256(content_bytes).hexdigest()
             stored_data["_meta"] = {
                 "source_url": source_url,
-                "source_hash": f"sha256:{sha256_hex}",
+                "sha256": f"sha256:{sha256_hex}",
                 "fetched_at": datetime.now(tz=timezone.utc).isoformat(),
             }
 
@@ -121,11 +138,10 @@ class Registry:
         if def_type == "agent":
             alias_file = self.home / "agents.yaml"
         else:
-            # Non-agent types (e.g. "behavior") go to behaviors.yaml
             alias_file = self.home / "behaviors.yaml"
 
         alias_data = yaml.safe_load(alias_file.read_text()) or {}
-        alias_data[local_ref] = definition_id
+        alias_data[ref] = definition_id
         if source_url is not None:
             # Also register the source URL as a resolvable alias so callers
             # can resolve the definition by its original URL without re-fetching.

@@ -88,8 +88,11 @@ def install(name: str, force: bool, home: Optional[str]) -> None:
             )
 
     # Parse definition YAML to get the services list.
+    # Definitions use a nested format: top-level key is 'agent' or 'behavior',
+    # with services and other fields in the inner mapping.
     definition: dict = yaml.safe_load(def_path.read_text()) or {}
-    services: list[dict] = definition.get("services") or []
+    inner: dict = definition.get("agent") or definition.get("behavior") or definition
+    services: list[dict] = (inner or {}).get("services") or []
 
     if not services:
         click.echo(f"No services to install for '{name}'.")

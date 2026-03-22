@@ -22,19 +22,19 @@ def registry(home_dir: Path):
 
 
 AGENT_YAML = """\
-type: agent
-local_ref: my-agent
-uuid: 12345678-abcd-efgh-ijkl-mnopqrstuvwx
-name: My Test Agent
-description: A test agent definition
+agent:
+  ref: my-agent
+  uuid: 12345678-abcd-efgh-ijkl-mnopqrstuvwx
+  name: My Test Agent
+  description: A test agent definition
 """
 
 BEHAVIOR_YAML = """\
-type: behavior
-local_ref: my-behavior
-uuid: 87654321-dcba-hgfe-lkji-xwvutsrqponm
-name: My Test Behavior
-description: A test behavior definition
+behavior:
+  ref: my-behavior
+  uuid: 87654321-dcba-hgfe-lkji-xwvutsrqponm
+  name: My Test Behavior
+  description: A test behavior definition
 """
 
 
@@ -88,15 +88,15 @@ class TestRegisterDefinition:
         registry.ensure_home()
         registry.register_definition(AGENT_YAML)
 
-        # definition_id = agent_my-agent_12345678
-        definition_id = "agent_my-agent_12345678"
+        # definition_id = agent_my-agent_<full-uuid>
+        definition_id = "agent_my-agent_12345678-abcd-efgh-ijkl-mnopqrstuvwx"
         def_file = home_dir / "definitions" / f"{definition_id}.yaml"
         assert def_file.is_file(), f"definition file {def_file} should exist"
 
-        # Verify the file contains the original YAML content
+        # Verify the file contains the original YAML content (nested format)
         parsed = yaml.safe_load(def_file.read_text())
-        assert parsed["type"] == "agent"
-        assert parsed["local_ref"] == "my-agent"
+        assert "agent" in parsed
+        assert parsed["agent"]["ref"] == "my-agent"
 
         # Verify agents.yaml alias updated
         agents_data = yaml.safe_load((home_dir / "agents.yaml").read_text())
@@ -108,14 +108,14 @@ class TestRegisterDefinition:
         registry.ensure_home()
         registry.register_definition(BEHAVIOR_YAML)
 
-        # definition_id = behavior_my-behavior_87654321
-        definition_id = "behavior_my-behavior_87654321"
+        # definition_id = behavior_my-behavior_<full-uuid>
+        definition_id = "behavior_my-behavior_87654321-dcba-hgfe-lkji-xwvutsrqponm"
         def_file = home_dir / "definitions" / f"{definition_id}.yaml"
         assert def_file.is_file(), f"definition file {def_file} should exist"
 
         parsed = yaml.safe_load(def_file.read_text())
-        assert parsed["type"] == "behavior"
-        assert parsed["local_ref"] == "my-behavior"
+        assert "behavior" in parsed
+        assert parsed["behavior"]["ref"] == "my-behavior"
 
         # Verify behaviors.yaml alias updated (NOT agents.yaml)
         behaviors_data = yaml.safe_load((home_dir / "behaviors.yaml").read_text())
@@ -134,7 +134,7 @@ class TestRegisterDefinition:
         source_url = "https://example.com/agents/my-agent.yaml"
         registry.register_definition(AGENT_YAML, source_url=source_url)
 
-        definition_id = "agent_my-agent_12345678"
+        definition_id = "agent_my-agent_12345678-abcd-efgh-ijkl-mnopqrstuvwx"
         def_file = home_dir / "definitions" / f"{definition_id}.yaml"
         parsed = yaml.safe_load(def_file.read_text())
 
@@ -143,12 +143,12 @@ class TestRegisterDefinition:
         )
         meta = parsed["_meta"]
         assert meta["source_url"] == source_url
-        assert "source_hash" in meta, "_meta should have source_hash"
-        assert meta["source_hash"].startswith("sha256:"), (
-            "source_hash should start with 'sha256:'"
+        assert "sha256" in meta, "_meta should have sha256 field"
+        assert meta["sha256"].startswith("sha256:"), (
+            "sha256 field should start with 'sha256:'"
         )
-        assert len(meta["source_hash"]) > len("sha256:"), (
-            "source_hash should have hex digest"
+        assert len(meta["sha256"]) > len("sha256:"), (
+            "sha256 field should have hex digest"
         )
         assert "fetched_at" in meta, "_meta should have fetched_at timestamp"
         # fetched_at should be a valid ISO timestamp string — parse strictly
@@ -164,7 +164,7 @@ class TestRegisterDefinition:
         registry.register_definition(AGENT_YAML)
         registry.register_definition(AGENT_YAML)
 
-        definition_id = "agent_my-agent_12345678"
+        definition_id = "agent_my-agent_12345678-abcd-efgh-ijkl-mnopqrstuvwx"
         def_file = home_dir / "definitions" / f"{definition_id}.yaml"
         assert def_file.is_file()
 
@@ -184,7 +184,7 @@ class TestResolveAgent:
 
         result = registry.resolve_agent("my-agent")
 
-        definition_id = "agent_my-agent_12345678"
+        definition_id = "agent_my-agent_12345678-abcd-efgh-ijkl-mnopqrstuvwx"
         expected = home_dir / "definitions" / f"{definition_id}.yaml"
         assert result == expected
         assert result.is_file()
@@ -210,7 +210,7 @@ class TestResolveBehavior:
 
         result = registry.resolve_behavior("my-behavior")
 
-        definition_id = "behavior_my-behavior_87654321"
+        definition_id = "behavior_my-behavior_87654321-dcba-hgfe-lkji-xwvutsrqponm"
         expected = home_dir / "definitions" / f"{definition_id}.yaml"
         assert result == expected
         assert result.is_file()
@@ -265,12 +265,12 @@ class TestGetSourceMeta:
         source_url = "https://example.com/agents/my-agent.yaml"
         registry.register_definition(AGENT_YAML, source_url=source_url)
 
-        definition_id = "agent_my-agent_12345678"
+        definition_id = "agent_my-agent_12345678-abcd-efgh-ijkl-mnopqrstuvwx"
         meta = registry.get_source_meta(definition_id)
 
         assert meta is not None
         assert meta["source_url"] == source_url
-        assert "source_hash" in meta
+        assert "sha256" in meta
         assert "fetched_at" in meta
 
     def test_get_source_meta_returns_none_when_no_meta(
@@ -280,7 +280,7 @@ class TestGetSourceMeta:
         registry.ensure_home()
         registry.register_definition(AGENT_YAML)  # no source_url => no _meta
 
-        definition_id = "agent_my-agent_12345678"
+        definition_id = "agent_my-agent_12345678-abcd-efgh-ijkl-mnopqrstuvwx"
         meta = registry.get_source_meta(definition_id)
 
         assert meta is None

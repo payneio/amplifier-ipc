@@ -111,15 +111,15 @@ class TestLaunchSessionCreatesHost:
         registry.ensure_home()
 
         agent_yaml = """\
-type: agent
-local_ref: test-agent
-uuid: aaaaaaaa-0000-0000-0000-000000000001
-orchestrator: streaming
-context_manager: simple
-provider: anthropic
-services:
-  - name: test-service
-    installer: pip
+agent:
+  ref: test-agent
+  uuid: aaaaaaaa-0000-0000-0000-000000000001
+  orchestrator: streaming
+  context_manager: simple
+  provider: anthropic
+  services:
+    - name: test-service
+      installer: pip
 """
         registry.register_definition(agent_yaml)
 
@@ -169,14 +169,14 @@ class TestLaunchSessionLoadsSettings:
         registry.ensure_home()
 
         agent_yaml = """\
-type: agent
-local_ref: test-agent
-uuid: aaaaaaaa-0000-0000-0000-000000000002
-orchestrator: streaming
-context_manager: simple
-provider: anthropic
-services:
-  - name: my-service
+agent:
+  ref: test-agent
+  uuid: aaaaaaaa-0000-0000-0000-000000000002
+  orchestrator: streaming
+  context_manager: simple
+  provider: anthropic
+  services:
+    - name: my-service
 """
         registry.register_definition(agent_yaml)
 
@@ -240,15 +240,15 @@ class TestLaunchSessionBuildsUvRunOverride:
         registry.ensure_home()
 
         agent_yaml = f"""\
-type: agent
-local_ref: source-agent
-uuid: aaaaaaaa-0000-0000-0000-000000000010
-orchestrator: streaming
-context_manager: simple
-provider: anthropic
-services:
-  - name: my-source-service
-    source: {source_path}
+agent:
+  ref: source-agent
+  uuid: aaaaaaaa-0000-0000-0000-000000000010
+  orchestrator: streaming
+  context_manager: simple
+  provider: anthropic
+  services:
+    - name: my-source-service
+      source: {source_path}
 """
         registry.register_definition(agent_yaml)
 
@@ -288,15 +288,15 @@ services:
         registry.ensure_home()
 
         agent_yaml = f"""\
-type: agent
-local_ref: priority-agent
-uuid: aaaaaaaa-0000-0000-0000-000000000011
-orchestrator: streaming
-context_manager: simple
-provider: anthropic
-services:
-  - name: my-service
-    source: {source_path}
+agent:
+  ref: priority-agent
+  uuid: aaaaaaaa-0000-0000-0000-000000000011
+  orchestrator: streaming
+  context_manager: simple
+  provider: anthropic
+  services:
+    - name: my-service
+      source: {source_path}
 """
         registry.register_definition(agent_yaml)
 

@@ -35,27 +35,27 @@ def test_ensure_home_creates_structure(tmp_path: Path) -> None:
 
 
 def test_register_agent_definition(tmp_path: Path) -> None:
-    """register_definition() registers an agent, writes a definition file, and updates agents.yaml."""
+    """register_definition() registers an agent using nested agent: key, full UUID, and updates agents.yaml."""
     registry = Registry(home=tmp_path / "amplifier_home")
     registry.ensure_home()
 
     yaml_content = (
-        "type: agent\n"
-        "local_ref: my-agent\n"
-        "uuid: 12345678-abcd-ef00-0000-000000000000\n"
-        "name: My Agent\n"
+        "agent:\n"
+        "  ref: my-agent\n"
+        "  uuid: 12345678-abcd-ef00-0000-000000000000\n"
+        "  name: My Agent\n"
     )
 
     definition_id = registry.register_definition(yaml_content)
 
-    # Definition ID follows the pattern <type>_<local_ref>_<uuid_first_8>
-    assert definition_id == "agent_my-agent_12345678"
+    # Definition ID follows the pattern <type>_<ref>_<full-uuid>
+    assert definition_id == "agent_my-agent_12345678-abcd-ef00-0000-000000000000"
 
     # Definition file should exist
     def_file = registry.home / "definitions" / f"{definition_id}.yaml"
     assert def_file.is_file(), "definition file should be created"
 
-    # agents.yaml should map local_ref → definition_id
+    # agents.yaml should map ref → definition_id
     import yaml
 
     alias_data = yaml.safe_load((registry.home / "agents.yaml").read_text())
@@ -63,20 +63,20 @@ def test_register_agent_definition(tmp_path: Path) -> None:
 
 
 def test_register_behavior_definition(tmp_path: Path) -> None:
-    """register_definition() registers a behavior and updates behaviors.yaml."""
+    """register_definition() registers a behavior using nested behavior: key and updates behaviors.yaml."""
     registry = Registry(home=tmp_path / "amplifier_home")
     registry.ensure_home()
 
     yaml_content = (
-        "type: behavior\n"
-        "local_ref: my-behavior\n"
-        "uuid: abcdefab-0000-0000-0000-000000000000\n"
-        "name: My Behavior\n"
+        "behavior:\n"
+        "  ref: my-behavior\n"
+        "  uuid: abcdefab-0000-0000-0000-000000000000\n"
+        "  name: My Behavior\n"
     )
 
     definition_id = registry.register_definition(yaml_content)
 
-    assert definition_id == "behavior_my-behavior_abcdefab"
+    assert definition_id == "behavior_my-behavior_abcdefab-0000-0000-0000-000000000000"
 
     # behaviors.yaml should be updated; agents.yaml should remain empty
     import yaml
@@ -94,10 +94,10 @@ def test_resolve_agent_returns_path(tmp_path: Path) -> None:
     registry.ensure_home()
 
     yaml_content = (
-        "type: agent\n"
-        "local_ref: cool-agent\n"
-        "uuid: deadbeef-0000-0000-0000-000000000000\n"
-        "name: Cool Agent\n"
+        "agent:\n"
+        "  ref: cool-agent\n"
+        "  uuid: deadbeef-0000-0000-0000-000000000000\n"
+        "  name: Cool Agent\n"
     )
     definition_id = registry.register_definition(yaml_content)
 
@@ -117,6 +117,29 @@ def test_resolve_agent_unknown_raises(tmp_path: Path) -> None:
         registry.resolve_agent("nonexistent-agent")
 
 
+def test_register_definition_rejects_missing_fields(tmp_path: Path) -> None:
+    """register_definition() raises ValueError when ref or uuid is missing from inner dict."""
+    registry = Registry(home=tmp_path / "amplifier_home")
+    registry.ensure_home()
+
+    # Missing uuid
+    yaml_missing_uuid = "agent:\n  ref: my-agent\n"
+    with pytest.raises(ValueError, match="uuid"):
+        registry.register_definition(yaml_missing_uuid)
+
+    # Missing ref
+    yaml_missing_ref = "agent:\n  uuid: 12345678-abcd-ef00-0000-000000000000\n"
+    with pytest.raises(ValueError, match="ref"):
+        registry.register_definition(yaml_missing_ref)
+
+    # No known top-level key (neither agent nor behavior)
+    yaml_unknown_type = (
+        "type: agent\nlocal_ref: my-agent\nuuid: 12345678-abcd-ef00-0000-000000000000\n"
+    )
+    with pytest.raises(ValueError):
+        registry.register_definition(yaml_unknown_type)
+
+
 # ---------------------------------------------------------------------------
 # Tests for unregister_definition()
 # ---------------------------------------------------------------------------
@@ -128,10 +151,10 @@ def test_unregister_definition_removes_definition_file(tmp_path: Path) -> None:
     registry.ensure_home()
 
     yaml_content = (
-        "type: agent\n"
-        "local_ref: my-agent\n"
-        "uuid: 12345678-abcd-ef00-0000-000000000000\n"
-        "name: My Agent\n"
+        "agent:\n"
+        "  ref: my-agent\n"
+        "  uuid: 12345678-abcd-ef00-0000-000000000000\n"
+        "  name: My Agent\n"
     )
     definition_id = registry.register_definition(yaml_content)
 
@@ -149,23 +172,23 @@ def test_unregister_definition_removes_alias_entries(tmp_path: Path) -> None:
     registry.ensure_home()
 
     yaml_content = (
-        "type: agent\n"
-        "local_ref: my-agent\n"
-        "uuid: 12345678-abcd-ef00-0000-000000000000\n"
-        "name: My Agent\n"
+        "agent:\n"
+        "  ref: my-agent\n"
+        "  uuid: 12345678-abcd-ef00-0000-000000000000\n"
+        "  name: My Agent\n"
     )
     registry.register_definition(yaml_content)
 
     import yaml
 
-    # local_ref alias should exist before unregister
+    # ref alias should exist before unregister
     alias_data = yaml.safe_load((registry.home / "agents.yaml").read_text()) or {}
     assert "my-agent" in alias_data
 
     registry.unregister_definition("my-agent", kind="agent")
 
     alias_data = yaml.safe_load((registry.home / "agents.yaml").read_text()) or {}
-    assert "my-agent" not in alias_data, "local_ref alias must be removed"
+    assert "my-agent" not in alias_data, "ref alias must be removed"
 
 
 def test_unregister_definition_removes_source_url_alias(tmp_path: Path) -> None:
@@ -174,10 +197,10 @@ def test_unregister_definition_removes_source_url_alias(tmp_path: Path) -> None:
     registry.ensure_home()
 
     yaml_content = (
-        "type: agent\n"
-        "local_ref: url-agent\n"
-        "uuid: abcdef12-0000-0000-0000-000000000000\n"
-        "name: URL Agent\n"
+        "agent:\n"
+        "  ref: url-agent\n"
+        "  uuid: abcdef12-0000-0000-0000-000000000000\n"
+        "  name: URL Agent\n"
     )
     source_url = "https://example.com/url-agent.yaml"
     registry.register_definition(yaml_content, source_url=source_url)
@@ -190,7 +213,7 @@ def test_unregister_definition_removes_source_url_alias(tmp_path: Path) -> None:
     registry.unregister_definition("url-agent", kind="agent")
 
     alias_data = yaml.safe_load((registry.home / "agents.yaml").read_text()) or {}
-    assert "url-agent" not in alias_data, "local_ref alias must be removed"
+    assert "url-agent" not in alias_data, "ref alias must be removed"
     assert source_url not in alias_data, "source_url alias must also be removed"
 
 
@@ -200,10 +223,10 @@ def test_unregister_definition_returns_definition_id(tmp_path: Path) -> None:
     registry.ensure_home()
 
     yaml_content = (
-        "type: agent\n"
-        "local_ref: ret-agent\n"
-        "uuid: 11111111-0000-0000-0000-000000000000\n"
-        "name: Ret Agent\n"
+        "agent:\n"
+        "  ref: ret-agent\n"
+        "  uuid: 11111111-0000-0000-0000-000000000000\n"
+        "  name: Ret Agent\n"
     )
     expected_id = registry.register_definition(yaml_content)
 
@@ -227,10 +250,10 @@ def test_unregister_behavior_definition(tmp_path: Path) -> None:
     registry.ensure_home()
 
     yaml_content = (
-        "type: behavior\n"
-        "local_ref: my-behavior\n"
-        "uuid: aaaabbbb-0000-0000-0000-000000000000\n"
-        "name: My Behavior\n"
+        "behavior:\n"
+        "  ref: my-behavior\n"
+        "  uuid: aaaabbbb-0000-0000-0000-000000000000\n"
+        "  name: My Behavior\n"
     )
     definition_id = registry.register_definition(yaml_content)
 
@@ -257,7 +280,7 @@ def test_uninstall_environment_removes_directory(tmp_path: Path) -> None:
     registry = Registry(home=tmp_path / "amplifier_home")
     registry.ensure_home()
 
-    definition_id = "agent_test-agent_12345678"
+    definition_id = "agent_test-agent_12345678-0000-0000-0000-000000000000"
     env_path = registry.get_environment_path(definition_id)
     env_path.mkdir(parents=True)
     assert env_path.is_dir()

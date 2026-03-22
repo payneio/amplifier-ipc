@@ -149,15 +149,15 @@ class TestSpawnSubSessionCreatesHost:
         registry.ensure_home()
 
         agent_yaml = """\
-type: agent
-local_ref: test-child-agent
-uuid: bbbbbbbb-0000-0000-0000-000000000001
-orchestrator: streaming
-context_manager: simple
-provider: anthropic
-services:
-  - name: child-service
-    installer: pip
+agent:
+  ref: test-child-agent
+  uuid: bbbbbbbb-0000-0000-0000-000000000001
+  orchestrator: streaming
+  context_manager: simple
+  provider: anthropic
+  services:
+    - name: child-service
+      installer: pip
 """
         registry.register_definition(agent_yaml)
 

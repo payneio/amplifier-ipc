@@ -32,24 +32,24 @@ _TRUNCATED_DISPLAY_LEN = 8
 # ---------------------------------------------------------------------------
 
 _AGENT_YAML = """\
-type: agent
-local_ref: integration-agent
-uuid: aaaa1111-bbbb-2222-3333-444455556666
-orchestrator: loop
-context_manager: simple
-provider: anthropic
-behaviors:
-  - integration-beh
-services:
-  - name: integration-service
-    source: integration-package>=1.0
+agent:
+  ref: integration-agent
+  uuid: aaaa1111-bbbb-2222-3333-444455556666
+  orchestrator: loop
+  context_manager: simple
+  provider: anthropic
+  behaviors:
+    - integration-beh
+  services:
+    - name: integration-service
+      source: integration-package>=1.0
 """
 
 _BEHAVIOR_YAML = """\
-type: behavior
-local_ref: integration-beh
-uuid: cccc3333-dddd-4444-5555-666677778888
-description: Integration test behavior
+behavior:
+  ref: integration-beh
+  uuid: cccc3333-dddd-4444-5555-666677778888
+  description: Integration test behavior
 """
 
 

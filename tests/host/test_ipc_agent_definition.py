@@ -126,30 +126,38 @@ def test_agent_provider() -> None:
 
 
 def test_agent_tools_flag_is_true_in_yaml() -> None:
-    """The raw YAML must have `tools: true`."""
+    """The raw YAML must have `tools: true` in the nested definition block."""
     raw = _load_raw_yaml()
-    assert raw.get("tools") is True, f"Expected tools: true, got {raw.get('tools')!r}"
+    inner = raw.get("agent", raw.get("behavior", {})) or {}
+    assert inner.get("tools") is True, (
+        f"Expected tools: true, got {inner.get('tools')!r}"
+    )
 
 
 def test_agent_hooks_flag_is_true_in_yaml() -> None:
-    """The raw YAML must have `hooks: true`."""
+    """The raw YAML must have `hooks: true` in the nested definition block."""
     raw = _load_raw_yaml()
-    assert raw.get("hooks") is True, f"Expected hooks: true, got {raw.get('hooks')!r}"
+    inner = raw.get("agent", raw.get("behavior", {})) or {}
+    assert inner.get("hooks") is True, (
+        f"Expected hooks: true, got {inner.get('hooks')!r}"
+    )
 
 
 def test_agent_agents_flag_is_true_in_yaml() -> None:
-    """The raw YAML must have `agents: true`."""
+    """The raw YAML must have `agents: true` in the nested definition block."""
     raw = _load_raw_yaml()
-    assert raw.get("agents") is True, (
-        f"Expected agents: true, got {raw.get('agents')!r}"
+    inner = raw.get("agent", raw.get("behavior", {})) or {}
+    assert inner.get("agents") is True, (
+        f"Expected agents: true, got {inner.get('agents')!r}"
     )
 
 
 def test_agent_context_flag_is_true_in_yaml() -> None:
-    """The raw YAML must have `context: true`."""
+    """The raw YAML must have `context: true` in the nested definition block."""
     raw = _load_raw_yaml()
-    assert raw.get("context") is True, (
-        f"Expected context: true, got {raw.get('context')!r}"
+    inner = raw.get("agent", raw.get("behavior", {})) or {}
+    assert inner.get("context") is True, (
+        f"Expected context: true, got {inner.get('context')!r}"
     )
 
 
