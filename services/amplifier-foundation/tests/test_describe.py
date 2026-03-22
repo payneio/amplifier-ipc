@@ -136,20 +136,21 @@ async def test_describe_has_hooks() -> None:
 
 @pytest.mark.asyncio
 async def test_describe_has_content() -> None:
-    """describe must report >=20 content paths with >=5 agents, >=5 behaviors, >=5 context."""
+    """describe must report >=20 content paths with >=5 behaviors and >=5 context.
+
+    Note: agent definitions (formerly 'sessions') live at the service root as fsspec
+    URIs and are NOT served as package content. Only behaviors, context, and recipes
+    are served via content.read/content.list.
+    """
     result = await _send_describe()
     caps = result["capabilities"]
 
     paths = caps.get("content", {}).get("paths", [])
     assert len(paths) >= 20, f"Expected >= 20 content paths, got {len(paths)}"
 
-    agents = [p for p in paths if p.startswith("agents/")]
     behaviors = [p for p in paths if p.startswith("behaviors/")]
     context = [p for p in paths if p.startswith("context/")]
 
-    assert len(agents) >= 5, (
-        f"Expected >= 5 agent content paths, got {len(agents)}: {agents}"
-    )
     assert len(behaviors) >= 5, (
         f"Expected >= 5 behavior content paths, got {len(behaviors)}: {behaviors}"
     )

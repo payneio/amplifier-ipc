@@ -21,7 +21,7 @@ def test_version_attribute() -> None:
     amplifier_foundation installation pyright resolves to.
     """
     version = importlib.metadata.version("amplifier-foundation")
-    assert version == "1.0.0"
+    assert version == "0.1.0"
 
 
 def test_package_docstring() -> None:

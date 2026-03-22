@@ -174,12 +174,6 @@ def test_content_file_count(content_paths: list[str]) -> None:
     )
 
 
-def test_content_has_agents(content_paths: list[str]) -> None:
-    """Content must include agent definition files."""
-    agents = [p for p in content_paths if p.startswith("agents/")]
-    assert len(agents) >= 10, f"Expected >= 10 agent files, got {len(agents)}: {agents}"
-
-
 def test_content_has_behaviors(content_paths: list[str]) -> None:
     """Content must include behavior YAML files."""
     behaviors = [p for p in content_paths if p.startswith("behaviors/")]

@@ -18,14 +18,6 @@ def _files_in_dir(content_files: list[str], dir_name: str) -> list[str]:
     return [f for f in content_files if f.startswith(f"{dir_name}/")]
 
 
-def test_agents_content_discovered(content_files: list[str]) -> None:
-    """At least 10 agent .md files must be discoverable under agents/."""
-    agent_files = _files_in_dir(content_files, "agents")
-    assert len(agent_files) >= 10, (
-        f"Expected >= 10 agent files, found {len(agent_files)}: {agent_files}"
-    )
-
-
 def test_behaviors_content_discovered(content_files: list[str]) -> None:
     """At least 5 behavior .yaml files must be discoverable under behaviors/."""
     behavior_files = _files_in_dir(content_files, "behaviors")
@@ -50,9 +42,6 @@ def test_recipes_content_discovered(content_files: list[str]) -> None:
     )
 
 
-def test_sessions_content_discovered(content_files: list[str]) -> None:
-    """At least 3 session .yaml files must be discoverable under sessions/."""
-    session_files = _files_in_dir(content_files, "sessions")
-    assert len(session_files) >= 3, (
-        f"Expected >= 3 session files, found {len(session_files)}: {session_files}"
-    )
+# NOTE: agent definitions (formerly "sessions") are referenced via fsspec URIs
+# and live at the service root (services/amplifier-foundation/agents/), NOT inside
+# the Python package. No sessions/ or agents/ content assertion needed here.
