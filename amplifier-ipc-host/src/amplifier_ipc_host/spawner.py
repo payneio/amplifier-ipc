@@ -370,7 +370,7 @@ async def _run_child_session(
         "session_id": child_session_id,
         "response": response,
         "turn_count": turn_count,
-        "metadata": {},
+        "metadata": {"agent": request.agent},
     }
 
 
@@ -452,4 +452,6 @@ async def spawn_child_session(
         instruction = request.instruction
 
     # 7. Execute child session
-    return await _run_child_session(child_session_id, child_config, instruction, request)
+    return await _run_child_session(
+        child_session_id, child_config, instruction, request
+    )
