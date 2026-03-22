@@ -13,6 +13,7 @@ implemented in the installed protocol package).
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -117,8 +118,12 @@ async def test_e2e_mock_provider_completes() -> None:
     host = Host(config=config, settings=settings)
 
     events: list[HostEvent] = []
-    async for event in host.run("Say hello"):
-        events.append(event)
+
+    async def _collect() -> None:
+        async for event in host.run("Say hello"):
+            events.append(event)
+
+    await asyncio.wait_for(_collect(), timeout=10.0)
 
     complete_events = [e for e in events if isinstance(e, CompleteEvent)]
 
