@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from amplifier_ipc_host.config import HostSettings, ServiceOverride, SessionConfig
-from amplifier_ipc_host.events import CompleteEvent, HostEvent
+from amplifier_ipc_host.events import CompleteEvent, HostEvent, StreamTokenEvent  # noqa: F401
 from amplifier_ipc_host.host import Host
 
 # ---------------------------------------------------------------------------
@@ -77,29 +77,6 @@ def _make_settings() -> HostSettings:
     )
 
 
-def _protocol_server_supports_orchestrator() -> bool:
-    """Return True if the installed protocol Server handles orchestrator.execute.
-
-    The full e2e chain requires the protocol Server (in the foundation service's
-    venv) to dispatch ``orchestrator.execute`` to the orchestrator component.
-    This checks whether that handler is present in the installed server.py.
-    """
-    try:
-        lib_dir = FOUNDATION_SERVICE_DIR / ".venv" / "lib"
-        # Find the python version directory (e.g. python3.13)
-        python_dirs = list(lib_dir.iterdir()) if lib_dir.exists() else []
-        if not python_dirs:
-            return False
-        server_py = (
-            python_dirs[0] / "site-packages" / "amplifier_ipc_protocol" / "server.py"
-        )
-        if not server_py.exists():
-            return False
-        return "orchestrator.execute" in server_py.read_text()
-    except Exception:  # noqa: BLE001
-        return False
-
-
 # ---------------------------------------------------------------------------
 # Availability check
 # ---------------------------------------------------------------------------
@@ -111,13 +88,11 @@ _SERVICES_AVAILABLE = (
         FOUNDATION_SERVICE_DIR / ".venv" / "bin" / "amplifier-foundation-serve"
     ).exists()
     and (PROVIDERS_SERVICE_DIR / ".venv" / "bin" / "amplifier-providers-serve").exists()
-    and _protocol_server_supports_orchestrator()
 )
 
 _SKIP_REASON = (
-    "Services not installed or protocol Server does not handle orchestrator.execute. "
-    "Run `uv sync` in services/amplifier-foundation and services/amplifier-providers, "
-    "and ensure the installed amplifier-ipc-protocol Server dispatches orchestrator.execute."
+    "Services not installed. "
+    "Run `uv sync` in services/amplifier-foundation and services/amplifier-providers."
 )
 
 
