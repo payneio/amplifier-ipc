@@ -85,7 +85,7 @@ class GeminiProvider:
         self.temperature: float = float(config.get("temperature", 1.0))
         self.thinking_budget: int | None = config.get("thinking_budget")
 
-    def _get_model(self, **kwargs: Any) -> Any:
+    def _get_model(self) -> Any:
         """Lazily initialise and return the Gemini GenerativeModel."""
         if self._model is None:
             try:
@@ -399,17 +399,21 @@ class GeminiProvider:
         }
 
         temperature: float | None = (
-            request.temperature if request.temperature is not None else None
+            request.temperature if request.temperature is not None else self.temperature
         )
         if temperature is not None:
             generation_config["temperature"] = temperature
 
-        # thinking_budget handling
-        thinking_budget: int | None = (
-            getattr(request, "thinking_budget", None)
-            or kwargs.get("thinking_budget")
-            or self.thinking_budget
-        )
+        # thinking_budget handling — use explicit None-check so 0 is valid
+        thinking_budget: int | None = None
+        for _tb_source in (
+            getattr(request, "thinking_budget", None),
+            kwargs.get("thinking_budget"),
+            self.thinking_budget,
+        ):
+            if _tb_source is not None:
+                thinking_budget = _tb_source
+                break
         if thinking_budget is not None:
             generation_config["thinking_config"] = {"thinking_budget": thinking_budget}
 
@@ -469,8 +473,8 @@ def _struct_to_dict(value: Any) -> dict[str, Any]:
         from google.protobuf import json_format  # type: ignore[import-untyped]  # noqa: PLC0415
 
         return json.loads(json_format.MessageToJson(value))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to convert proto struct: %s", exc, exc_info=True)
     return {}
 
 
