@@ -112,27 +112,64 @@ def test_resolve_agent_unknown_raises(tmp_path: Path) -> None:
         registry.resolve_agent("nonexistent-agent")
 
 
-def test_register_definition_rejects_missing_fields(tmp_path: Path) -> None:
-    """register_definition() raises ValueError when ref or uuid is missing from inner dict."""
+def test_register_definition_rejects_missing_uuid(tmp_path: Path) -> None:
+    """register_definition() raises ValueError when uuid is absent from the inner dict."""
     registry = Registry(home=tmp_path / "amplifier_home")
     registry.ensure_home()
 
-    # Missing uuid
     yaml_missing_uuid = "agent:\n  ref: my-agent\n"
     with pytest.raises(ValueError, match="uuid"):
         registry.register_definition(yaml_missing_uuid)
 
-    # Missing ref
+
+def test_register_definition_rejects_missing_ref(tmp_path: Path) -> None:
+    """register_definition() raises ValueError when ref is absent from the inner dict."""
+    registry = Registry(home=tmp_path / "amplifier_home")
+    registry.ensure_home()
+
     yaml_missing_ref = "agent:\n  uuid: 12345678-abcd-ef00-0000-000000000000\n"
     with pytest.raises(ValueError, match="ref"):
         registry.register_definition(yaml_missing_ref)
 
-    # No known top-level key (neither agent nor behavior)
+
+def test_register_definition_rejects_unknown_type(tmp_path: Path) -> None:
+    """register_definition() raises ValueError when top-level key is neither agent nor behavior."""
+    registry = Registry(home=tmp_path / "amplifier_home")
+    registry.ensure_home()
+
     yaml_unknown_type = (
         "type: agent\nlocal_ref: my-agent\nuuid: 12345678-abcd-ef00-0000-000000000000\n"
     )
     with pytest.raises(ValueError):
         registry.register_definition(yaml_unknown_type)
+
+
+def test_register_definition_with_source_url_writes_meta(tmp_path: Path) -> None:
+    """register_definition() writes _meta block with source_url, sha256, and fetched_at."""
+    registry = Registry(home=tmp_path / "amplifier_home")
+    registry.ensure_home()
+
+    yaml_content = (
+        "agent:\n"
+        "  ref: meta-agent\n"
+        "  uuid: cafecafe-0000-0000-0000-000000000000\n"
+        "  name: Meta Agent\n"
+    )
+    source_url = "https://example.com/meta-agent.yaml"
+
+    definition_id = registry.register_definition(yaml_content, source_url=source_url)
+
+    def_file = registry.home / "definitions" / f"{definition_id}.yaml"
+    stored = yaml.safe_load(def_file.read_text())
+
+    assert "_meta" in stored, "definition file must contain a _meta block"
+    meta = stored["_meta"]
+    assert meta["source_url"] == source_url
+    assert meta["sha256"].startswith("sha256:")
+    assert len(meta["sha256"]) > len("sha256:"), (
+        "_meta.sha256 must include the hex digest"
+    )
+    assert "fetched_at" in meta, "_meta must include fetched_at timestamp"
 
 
 # ---------------------------------------------------------------------------
