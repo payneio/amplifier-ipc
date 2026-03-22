@@ -4,21 +4,22 @@ import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from amplifier_ipc.host.config import ServiceOverride
 from amplifier_ipc.host.definitions import ResolvedAgent, ServiceEntry
 
 
 # ---------------------------------------------------------------------------
-# Test 1: test_build_session_config_basic
+# Test 1: test_build_session_config_basic — uses (ref, ServiceEntry) tuples
 # ---------------------------------------------------------------------------
 
 
 class TestBuildSessionConfigBasic:
     def test_build_session_config_basic(self) -> None:
-        """build_session_config maps services/orchestrator/context_manager/provider."""
+        """build_session_config extracts refs from (ref, ServiceEntry) tuples."""
         from amplifier_ipc.cli.session_launcher import build_session_config
 
         resolved = ResolvedAgent(
-            services=[ServiceEntry(name="test-service")],
+            services=[("test-service", ServiceEntry(stack="my-stack"))],
             orchestrator="streaming",
             context_manager="simple",
             provider="anthropic",
@@ -40,14 +41,14 @@ class TestBuildSessionConfigBasic:
 
 class TestBuildSessionConfigMultipleServices:
     def test_build_session_config_multiple_services(self) -> None:
-        """build_session_config maps multiple services to a list of service names."""
+        """build_session_config maps multiple (ref, ServiceEntry) tuples to refs."""
         from amplifier_ipc.cli.session_launcher import build_session_config
 
         resolved = ResolvedAgent(
             services=[
-                ServiceEntry(name="amplifier-foundation"),
-                ServiceEntry(name="agent-browser"),
-                ServiceEntry(name="amplifier-modes"),
+                ("amplifier-foundation", ServiceEntry()),
+                ("agent-browser", ServiceEntry()),
+                ("amplifier-modes", ServiceEntry()),
             ],
             orchestrator="streaming",
             context_manager="simple",
@@ -81,7 +82,7 @@ class TestBuildSessionConfigPreservesComponentConfig:
         }
 
         resolved = ResolvedAgent(
-            services=[ServiceEntry(name="test-service")],
+            services=[("test-service", ServiceEntry())],
             orchestrator="streaming",
             context_manager="simple",
             provider="anthropic",
@@ -96,13 +97,81 @@ class TestBuildSessionConfigPreservesComponentConfig:
 
 
 # ---------------------------------------------------------------------------
+# Test 3b: test_build_service_overrides — new tuple-based API
+# ---------------------------------------------------------------------------
+
+
+class TestBuildServiceOverridesNewAPI:
+    def test_creates_override_keyed_by_ref(self) -> None:
+        """_build_service_overrides creates ServiceOverride keyed by ref when svc.command set."""
+        from amplifier_ipc.cli.session_launcher import _build_service_overrides
+
+        services = [("my-svc-ref", ServiceEntry(command="my-command"))]
+        result = _build_service_overrides(services, {})
+
+        assert "my-svc-ref" in result
+        assert result["my-svc-ref"].command == ["my-command"]
+        assert result["my-svc-ref"].working_dir is None
+
+    def test_skips_service_without_command(self) -> None:
+        """_build_service_overrides skips services with no command field."""
+        from amplifier_ipc.cli.session_launcher import _build_service_overrides
+
+        services = [("my-svc-ref", ServiceEntry(source="/some/path"))]
+        result = _build_service_overrides(services, {})
+
+        assert "my-svc-ref" not in result
+
+    def test_existing_overrides_take_priority(self) -> None:
+        """_build_service_overrides does not replace already-present overrides."""
+        from amplifier_ipc.cli.session_launcher import _build_service_overrides
+
+        existing = {"my-svc-ref": ServiceOverride(command=["existing-cmd"])}
+        services = [("my-svc-ref", ServiceEntry(command="new-command"))]
+        result = _build_service_overrides(services, existing)
+
+        assert result["my-svc-ref"].command == ["existing-cmd"]
+
+    def test_merges_new_overrides_with_existing(self) -> None:
+        """_build_service_overrides preserves existing overrides and adds new ones."""
+        from amplifier_ipc.cli.session_launcher import _build_service_overrides
+
+        existing = {"already-there": ServiceOverride(command=["old-cmd"])}
+        services = [("new-svc", ServiceEntry(command="new-cmd"))]
+        result = _build_service_overrides(services, existing)
+
+        assert "already-there" in result
+        assert result["already-there"].command == ["old-cmd"]
+        assert "new-svc" in result
+        assert result["new-svc"].command == ["new-cmd"]
+
+    def test_multiple_services_mixed(self) -> None:
+        """_build_service_overrides handles mix of command/no-command services."""
+        from amplifier_ipc.cli.session_launcher import _build_service_overrides
+
+        services = [
+            ("svc-with-cmd", ServiceEntry(command="run-me")),
+            ("svc-no-cmd", ServiceEntry(stack="some-stack")),
+        ]
+        result = _build_service_overrides(services, {})
+
+        assert "svc-with-cmd" in result
+        assert result["svc-with-cmd"].command == ["run-me"]
+        assert "svc-no-cmd" not in result
+
+
+# ---------------------------------------------------------------------------
 # Test 4: test_launch_session_creates_host
 # ---------------------------------------------------------------------------
 
 
 class TestLaunchSessionCreatesHost:
     def test_launch_session_creates_host(self, tmp_path: Path) -> None:
-        """launch_session creates and returns a Host with the correct SessionConfig."""
+        """launch_session creates and returns a Host with the correct SessionConfig.
+
+        The SessionConfig.services list contains the agent ref (from the resolved
+        (ref, ServiceEntry) tuple), not a separate service name field.
+        """
         from amplifier_ipc.host.definition_registry import Registry
         from amplifier_ipc.cli.session_launcher import launch_session
 
@@ -117,9 +186,8 @@ agent:
   orchestrator: streaming
   context_manager: simple
   provider: anthropic
-  services:
-    - name: test-service
-      installer: pip
+  service:
+    stack: my-stack
 """
         registry.register_definition(agent_yaml)
 
@@ -138,8 +206,8 @@ agent:
         call_args = mock_host_class.call_args
         session_config = call_args[0][0]  # first positional arg
 
-        # Verify SessionConfig was built correctly
-        assert session_config.services == ["test-service"]
+        # The service list contains the agent ref (keyed by ref in ResolvedAgent.services)
+        assert session_config.services == ["test-agent"]
         assert session_config.orchestrator == "streaming"
 
         # launch_session should return the Host instance
@@ -221,34 +289,31 @@ agent:
 # ---------------------------------------------------------------------------
 
 
-class TestLaunchSessionBuildsUvRunOverride:
-    def test_launch_session_builds_uv_run_override_for_source_services(
+class TestLaunchSessionBuildsCommandOverride:
+    def test_launch_session_builds_override_for_command_services(
         self, tmp_path: Path
     ) -> None:
-        """launch_session builds 'uv run --directory <source>' overrides for source services.
+        """launch_session builds ServiceOverride from service command field.
 
-        Services with a source: path in their definition should automatically
-        get a ServiceOverride using 'uv run --directory <source> <name>' so
-        that the Host can spawn them without any hardcoded settings.yaml entries.
+        Services with a command: field in their definition should automatically
+        get a ServiceOverride with that command so that the Host can spawn them
+        without any hardcoded settings.yaml entries.
         """
         from amplifier_ipc.host.definition_registry import Registry
         from amplifier_ipc.cli.session_launcher import launch_session
 
-        source_path = str(tmp_path / "my-service-src")
-
         registry = Registry(home=tmp_path / "amplifier_home")
         registry.ensure_home()
 
-        agent_yaml = f"""\
+        agent_yaml = """\
 agent:
-  ref: source-agent
+  ref: cmd-agent
   uuid: aaaaaaaa-0000-0000-0000-000000000010
   orchestrator: streaming
   context_manager: simple
   provider: anthropic
-  services:
-    - name: my-source-service
-      source: {source_path}
+  service:
+    command: my-service-command
 """
         registry.register_definition(agent_yaml)
 
@@ -257,57 +322,48 @@ agent:
         with patch("amplifier_ipc.cli.session_launcher.Host") as mock_host_class:
             mock_host_class.return_value = mock_host_instance
 
-            asyncio.run(launch_session("source-agent", registry=registry))
+            asyncio.run(launch_session("cmd-agent", registry=registry))
 
         assert mock_host_class.call_count == 1
         call_args = mock_host_class.call_args
         host_settings = call_args[0][1]  # second positional arg
 
-        # A uv run override should have been built for the source service
-        assert "my-source-service" in host_settings.service_overrides
-        override = host_settings.service_overrides["my-source-service"]
-        assert override.command == [
-            "uv",
-            "run",
-            "--directory",
-            source_path,
-            "my-source-service",
-        ]
-        assert override.working_dir == source_path
+        # A ServiceOverride keyed by agent ref should have been built
+        assert "cmd-agent" in host_settings.service_overrides
+        override = host_settings.service_overrides["cmd-agent"]
+        assert override.command == ["my-service-command"]
+        assert override.working_dir is None
 
-    def test_launch_session_settings_override_takes_priority_over_source(
+    def test_launch_session_settings_override_takes_priority_over_command(
         self, tmp_path: Path
     ) -> None:
-        """Settings file overrides take priority over source-path auto-discovery."""
+        """Settings file overrides take priority over service command auto-discovery."""
         from amplifier_ipc.host.definition_registry import Registry
         from amplifier_ipc.cli.session_launcher import launch_session
-
-        source_path = str(tmp_path / "my-service-src")
 
         registry = Registry(home=tmp_path / "amplifier_home")
         registry.ensure_home()
 
-        agent_yaml = f"""\
+        agent_yaml = """\
 agent:
   ref: priority-agent
   uuid: aaaaaaaa-0000-0000-0000-000000000011
   orchestrator: streaming
   context_manager: simple
   provider: anthropic
-  services:
-    - name: my-service
-      source: {source_path}
+  service:
+    command: auto-discovered-command
 """
         registry.register_definition(agent_yaml)
 
-        # Settings file overrides this service with a custom command
+        # Settings file overrides this service ref with a custom command
         project_settings_dir = tmp_path / ".amplifier"
         project_settings_dir.mkdir()
         project_settings_path = project_settings_dir / "settings.yaml"
         project_settings_path.write_text(
             "amplifier_ipc:\n"
             "  service_overrides:\n"
-            "    my-service:\n"
+            "    priority-agent:\n"
             "      command: [custom-command]\n"
         )
 
@@ -327,6 +383,6 @@ agent:
         call_args = mock_host_class.call_args
         host_settings = call_args[0][1]
 
-        # Settings override should win — not the uv run auto-discovery
-        override = host_settings.service_overrides["my-service"]
+        # Settings override should win — not the service command auto-discovery
+        override = host_settings.service_overrides["priority-agent"]
         assert override.command == ["custom-command"]

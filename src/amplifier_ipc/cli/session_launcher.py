@@ -19,8 +19,9 @@ from amplifier_ipc.host.definitions import ResolvedAgent, ServiceEntry, resolve_
 def build_session_config(resolved: ResolvedAgent) -> SessionConfig:
     """Build a SessionConfig from a ResolvedAgent.
 
-    Maps the resolved agent's service names, orchestrator, context_manager,
-    provider, and component_config to a SessionConfig suitable for the Host.
+    Maps the resolved agent's service refs (from ``(ref, ServiceEntry)`` tuples),
+    orchestrator, context_manager, provider, and component_config to a
+    SessionConfig suitable for the Host.
 
     Args:
         resolved: A fully resolved agent configuration.
@@ -29,7 +30,7 @@ def build_session_config(resolved: ResolvedAgent) -> SessionConfig:
         SessionConfig populated from the resolved agent fields.
     """
     return SessionConfig(
-        services=[svc.name for svc in resolved.services],
+        services=[ref for ref, _svc in resolved.services],
         orchestrator=resolved.orchestrator or "",
         context_manager=resolved.context_manager or "",
         provider=resolved.provider or "",
@@ -38,32 +39,28 @@ def build_session_config(resolved: ResolvedAgent) -> SessionConfig:
 
 
 def _build_service_overrides(
-    services: list[ServiceEntry],
+    services: list[tuple[str, ServiceEntry]],
     existing_overrides: dict[str, ServiceOverride],
 ) -> dict[str, ServiceOverride]:
-    """Build ServiceOverride entries for services that have a source path.
+    """Build ServiceOverride entries for services that have a command.
 
-    For each service with a non-empty ``source`` field, creates a
-    ``ServiceOverride`` that runs the service via
-    ``uv run --directory <source> <name>``.  Services already covered by
+    For each service with a non-empty ``command`` field, creates a
+    ``ServiceOverride`` keyed by the service ref.  Services already covered by
     *existing_overrides* are left unchanged (settings file takes priority).
 
     Args:
-        services: Resolved service entries, each optionally carrying a source path.
+        services: Resolved service entries as ``(ref, ServiceEntry)`` tuples.
         existing_overrides: Overrides already loaded from settings files.
 
     Returns:
         A merged dict of service overrides: existing_overrides plus any new
-        source-based entries (settings overrides take priority on conflict).
+        command-based entries (settings overrides take priority on conflict).
     """
     merged: dict[str, ServiceOverride] = dict(existing_overrides)
 
-    for svc in services:
-        if svc.source and svc.name not in merged:
-            merged[svc.name] = ServiceOverride(
-                command=["uv", "run", "--directory", svc.source, svc.name],
-                working_dir=svc.source,
-            )
+    for ref, svc in services:
+        if ref not in merged and svc.command:
+            merged[ref] = ServiceOverride(command=[svc.command], working_dir=None)
 
     return merged
 
