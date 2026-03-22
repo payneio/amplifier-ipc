@@ -67,7 +67,7 @@ async def test_describe_reports_zero_hooks() -> None:
 
 
 def test_stub_provider_files_exist() -> None:
-    """All 7 stub provider files must exist in the providers directory."""
+    """All 7 provider files must exist in the providers directory, including the full anthropic implementation."""
     pkg_dir = Path(amplifier_providers.__file__).parent  # type: ignore[arg-type]
     providers_dir = pkg_dir / "providers"
 
