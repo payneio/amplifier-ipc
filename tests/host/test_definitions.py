@@ -9,6 +9,7 @@ from amplifier_ipc.host.definitions import (
     BehaviorDefinition,
     ResolvedAgent,
     ServiceEntry,
+    _parse_service,
     _to_behavior_list,
     _to_bool,
     parse_agent_definition,
@@ -115,59 +116,184 @@ def test_to_behavior_list_mixed_list() -> None:
 
 
 # ---------------------------------------------------------------------------
-# parse_agent_definition / parse_behavior_definition integration tests
+# _parse_service unit tests
 # ---------------------------------------------------------------------------
 
 
-def test_parse_agent_definition_behaviors_dict_list_format() -> None:
-    """parse_agent_definition() preserves alias+url dicts from list-of-dicts behavior format."""
+def test_parse_service_returns_service_entry() -> None:
+    """_parse_service() returns a ServiceEntry when given a dict with service fields."""
+    data = {"stack": "uv", "source": "git+https://example.com/pkg", "command": "serve"}
+    svc = _parse_service(data)
+    assert isinstance(svc, ServiceEntry)
+    assert svc.stack == "uv"
+    assert svc.source == "git+https://example.com/pkg"
+    assert svc.command == "serve"
+
+
+def test_parse_service_returns_none_for_none() -> None:
+    """_parse_service() returns None for non-dict inputs (None, list, string)."""
+    assert _parse_service(None) is None
+    assert _parse_service([{"stack": "uv"}]) is None
+    assert _parse_service("string") is None
+    assert _parse_service(True) is None
+
+
+# ---------------------------------------------------------------------------
+# parse_agent_definition tests (nested format)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_agent_definition_nested_format() -> None:
+    """parse_agent_definition() reads all fields from nested agent: block."""
     yaml_content = """\
-type: agent
-local_ref: my-agent
-uuid: 12345678-abcd-ef00-0000-000000000001
-behaviors:
-  - modes: https://example.com/modes-behavior.yaml
-  - skills: https://example.com/skills-behavior.yaml
+agent:
+  ref: my-agent
+  uuid: 12345678-abcd-ef00-0000-000000000000
+  version: 1
+  description: A test agent
+  orchestrator: foundation:streaming
+  context_manager: foundation:simple
+  provider: anthropic
+  tools: true
+  hooks: true
+  agents: true
+  context: true
+  behaviors:
+    - some-behavior
+  service:
+    stack: uv
+    command: my-service
 """
     result = parse_agent_definition(yaml_content)
-    assert result.behaviors == [
-        {"modes": "https://example.com/modes-behavior.yaml"},
-        {"skills": "https://example.com/skills-behavior.yaml"},
-    ]
+    assert isinstance(result, AgentDefinition)
+    assert result.ref == "my-agent"
+    assert result.uuid == "12345678-abcd-ef00-0000-000000000000"
+    assert result.version == "1"
+    assert result.description == "A test agent"
+    assert result.orchestrator == "foundation:streaming"
+    assert result.context_manager == "foundation:simple"
+    assert result.provider == "anthropic"
+    assert result.tools is True
+    assert result.hooks is True
+    assert result.agents is True
+    assert result.context is True
+    assert result.behaviors == [{"ref": "some-behavior"}]
+    assert result.service is not None
+    assert result.service.stack == "uv"
+    assert result.service.command == "my-service"
 
 
-def test_parse_agent_definition_behaviors_plain_dict_format() -> None:
-    """parse_agent_definition() wraps a plain-dict behavior block as a list of alias+url dicts."""
+def test_parse_agent_definition_no_service() -> None:
+    """parse_agent_definition() sets service=None when no service block present."""
     yaml_content = """\
-type: agent
-local_ref: my-agent
-uuid: 12345678-abcd-ef00-0000-000000000002
-behaviors:
-  modes: https://example.com/modes-behavior.yaml
+agent:
+  ref: my-agent
+  uuid: 12345678-abcd-ef00-0000-000000000000
 """
     result = parse_agent_definition(yaml_content)
-    assert result.behaviors == [{"modes": "https://example.com/modes-behavior.yaml"}]
+    assert result.service is None
 
 
-def test_parse_behavior_definition_behaviors_dict_list_format() -> None:
-    """parse_behavior_definition() preserves alias+url dicts from list-of-dicts nested behavior format."""
+def test_parse_agent_definition_empty_behaviors() -> None:
+    """parse_agent_definition() returns empty behaviors list when behaviors not specified."""
     yaml_content = """\
-type: behavior
-local_ref: my-behavior
-uuid: abcdefab-0000-0000-0000-000000000001
-behaviors:
-  - tools: https://example.com/tools-behavior.yaml
-  - context: https://example.com/context-behavior.yaml
+agent:
+  ref: my-agent
+"""
+    result = parse_agent_definition(yaml_content)
+    assert result.behaviors == []
+
+
+def test_parse_agent_definition_with_config() -> None:
+    """parse_agent_definition() reads component_config from the component_config: key."""
+    yaml_content = """\
+agent:
+  ref: my-agent
+  component_config:
+    model: gpt-4
+    temperature: 0.7
+"""
+    result = parse_agent_definition(yaml_content)
+    assert result.component_config == {"model": "gpt-4", "temperature": 0.7}
+
+
+# ---------------------------------------------------------------------------
+# parse_behavior_definition tests (nested format)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_behavior_definition_nested_format() -> None:
+    """parse_behavior_definition() reads all fields from nested behavior: block."""
+    yaml_content = """\
+behavior:
+  ref: my-behavior
+  uuid: abcdefab-0000-0000-0000-000000000000
+  version: 2
+  description: A test behavior
+  tools: true
+  hooks: true
+  context: true
+  service:
+    stack: uv
+    source: https://example.com/service
+    command: behavior-service
+"""
+    result = parse_behavior_definition(yaml_content)
+    assert isinstance(result, BehaviorDefinition)
+    assert result.ref == "my-behavior"
+    assert result.uuid == "abcdefab-0000-0000-0000-000000000000"
+    assert result.version == "2"
+    assert result.description == "A test behavior"
+    assert result.tools is True
+    assert result.hooks is True
+    assert result.context is True
+    assert result.service is not None
+    assert result.service.stack == "uv"
+    assert result.service.source == "https://example.com/service"
+    assert result.service.command == "behavior-service"
+
+
+def test_parse_behavior_definition_no_service() -> None:
+    """parse_behavior_definition() sets service=None when no service block present."""
+    yaml_content = """\
+behavior:
+  ref: my-behavior
+"""
+    result = parse_behavior_definition(yaml_content)
+    assert result.service is None
+
+
+def test_parse_behavior_definition_with_config() -> None:
+    """parse_behavior_definition() reads component_config from the config: key."""
+    yaml_content = """\
+behavior:
+  ref: my-behavior
+  config:
+    timeout: 30
+    retries: 3
+"""
+    result = parse_behavior_definition(yaml_content)
+    assert result.component_config == {"timeout": 30, "retries": 3}
+
+
+def test_parse_behavior_definition_with_sub_behaviors() -> None:
+    """parse_behavior_definition() parses nested behaviors list-of-dicts correctly."""
+    yaml_content = """\
+behavior:
+  ref: my-behavior
+  behaviors:
+    - tools: https://example.com/tools.yaml
+    - context: https://example.com/context.yaml
 """
     result = parse_behavior_definition(yaml_content)
     assert result.behaviors == [
-        {"tools": "https://example.com/tools-behavior.yaml"},
-        {"context": "https://example.com/context-behavior.yaml"},
+        {"tools": "https://example.com/tools.yaml"},
+        {"context": "https://example.com/context.yaml"},
     ]
 
 
 # ---------------------------------------------------------------------------
-# resolve_agent integration test with dict-format behaviors
+# resolve_agent integration tests (kept for Task 6)
 # ---------------------------------------------------------------------------
 
 
@@ -202,65 +328,6 @@ behaviors:
     assert isinstance(result, ResolvedAgent)
     service_commands = [s.command for s in result.services]
     assert "behavior-service" in service_commands
-
-
-def test_parse_agent_definition_basic() -> None:
-    """parse_agent_definition() correctly parses a minimal agent YAML."""
-    yaml_content = """\
-type: agent
-local_ref: my-agent
-uuid: 12345678-abcd-ef00-0000-000000000000
-version: 1
-description: A test agent
-orchestrator: default
-provider: anthropic
-behaviors:
-  - some-behavior
-services:
-  - stack: pip
-    command: my-service
-"""
-
-    result = parse_agent_definition(yaml_content)
-
-    assert isinstance(result, AgentDefinition)
-    assert result.ref == "my-agent"
-    assert result.uuid == "12345678-abcd-ef00-0000-000000000000"
-    assert result.version == "1"
-    assert result.description == "A test agent"
-    assert result.orchestrator == "default"
-    assert result.provider == "anthropic"
-    assert result.behaviors == [{"ref": "some-behavior"}]
-    assert result.service is not None
-    assert result.service.command == "my-service"
-    assert result.service.stack == "pip"
-
-
-def test_parse_behavior_definition_basic() -> None:
-    """parse_behavior_definition() correctly parses a minimal behavior YAML."""
-    yaml_content = """\
-type: behavior
-local_ref: my-behavior
-uuid: abcdefab-0000-0000-0000-000000000000
-version: 2
-description: A test behavior
-services:
-  - command: behavior-service
-    source: https://example.com/service
-tools: true
-"""
-
-    result = parse_behavior_definition(yaml_content)
-
-    assert isinstance(result, BehaviorDefinition)
-    assert result.ref == "my-behavior"
-    assert result.uuid == "abcdefab-0000-0000-0000-000000000000"
-    assert result.version == "2"
-    assert result.description == "A test behavior"
-    assert result.service is not None
-    assert result.service.command == "behavior-service"
-    assert result.service.source == "https://example.com/service"
-    assert result.tools is True
 
 
 async def test_resolve_agent_deduplicates_services(tmp_path) -> None:
@@ -312,63 +379,6 @@ services:
     assert "behavior-only-service" in service_commands
 
 
-def test_parse_agent_definition_tools_bool_true() -> None:
-    """parse_agent_definition() handles boolean shorthand (tools: true) as bool True.
-
-    'true' means the capability is enabled — stored as bool True.
-    Same for hooks, agents, and context.
-    """
-    yaml_content = """\
-type: agent
-local_ref: foundation
-uuid: 3898a638-71de-427a-8183-b80eba8b26be
-orchestrator: foundation:streaming
-context_manager: foundation:simple
-provider: providers:anthropic
-tools: true
-hooks: true
-agents: true
-context: true
-"""
-    result = parse_agent_definition(yaml_content)
-
-    assert result.tools is True
-    assert result.hooks is True
-    assert result.agents is True
-    assert result.context is True
-
-
-def test_parse_agent_definition_tools_bool_false() -> None:
-    """parse_agent_definition() handles 'false' booleans — stored as bool False."""
-    yaml_content = """\
-type: agent
-local_ref: my-agent
-uuid: 12345678-abcd-ef00-0000-000000000000
-tools: false
-hooks: false
-"""
-    result = parse_agent_definition(yaml_content)
-    assert result.tools is False
-    assert result.hooks is False
-
-
-def test_parse_behavior_definition_tools_bool_true() -> None:
-    """parse_behavior_definition() handles boolean shorthand (tools: true) as bool True."""
-    yaml_content = """\
-type: behavior
-local_ref: my-behavior
-uuid: bbbbbbbb-0000-0000-0000-000000000000
-tools: true
-hooks: true
-context: true
-"""
-    result = parse_behavior_definition(yaml_content)
-
-    assert result.tools is True
-    assert result.hooks is True
-    assert result.context is True
-
-
 async def test_resolve_agent_unknown_raises(tmp_path) -> None:
     """resolve_agent() raises FileNotFoundError for an unregistered agent."""
     registry = Registry(home=tmp_path / "amplifier_home")
@@ -376,6 +386,11 @@ async def test_resolve_agent_unknown_raises(tmp_path) -> None:
 
     with pytest.raises(FileNotFoundError, match="nonexistent-agent"):
         await resolve_agent(registry, "nonexistent-agent")
+
+
+# ---------------------------------------------------------------------------
+# Dataclass structure tests
+# ---------------------------------------------------------------------------
 
 
 def test_agent_definition_has_ref_not_local_ref() -> None:
@@ -399,43 +414,4 @@ def test_behavior_definition_has_ref_not_local_ref() -> None:
     )
     assert not hasattr(behavior, "type"), (
         "BehaviorDefinition should not have a 'type' attribute"
-    )
-
-
-def test_relative_source_resolved_against_definition_dir(tmp_path) -> None:
-    """parse_agent_definition() resolves relative source paths against the definition file's dir.
-
-    Creates a tmp_path structure with definitions/ and services/ dirs,
-    parses YAML with relative source '../services/my-service', and verifies
-    the resolved path is absolute and points to the correct directory.
-    """
-    from pathlib import Path
-
-    # Set up directory structure
-    definitions_dir = tmp_path / "definitions"
-    definitions_dir.mkdir()
-    service_dir = tmp_path / "services" / "my-service"
-    service_dir.mkdir(parents=True)
-
-    # Write the definition YAML file with a relative source path
-    yaml_content = """\
-type: agent
-local_ref: my-agent
-uuid: 12345678-abcd-ef00-0000-000000000000
-services:
-  - source: ../services/my-service
-"""
-    definition_path = definitions_dir / "my-agent.yaml"
-    definition_path.write_text(yaml_content)
-
-    # Parse with path so relative sources are resolved
-    result = parse_agent_definition(yaml_content, path=definition_path)
-
-    assert result.service is not None
-    svc = result.service
-    assert svc.source is not None
-    resolved = Path(svc.source)
-    assert resolved.is_absolute(), f"Expected absolute path, got: {svc.source}"
-    assert resolved == service_dir.resolve(), (
-        f"Expected {service_dir.resolve()}, got {resolved}"
     )

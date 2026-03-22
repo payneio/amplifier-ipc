@@ -5,7 +5,6 @@ import logging
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import yaml
@@ -128,81 +127,41 @@ def _to_behavior_list(value: Any) -> list[dict[str, str]]:
     return result
 
 
-def _to_dict(value: Any) -> dict[str, Any]:
-    """Coerce a YAML value to a dict.
-
-    Handles boolean shorthand:
-    - ``True``  → empty dict (sentinel meaning "all context")
-    - ``False`` → empty dict
-    - ``None``  → empty dict
-    - dict      → the dict as-is
-    """
-    if isinstance(value, bool) or value is None or not isinstance(value, dict):
-        return {}
-    return dict(value)
-
-
 def _parse_service(service_data: Any) -> ServiceEntry | None:
-    """Parse a service dict or the first entry of a legacy services list.
-
-    Accepts:
-    - A single ``{stack, source, command}`` dict (new singular format).
-    - A list of dicts (legacy ``services:`` list) — only the first item is used.
-    - ``None`` / falsy → returns ``None``.
+    """Parse a service dict into a ServiceEntry.
 
     Args:
-        service_data: Raw YAML value for the ``service:`` (or ``services:``) key.
+        service_data: Raw YAML value for the ``service:`` key.
 
     Returns:
-        A single ``ServiceEntry`` or ``None``.
+        A ``ServiceEntry`` when given a dict, otherwise ``None``.
     """
-    if not service_data:
+    if not isinstance(service_data, dict):
         return None
-    if isinstance(service_data, dict):
-        return ServiceEntry(
-            stack=service_data.get("stack"),
-            source=service_data.get("source"),
-            command=service_data.get("command"),
-        )
-    # Legacy list format — use first entry only.
-    if isinstance(service_data, list):
-        for item in service_data:
-            if isinstance(item, dict):
-                return ServiceEntry(
-                    stack=item.get("stack"),
-                    source=item.get("source"),
-                    command=item.get("command"),
-                )
-    return None
+    return ServiceEntry(
+        stack=service_data.get("stack"),
+        source=service_data.get("source"),
+        command=service_data.get("command"),
+    )
 
 
-def parse_agent_definition(
-    yaml_content: str,
-    path: Path | None = None,
-) -> AgentDefinition:
+def parse_agent_definition(yaml_content: str) -> AgentDefinition:
     """Parse a YAML string into an AgentDefinition.
+
+    Expects the nested format with ``agent:`` as the top-level key.
 
     Args:
         yaml_content: YAML text of an agent definition file.
-        path: Optional path to the definition file. When provided, relative
-              ``source`` paths in the service block are resolved against this
-              file's parent directory.
 
     Returns:
         AgentDefinition populated from the YAML content.
     """
-    data: dict[str, Any] = yaml.safe_load(yaml_content) or {}
-    # Support both new singular ``service:`` key and legacy ``services:`` list.
-    service_raw = data.get("service") or data.get("services")
-    service = _parse_service(service_raw)
-    if service is not None and path is not None:
-        svc_source = service.source
-        if svc_source and not Path(svc_source).is_absolute():
-            service.source = str((path.parent / svc_source).resolve())
-    # Support both new ``ref:`` key and legacy ``local_ref:`` key.
-    ref = data.get("ref") or data.get("local_ref")
+    raw: dict[str, Any] = yaml.safe_load(yaml_content) or {}
+    data: dict[str, Any] = raw.get("agent") or {}
+    config = data.get("component_config")
+    component_config: dict[str, Any] = config if isinstance(config, dict) else {}
     return AgentDefinition(
-        ref=ref,
+        ref=data.get("ref"),
         uuid=data.get("uuid"),
         version=str(data["version"]) if data.get("version") is not None else None,
         description=data.get("description"),
@@ -214,13 +173,15 @@ def parse_agent_definition(
         agents=_to_bool(data.get("agents")),
         context=_to_bool(data.get("context")),
         behaviors=_to_behavior_list(data.get("behaviors")),
-        service=service,
-        component_config=_to_dict(data.get("component_config")),
+        service=_parse_service(data.get("service")),
+        component_config=component_config,
     )
 
 
 def parse_behavior_definition(yaml_content: str) -> BehaviorDefinition:
     """Parse a YAML string into a BehaviorDefinition.
+
+    Expects the nested format with ``behavior:`` as the top-level key.
 
     Args:
         yaml_content: YAML text of a behavior definition file.
@@ -228,13 +189,12 @@ def parse_behavior_definition(yaml_content: str) -> BehaviorDefinition:
     Returns:
         BehaviorDefinition populated from the YAML content.
     """
-    data: dict[str, Any] = yaml.safe_load(yaml_content) or {}
-    # Support both new ``ref:`` key and legacy ``local_ref:`` key.
-    ref = data.get("ref") or data.get("local_ref")
-    # Support both new singular ``service:`` key and legacy ``services:`` list.
-    service_raw = data.get("service") or data.get("services")
+    raw: dict[str, Any] = yaml.safe_load(yaml_content) or {}
+    data: dict[str, Any] = raw.get("behavior") or {}
+    config = data.get("config")
+    component_config: dict[str, Any] = config if isinstance(config, dict) else {}
     return BehaviorDefinition(
-        ref=ref,
+        ref=data.get("ref"),
         uuid=data.get("uuid"),
         version=str(data["version"]) if data.get("version") is not None else None,
         description=data.get("description"),
@@ -242,8 +202,8 @@ def parse_behavior_definition(yaml_content: str) -> BehaviorDefinition:
         hooks=_to_bool(data.get("hooks")),
         context=_to_bool(data.get("context")),
         behaviors=_to_behavior_list(data.get("behaviors")),
-        service=_parse_service(service_raw),
-        component_config=_to_dict(data.get("component_config")),
+        service=_parse_service(data.get("service")),
+        component_config=component_config,
     )
 
 
@@ -273,7 +233,7 @@ async def resolve_agent(
     agent_path = registry.resolve_agent(agent_name)
 
     # Step 2: Parse agent definition YAML.
-    agent_def = parse_agent_definition(agent_path.read_text(), path=agent_path)
+    agent_def = parse_agent_definition(agent_path.read_text())
 
     # Step 3: Collect service from agent, keyed by identity for deduplication.
     services_by_key: dict[tuple[str | None, str | None, str | None], ServiceEntry] = {}
