@@ -1,6 +1,25 @@
-includes:
-- foundation/default
+type: agent
+local_ref: amplifier-dev
+uuid: 52d19e87-24ba-4291-a872-69d963b96ce9
+version: 1
+description: Amplifier development agent with full foundation capabilities
 
-session:
-  tools:
-  - class: amplifier_foundation.tools.bundle_shadow.ShadowTool
+orchestrator: streaming
+context_manager: simple
+provider: anthropic
+
+tools: true
+hooks: true
+agents: true
+context: true
+
+behaviors:
+  - modes
+  - skills
+  - routing
+
+services:
+  - name: amplifier-foundation-serve
+    source: ..
+  - name: amplifier-providers-serve
+    source: ../../amplifier-providers
