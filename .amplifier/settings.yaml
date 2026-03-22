@@ -1,8 +1,0 @@
-# amplifier_ipc:
-#   service_overrides:
-#     amplifier-foundation-serve:
-#       command:
-#         - /data/labs/amplifier-lite/amplifier-ipc/amplifier-ipc-cli/.venv/bin/amplifier-foundation-serve
-#     amplifier-providers-serve:
-#       command:
-#         - /data/labs/amplifier-lite/amplifier-ipc/amplifier-ipc-cli/.venv/bin/amplifier-providers-serve
