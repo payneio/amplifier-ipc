@@ -181,3 +181,43 @@ async def test_resolve_agent_unknown_raises(tmp_path) -> None:
 
     with pytest.raises(FileNotFoundError, match="nonexistent-agent"):
         await resolve_agent(registry, "nonexistent-agent")
+
+
+def test_relative_source_resolved_against_definition_dir(tmp_path) -> None:
+    """parse_agent_definition() resolves relative source paths against the definition file's dir.
+
+    Creates a tmp_path structure with definitions/ and services/ dirs,
+    parses YAML with relative source '../services/my-service', and verifies
+    the resolved path is absolute and points to the correct directory.
+    """
+    from pathlib import Path
+
+    # Set up directory structure
+    definitions_dir = tmp_path / "definitions"
+    definitions_dir.mkdir()
+    service_dir = tmp_path / "services" / "my-service"
+    service_dir.mkdir(parents=True)
+
+    # Write the definition YAML file with a relative source path
+    yaml_content = """\
+type: agent
+local_ref: my-agent
+uuid: 12345678-abcd-ef00-0000-000000000000
+services:
+  - name: my-service
+    source: ../services/my-service
+"""
+    definition_path = definitions_dir / "my-agent.yaml"
+    definition_path.write_text(yaml_content)
+
+    # Parse with path so relative sources are resolved
+    result = parse_agent_definition(yaml_content, path=definition_path)
+
+    assert len(result.services) == 1
+    svc = result.services[0]
+    assert svc.source is not None
+    resolved = Path(svc.source)
+    assert resolved.is_absolute(), f"Expected absolute path, got: {svc.source}"
+    assert resolved == service_dir.resolve(), (
+        f"Expected {service_dir.resolve()}, got {resolved}"
+    )

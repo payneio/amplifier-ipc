@@ -18,6 +18,6 @@ context: true
 
 services:
   - name: amplifier-foundation-serve
-    source: /data/labs/amplifier-lite/amplifier-ipc/services/amplifier-foundation
+    source: ../services/amplifier-foundation
   - name: amplifier-providers-serve
-    source: /data/labs/amplifier-lite/amplifier-ipc/services/amplifier-providers
+    source: ../services/amplifier-providers

@@ -5,6 +5,7 @@ import logging
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -145,16 +146,28 @@ def _parse_services(services_data: Any) -> list[ServiceEntry]:
     return result
 
 
-def parse_agent_definition(yaml_content: str) -> AgentDefinition:
+def parse_agent_definition(
+    yaml_content: str,
+    path: Path | None = None,
+) -> AgentDefinition:
     """Parse a YAML string into an AgentDefinition.
 
     Args:
         yaml_content: YAML text of an agent definition file.
+        path: Optional path to the definition file. When provided, relative
+              ``source`` paths in services are resolved against this file's
+              parent directory.
 
     Returns:
         AgentDefinition populated from the YAML content.
     """
     data: dict[str, Any] = yaml.safe_load(yaml_content) or {}
+    services = _parse_services(data.get("services"))
+    if path is not None:
+        for svc in services:
+            svc_source = svc.source
+            if svc_source and not Path(svc_source).is_absolute():
+                svc.source = str((path.parent / svc_source).resolve())
     return AgentDefinition(
         type=data.get("type", "agent"),
         local_ref=data.get("local_ref"),
@@ -165,7 +178,7 @@ def parse_agent_definition(yaml_content: str) -> AgentDefinition:
         context_manager=data.get("context_manager"),
         provider=data.get("provider"),
         behaviors=_to_str_list(data.get("behaviors")),
-        services=_parse_services(data.get("services")),
+        services=services,
         tools=_to_str_list(data.get("tools")),
         hooks=_to_str_list(data.get("hooks")),
         context=_to_dict(data.get("context")),
@@ -224,7 +237,7 @@ async def resolve_agent(
     agent_path = registry.resolve_agent(agent_name)
 
     # Step 2: Parse agent definition YAML.
-    agent_def = parse_agent_definition(agent_path.read_text())
+    agent_def = parse_agent_definition(agent_path.read_text(), path=agent_path)
 
     # Step 3: Collect services from agent, keyed by name for deduplication.
     services_by_name: dict[str, ServiceEntry] = {}
