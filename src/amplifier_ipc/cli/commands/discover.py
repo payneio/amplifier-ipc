@@ -105,8 +105,8 @@ def scan_location(location: str) -> list[dict[str, Any]]:
     """Recursively scan a filesystem path for agent and behavior YAML definitions.
 
     Walks ``location`` recursively and inspects every ``.yaml`` / ``.yml``
-    file.  Files whose parsed content contains a ``type`` key equal to
-    ``"agent"`` or ``"behavior"`` are included in the result.
+    file.  Files whose top-level YAML key is ``agent`` or ``behavior``
+    are included in the result.
 
     Args:
         location: Absolute or relative path to a directory to scan.
@@ -114,7 +114,7 @@ def scan_location(location: str) -> list[dict[str, Any]]:
     Returns:
         List of dicts, each containing at minimum:
         - ``type``: ``"agent"`` or ``"behavior"``
-        - ``local_ref``: value of the ``local_ref`` field (may be empty string)
+        - ``ref``: value of the ``ref`` field (may be empty string)
         - ``path``: absolute path to the YAML file
         - ``raw_content``: raw text content of the YAML file
     """
