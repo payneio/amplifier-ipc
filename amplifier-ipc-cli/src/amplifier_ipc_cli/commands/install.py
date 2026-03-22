@@ -48,7 +48,10 @@ def install_service(
     env_path: Path = registry.get_environment_path(definition_id)
     python_path = env_path / "bin" / "python"
 
-    _run_uv(["venv", str(env_path)])
+    venv_args = ["venv", str(env_path)]
+    if force:
+        venv_args.append("--clear")
+    _run_uv(venv_args)
     _run_uv(["pip", "install", "--python", str(python_path), source])
 
 
