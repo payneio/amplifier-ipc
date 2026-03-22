@@ -226,7 +226,7 @@ async def resolve_agent(
     """Resolve an agent by walking its behavior tree and collecting services.
 
     Looks up the agent definition, collects its services, then recursively
-    walks the behavior tree collecting and deduplicating services by name.
+    walks the behavior tree collecting and deduplicating services by identity (stack, source, command).
 
     Args:
         registry: Registry instance used to resolve agent and behavior paths.

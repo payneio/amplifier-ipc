@@ -361,8 +361,7 @@ type: agent
 local_ref: my-agent
 uuid: 12345678-abcd-ef00-0000-000000000000
 services:
-  - name: my-service
-    source: ../services/my-service
+  - source: ../services/my-service
 """
     definition_path = definitions_dir / "my-agent.yaml"
     definition_path.write_text(yaml_content)
