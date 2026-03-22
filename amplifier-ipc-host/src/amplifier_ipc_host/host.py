@@ -78,10 +78,23 @@ class Host:
         self._provider_notification_queue: asyncio.Queue[dict[str, Any]] = (
             asyncio.Queue()
         )
+        self._approval_queue: asyncio.Queue[bool] = asyncio.Queue()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def send_approval(self, approved: bool) -> None:
+        """Submit an approval decision to unblock the orchestrator loop.
+
+        Called by the CLI when an :class:`~amplifier_ipc_host.events.ApprovalRequestEvent`
+        is received.  The orchestrator loop awaits this value after yielding
+        the event, so calling this method unblocks it.
+
+        Args:
+            approved: ``True`` to approve the pending action, ``False`` to deny.
+        """
+        self._approval_queue.put_nowait(approved)
 
     async def run(self, prompt: str) -> AsyncIterator[HostEvent]:
         """Execute a full session turn, yielding events as they occur.
@@ -472,10 +485,12 @@ class Host:
                 index = params.get("index", 0)
                 yield StreamContentBlockEndEvent(block_type=block_type, index=index)
 
-            # Approval request notification
+            # Approval request notification — yield event, then wait for the
+            # CLI to call send_approval() before continuing the loop.
             elif method == "approval_request":
                 params = message.get("params") or {}
                 yield ApprovalRequestEvent(params=params)
+                await self._approval_queue.get()
 
             # Error notification (non-fatal)
             elif method == "error":

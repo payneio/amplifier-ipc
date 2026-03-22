@@ -9,6 +9,7 @@ import pytest
 
 from amplifier_ipc_host.config import HostSettings, SessionConfig
 from amplifier_ipc_host.events import (
+    ApprovalRequestEvent,
     CompleteEvent,
     StreamContentBlockEndEvent,
     StreamContentBlockStartEvent,
@@ -614,3 +615,97 @@ async def test_orchestrator_loop_yields_content_block_events() -> None:
     assert events[2].index == 0
     assert isinstance(events[3], CompleteEvent)
     assert events[3].result == "Hello"
+
+
+async def test_host_send_approval_unblocks_loop() -> None:
+    """Host yields ApprovalRequestEvent with correct params, consumer calls
+    send_approval(True), loop continues to yield CompleteEvent.
+
+    The _orchestrator_loop must block waiting for send_approval() after
+    yielding the ApprovalRequestEvent.  send_approval() uses put_nowait()
+    so it is non-blocking on the caller side.
+    """
+    config = SessionConfig(
+        services=["orch"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+
+    host = Host(config=config, settings=settings)
+
+    fake_process = MagicMock()
+    fake_process.stdin = MagicMock()
+    fake_process.stdout = MagicMock()
+
+    fake_service = MagicMock()
+    fake_service.process = fake_process
+    host._services = {"orch": fake_service}
+
+    captured_id: list[str] = []
+
+    async def fake_write(stream: object, message: dict) -> None:  # type: ignore[type-arg]
+        if message.get("method") == "orchestrator.execute":
+            captured_id.append(message["id"])
+
+    read_call_count = 0
+
+    async def fake_read(stream: object) -> dict | None:  # type: ignore[type-arg]
+        nonlocal read_call_count
+        read_call_count += 1
+        if read_call_count == 1:
+            return {
+                "jsonrpc": "2.0",
+                "method": "approval_request",
+                "params": {"tool_name": "bash"},
+            }
+        else:
+            # Final response matching execute_id
+            return {
+                "jsonrpc": "2.0",
+                "id": captured_id[0],
+                "result": "done",
+            }
+
+    with (
+        patch("amplifier_ipc_host.host.write_message", fake_write),
+        patch("amplifier_ipc_host.host.read_message", fake_read),
+    ):
+        events = []
+        async for event in host._orchestrator_loop(
+            orchestrator_key="orch",
+            prompt="hello",
+            system_prompt="be helpful",
+        ):
+            events.append(event)
+            if isinstance(event, ApprovalRequestEvent):
+                # Consumer unblocks the loop by calling send_approval
+                host.send_approval(True)
+
+    assert len(events) == 2
+    assert isinstance(events[0], ApprovalRequestEvent)
+    assert events[0].params == {"tool_name": "bash"}
+    assert isinstance(events[1], CompleteEvent)
+    assert events[1].result == "done"
+
+
+async def test_host_send_approval_is_non_blocking() -> None:
+    """send_approval() is non-blocking (uses put_nowait under the hood)."""
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+
+    host = Host(config=config, settings=settings)
+
+    # Calling send_approval should not block or raise
+    host.send_approval(True)
+    host.send_approval(False)
+
+    # Queue should have both values
+    assert host._approval_queue.get_nowait() is True
+    assert host._approval_queue.get_nowait() is False
