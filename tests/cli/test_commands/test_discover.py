@@ -46,7 +46,7 @@ class TestScanLocationFindsAgentYaml:
     def test_scan_location_finds_agent_yaml(
         self, tmp_path: Path, agent_yaml_content: str
     ) -> None:
-        """scan_location finds a .yaml file with type: agent."""
+        """scan_location finds a .yaml file with agent: top-level key."""
         from amplifier_ipc.cli.commands.discover import scan_location
 
         agent_file = tmp_path / "my_agent.yaml"
@@ -66,7 +66,7 @@ class TestScanLocationFindsBehaviorYaml:
     def test_scan_location_finds_behavior_yaml(
         self, tmp_path: Path, behavior_yaml_content: str
     ) -> None:
-        """scan_location finds a .yaml file with type: behavior."""
+        """scan_location finds a .yaml file with behavior: top-level key."""
         from amplifier_ipc.cli.commands.discover import scan_location
 
         behavior_file = tmp_path / "my_behavior.yml"
@@ -112,7 +112,7 @@ class TestScanLocationEmptyDirectory:
         assert results == []
 
     def test_scan_location_ignores_non_definition_yaml(self, tmp_path: Path) -> None:
-        """scan_location ignores YAML files that have no type: agent/behavior."""
+        """scan_location ignores YAML files that have no agent:/behavior: top-level key."""
         from amplifier_ipc.cli.commands.discover import scan_location
 
         random_yaml = tmp_path / "config.yaml"
@@ -160,8 +160,8 @@ class TestDiscoverLocalPath:
             f"Exit code: {result.exit_code}\nOutput: {result.output}\n"
             f"Exception: {result.exception}"
         )
-        # Should report found definitions
-        assert "my-agent" in result.output or "agent" in result.output
+        # Should report found definitions with the ref value
+        assert "my-agent" in result.output
 
 
 class TestDiscoverWithRegister:
