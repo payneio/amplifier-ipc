@@ -798,7 +798,9 @@ class TestExtendedThinking:
         mock_client.messages.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
-        request = ChatRequest(messages=[Message(role="user", content="Think carefully.")])
+        request = ChatRequest(
+            messages=[Message(role="user", content="Think carefully.")]
+        )
         await provider.complete(request)
 
         call_kwargs = mock_client.messages.create.call_args.kwargs

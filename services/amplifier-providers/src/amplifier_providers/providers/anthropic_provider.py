@@ -1,8 +1,10 @@
-"""Anthropic provider — message conversion and API integration.
+"""Anthropic provider — full production implementation for the amplifier-providers IPC service.
 
-Implements _convert_messages() to translate Amplifier's internal Message
-representation into the format required by Anthropic's Messages API.
-complete() is a placeholder; full streaming implementation is in Task 4.
+Provides AnthropicProvider with: message and tool conversion (Amplifier ↔ Anthropic
+Messages API formats), complete() with tool-result repair and extended thinking support,
+exponential-backoff retry logic with jitter, and pre-emptive rate-limit throttling via
+_RateLimitState. ProviderError and retry_with_backoff are also available as module-level
+utilities for callers that need them directly.
 """
 
 from __future__ import annotations
