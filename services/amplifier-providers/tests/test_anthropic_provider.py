@@ -1,10 +1,14 @@
 """Tests for AnthropicProvider._convert_messages() and related methods."""
 
+# ruff: noqa: E402  — pytest.importorskip must precede all other imports
 from __future__ import annotations
 
-import anthropic
-import httpx
 import pytest
+
+# Skip entire module if anthropic SDK is not installed (optional dependency)
+anthropic = pytest.importorskip("anthropic")
+
+import httpx
 
 from amplifier_ipc_protocol import ChatRequest, ChatResponse, Message
 from amplifier_ipc_protocol.models import (
