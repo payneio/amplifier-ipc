@@ -65,6 +65,10 @@ class Server:
             if name:
                 self._tools[name] = tool_instance
 
+        # Tracks the active orchestrator's IPC client during orchestrator.execute,
+        # so tools can use it to make delegate/task calls back to the host.
+        self._current_orchestrator_client: Any = None
+
         # Build _hooks: event -> list of instances sorted by priority (ascending)
         self._hooks: dict[str, list[Any]] = {}
         # Keep an ordered, deduplicated list of all hook instances for describe
@@ -241,11 +245,13 @@ class Server:
         client = _OrchestratorLocalClient(
             server=self, ipc_reader=reader, ipc_writer=writer
         )
+        self._current_orchestrator_client = client
         try:
             return await orch_instance.execute(
                 prompt=prompt, config=config, client=client
             )
         finally:
+            self._current_orchestrator_client = None
             # Cancel any background IPC read task started by the local client.
             ipc = client._ipc_client
             if (
@@ -400,6 +406,11 @@ class Server:
             raise JsonRpcError(INVALID_PARAMS, f"Unknown tool: {name!r}")
 
         input_data: dict[str, Any] = params.get("input", {})
+        if (
+            hasattr(tool_instance, "client")
+            and self._current_orchestrator_client is not None
+        ):
+            tool_instance.client = self._current_orchestrator_client
         result = await tool_instance.execute(input_data)
 
         if isinstance(result, BaseModel):
