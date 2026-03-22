@@ -36,11 +36,11 @@ async def _fetch_url(url: str) -> str:
 
 @dataclass
 class ServiceEntry:
-    """Represents a service dependency required by an agent or behavior."""
+    """Represents the service block from a definition file."""
 
-    name: str
-    installer: str | None = None
+    stack: str | None = None
     source: str | None = None
+    command: str | None = None
 
 
 @dataclass
@@ -137,9 +137,6 @@ def _parse_services(services_data: Any) -> list[ServiceEntry]:
 
     Returns:
         List of ServiceEntry instances. Empty list if services_data is None/empty.
-
-    Raises:
-        KeyError: If a service dict is missing the required 'name' key.
     """
     if not services_data:
         return []
@@ -148,9 +145,9 @@ def _parse_services(services_data: Any) -> list[ServiceEntry]:
         if isinstance(item, dict):
             result.append(
                 ServiceEntry(
-                    name=item["name"],
-                    installer=item.get("installer"),
+                    stack=item.get("stack"),
                     source=item.get("source"),
+                    command=item.get("command"),
                 )
             )
     return result
@@ -249,11 +246,12 @@ async def resolve_agent(
     # Step 2: Parse agent definition YAML.
     agent_def = parse_agent_definition(agent_path.read_text(), path=agent_path)
 
-    # Step 3: Collect services from agent, keyed by name for deduplication.
-    services_by_name: dict[str, ServiceEntry] = {}
+    # Step 3: Collect services from agent, keyed by identity for deduplication.
+    services_by_key: dict[tuple[str | None, str | None, str | None], ServiceEntry] = {}
     for svc in agent_def.services:
-        if svc.name not in services_by_name:
-            services_by_name[svc.name] = svc
+        key = (svc.stack, svc.source, svc.command)
+        if key not in services_by_key:
+            services_by_key[key] = svc
 
     visited_behaviors: set[str] = set()
 
@@ -300,10 +298,11 @@ async def resolve_agent(
         # Parse the behavior definition.
         behavior_def = parse_behavior_definition(behavior_path.read_text())
 
-        # Collect services, deduplicating by name.
+        # Collect services, deduplicating by identity.
         for svc in behavior_def.services:
-            if svc.name not in services_by_name:
-                services_by_name[svc.name] = svc
+            key = (svc.stack, svc.source, svc.command)
+            if key not in services_by_key:
+                services_by_key[key] = svc
 
         # Recurse into nested behaviors.
         for nested_behavior in behavior_def.behaviors:
@@ -320,7 +319,7 @@ async def resolve_agent(
 
     # Step 6: Return ResolvedAgent.
     return ResolvedAgent(
-        services=list(services_by_name.values()),
+        services=list(services_by_key.values()),
         orchestrator=agent_def.orchestrator,
         context_manager=agent_def.context_manager,
         provider=agent_def.provider,

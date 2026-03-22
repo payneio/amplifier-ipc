@@ -8,12 +8,34 @@ from amplifier_ipc.host.definitions import (
     AgentDefinition,
     BehaviorDefinition,
     ResolvedAgent,
+    ServiceEntry,
     _to_str_list,
     parse_agent_definition,
     parse_behavior_definition,
     resolve_agent,
 )
 from amplifier_ipc.host.definition_registry import Registry
+
+
+# ---------------------------------------------------------------------------
+# ServiceEntry dataclass tests
+# ---------------------------------------------------------------------------
+
+
+def test_service_entry_has_stack_and_command_fields() -> None:
+    """ServiceEntry has stack, source, command fields (all optional str), not name/installer."""
+    svc = ServiceEntry(
+        stack="uv", source="git+https://example.com/pkg", command="my-serve"
+    )
+
+    assert svc.stack == "uv"
+    assert svc.source == "git+https://example.com/pkg"
+    assert svc.command == "my-serve"
+
+    assert not hasattr(svc, "name"), "ServiceEntry should not have a 'name' attribute"
+    assert not hasattr(svc, "installer"), (
+        "ServiceEntry should not have an 'installer' attribute"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -128,8 +150,8 @@ type: behavior
 local_ref: my-behavior
 uuid: cccccccc-0000-0000-0000-000000000000
 services:
-  - name: behavior-service
-    installer: pip
+  - stack: uv
+    command: behavior-service
 """
     registry.register_definition(behavior_yaml)
 
@@ -146,8 +168,8 @@ behaviors:
     result = await resolve_agent(registry, "my-agent")
 
     assert isinstance(result, ResolvedAgent)
-    service_names = [s.name for s in result.services]
-    assert "behavior-service" in service_names
+    service_commands = [s.command for s in result.services]
+    assert "behavior-service" in service_commands
 
 
 def test_parse_agent_definition_basic() -> None:
@@ -163,8 +185,8 @@ provider: anthropic
 behaviors:
   - some-behavior
 services:
-  - name: my-service
-    installer: pip
+  - stack: pip
+    command: my-service
 """
 
     result = parse_agent_definition(yaml_content)
@@ -179,8 +201,8 @@ services:
     assert result.provider == "anthropic"
     assert result.behaviors == ["some-behavior"]
     assert len(result.services) == 1
-    assert result.services[0].name == "my-service"
-    assert result.services[0].installer == "pip"
+    assert result.services[0].command == "my-service"
+    assert result.services[0].stack == "pip"
 
 
 def test_parse_behavior_definition_basic() -> None:
@@ -192,7 +214,7 @@ uuid: abcdefab-0000-0000-0000-000000000000
 version: 2
 description: A test behavior
 services:
-  - name: behavior-service
+  - command: behavior-service
     source: https://example.com/service
 tools:
   - bash
@@ -208,13 +230,13 @@ tools:
     assert result.version == "2"
     assert result.description == "A test behavior"
     assert len(result.services) == 1
-    assert result.services[0].name == "behavior-service"
+    assert result.services[0].command == "behavior-service"
     assert result.services[0].source == "https://example.com/service"
     assert result.tools == ["bash", "read_file"]
 
 
 async def test_resolve_agent_deduplicates_services(tmp_path) -> None:
-    """resolve_agent() deduplicates services by name across agent and behavior definitions."""
+    """resolve_agent() deduplicates services by identity across agent and behavior definitions."""
     registry = Registry(home=tmp_path / "amplifier_home")
     registry.ensure_home()
 
@@ -224,9 +246,9 @@ type: behavior
 local_ref: my-behavior
 uuid: bbbbbbbb-0000-0000-0000-000000000000
 services:
-  - name: shared-service
-    installer: pip
-  - name: behavior-only-service
+  - stack: pip
+    command: shared-service
+  - command: behavior-only-service
 """
     registry.register_definition(behavior_yaml)
 
@@ -238,8 +260,8 @@ uuid: aaaaaaaa-0000-0000-0000-000000000000
 behaviors:
   - my-behavior
 services:
-  - name: shared-service
-    installer: pip
+  - stack: pip
+    command: shared-service
 """
     registry.register_definition(agent_yaml)
 
@@ -247,9 +269,9 @@ services:
 
     assert isinstance(result, ResolvedAgent)
     # Services should be deduplicated — shared-service appears once
-    service_names = [s.name for s in result.services]
-    assert service_names.count("shared-service") == 1
-    assert "behavior-only-service" in service_names
+    service_commands = [s.command for s in result.services]
+    assert service_commands.count("shared-service") == 1
+    assert "behavior-only-service" in service_commands
 
 
 def test_parse_agent_definition_tools_bool_true() -> None:
