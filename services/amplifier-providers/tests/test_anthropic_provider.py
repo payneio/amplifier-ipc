@@ -771,3 +771,96 @@ class TestRateLimitState:
         assert state.requests_remaining is None
         assert state.tokens_limit is None
         assert state.tokens_remaining is None
+
+
+# ---------------------------------------------------------------------------
+# TestExtendedThinking
+# ---------------------------------------------------------------------------
+
+
+class TestExtendedThinking:
+    """Tests for extended thinking (thinking_budget) parameter handling."""
+
+    def _make_provider(self, **config_overrides) -> AnthropicProvider:
+        """Create an AnthropicProvider with optional config overrides."""
+        config = {"api_key": "test-key", **config_overrides}
+        return AnthropicProvider(config=config)
+
+    async def test_thinking_budget_from_config(self) -> None:
+        """Provider with thinking_budget=10000 passes thinking param to API call."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        provider = self._make_provider(thinking_budget=10000)
+        mock_response = _make_anthropic_response(
+            content=[MockTextBlock("I thought about it carefully.")],
+        )
+        mock_client = MagicMock()
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+        provider._client = mock_client
+
+        request = ChatRequest(messages=[Message(role="user", content="Think carefully.")])
+        await provider.complete(request)
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert "thinking" in call_kwargs
+        assert call_kwargs["thinking"] == {"type": "enabled", "budget_tokens": 10000}
+
+    async def test_thinking_budget_from_kwargs(self) -> None:
+        """Provider without thinking_budget uses thinking_budget kwarg passed to complete()."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        provider = self._make_provider()
+        mock_response = _make_anthropic_response(
+            content=[MockTextBlock("Done.")],
+        )
+        mock_client = MagicMock()
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+        provider._client = mock_client
+
+        request = ChatRequest(messages=[Message(role="user", content="Hello")])
+        await provider.complete(request, thinking_budget=5000)
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert "thinking" in call_kwargs
+        assert call_kwargs["thinking"]["budget_tokens"] == 5000
+
+    async def test_no_thinking_when_budget_not_set(self) -> None:
+        """Provider without thinking_budget does not include thinking in the API call."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        provider = self._make_provider()
+        mock_response = _make_anthropic_response(
+            content=[MockTextBlock("Simple response.")],
+        )
+        mock_client = MagicMock()
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+        provider._client = mock_client
+
+        request = ChatRequest(messages=[Message(role="user", content="Hello")])
+        await provider.complete(request)
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert "thinking" not in call_kwargs
+
+    def test_thinking_block_in_response(self) -> None:
+        """_convert_to_chat_response with thinking + text blocks produces 2-block content list."""
+        provider = self._make_provider()
+        response = _make_anthropic_response(
+            content=[
+                MockThinkingBlock(thinking="Step 1: analyze...", signature="sig_1"),
+                MockTextBlock("Here is the answer."),
+            ],
+        )
+        result = provider._convert_to_chat_response(response)
+
+        assert result.content is not None
+        assert len(result.content) == 2
+
+        thinking_block = result.content[0]
+        assert isinstance(thinking_block, ThinkingBlock)
+        assert thinking_block.thinking == "Step 1: analyze..."
+        assert thinking_block.signature == "sig_1"
+
+        text_block = result.content[1]
+        assert isinstance(text_block, TextBlock)
+        assert text_block.text == "Here is the answer."
