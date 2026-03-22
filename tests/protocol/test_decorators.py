@@ -158,3 +158,33 @@ def test_hook_decorated_class_is_same_object():
 
     decorated = hook(events=["on_test"])(Original)
     assert decorated is Original
+
+
+# ---------------------------------------------------------------------------
+# Class-level metadata tests (pre-instantiation describe)
+# ---------------------------------------------------------------------------
+
+
+def test_tool_decorator_sets_class_metadata() -> None:
+    """@tool sets __amplifier_component__ on the class itself (not just instances)."""
+    from amplifier_ipc.protocol.decorators import tool
+
+    @tool
+    class MyTestTool:
+        name = "test-tool"
+
+    assert hasattr(MyTestTool, "__amplifier_component__")
+    assert MyTestTool.__amplifier_component__ == "tool"
+
+
+def test_hook_decorator_sets_class_metadata() -> None:
+    """@hook sets hook metadata on the class itself (not just instances)."""
+    from amplifier_ipc.protocol.decorators import hook
+
+    @hook(events=["before_call"], priority=10)
+    class MyTestHook:
+        name = "test-hook"
+
+    assert hasattr(MyTestHook, "__amplifier_hook_events__")
+    assert MyTestHook.__amplifier_hook_events__ == ["before_call"]
+    assert MyTestHook.__amplifier_hook_priority__ == 10
