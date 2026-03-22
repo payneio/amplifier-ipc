@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Optional
 
 import click
+import yaml
 
+from amplifier_ipc_cli.commands.install import install_service
 from amplifier_ipc_cli.registry import Registry
 
 
@@ -40,7 +42,7 @@ def _read_definition(fsspec: str) -> str:
     "--install",
     is_flag=True,
     default=False,
-    help="(Placeholder) Install the registered definition.",
+    help="Install the services declared in the definition after registering.",
 )
 @click.option(
     "--home",
@@ -52,6 +54,10 @@ def register(fsspec: str, install: bool, home: Optional[str]) -> None:
 
     FSSPEC may be a local filesystem path or an HTTP(S) URL pointing to a
     YAML definition file.
+
+    With --install, each service declared in the definition is installed into
+    a dedicated virtualenv managed by uv at
+    $AMPLIFIER_HOME/environments/<definition_id>/.
     """
     # Determine source_url for HTTP sources
     is_http = fsspec.startswith("http://") or fsspec.startswith("https://")
@@ -74,3 +80,27 @@ def register(fsspec: str, install: bool, home: Optional[str]) -> None:
         raise click.ClickException(str(exc)) from exc
 
     click.echo(f"Registered: {definition_id}")
+
+    if install:
+        parsed: dict = yaml.safe_load(yaml_content) or {}
+        services: list = parsed.get("services") or []
+
+        if not services:
+            click.echo("No services to install.")
+            return
+
+        for service in services:
+            if not isinstance(service, dict):
+                continue
+            source = service.get("source")
+            svc_name: str = service.get("name", "<unknown>")
+            if not source:
+                click.echo(f"Skipping service '{svc_name}': no source specified.")
+                continue
+            try:
+                install_service(registry, definition_id, source)
+                click.echo(f"Installed: {svc_name}")
+            except Exception as exc:  # noqa: BLE001
+                raise click.ClickException(
+                    f"Failed to install service '{svc_name}': {exc}"
+                ) from exc
