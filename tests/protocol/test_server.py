@@ -467,6 +467,120 @@ async def test_orchestrator_execute_dispatches_to_orchestrator(
     assert responses[0]["result"] == "Echo: hello world"
 
 
+# ---------------------------------------------------------------------------
+# Task-12: Lazy instantiation & configure tests
+# ---------------------------------------------------------------------------
+
+
+async def test_server_describe_before_configure(tmp_path: Path) -> None:
+    """describe works without calling configure, using class metadata."""
+    pkg_name = "mock_srv_pre_configure_pkg"
+    pkg_dir = _create_mock_package(tmp_path, pkg_name)
+    tools_dir = pkg_dir / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "__init__.py").write_text("")
+    (tools_dir / "mytool.py").write_text(
+        "from amplifier_ipc.protocol.decorators import tool\n\n"
+        "@tool\n"
+        "class MyTool:\n"
+        "    name = 'mytool'\n"
+        "    description = 'A test tool'\n"
+        "    input_schema = {'type': 'object'}\n"
+        "    async def execute(self, input):\n"
+        "        return 'ok'\n"
+    )
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        server = Server(pkg_name)
+        # Do NOT call configure - describe should work from class metadata
+        assert server._instances_ready is False, (
+            "instances should not be ready before configure"
+        )
+        responses = await _send_and_collect(
+            server,
+            [{"jsonrpc": "2.0", "id": 1, "method": "describe"}],
+        )
+    finally:
+        _cleanup_package(tmp_path, pkg_name)
+
+    result = responses[0]["result"]
+    tools = result["capabilities"]["tools"]
+    assert len(tools) == 1
+    assert tools[0]["name"] == "mytool"
+    assert tools[0]["description"] == "A test tool"
+    assert tools[0]["input_schema"] == {"type": "object"}
+
+
+async def test_server_configure_instantiates_with_config(tmp_path: Path) -> None:
+    """configure instantiates tools with provided config when config is available."""
+    pkg_name = "mock_srv_configure_config_pkg"
+    pkg_dir = _create_mock_package(tmp_path, pkg_name)
+    tools_dir = pkg_dir / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "__init__.py").write_text("")
+    (tools_dir / "configtool.py").write_text(
+        "from amplifier_ipc.protocol.decorators import tool\n\n"
+        "@tool\n"
+        "class ConfigTool:\n"
+        "    name = 'configtool'\n"
+        "    description = 'A configurable tool'\n"
+        "    input_schema = {}\n"
+        "    def __init__(self, config=None):\n"
+        "        self.config = config\n"
+        "    async def execute(self, input):\n"
+        "        return self.config\n"
+    )
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        server = Server(pkg_name)
+        assert server._instances_ready is False
+
+        result = await server.handle_configure(
+            {"config": {"configtool": {"key": "value"}}}
+        )
+        assert result == {"status": "ok"}
+        assert server._instances_ready is True
+        assert len(server._tool_instances) == 1
+        assert server._tool_instances[0].config == {"key": "value"}
+    finally:
+        _cleanup_package(tmp_path, pkg_name)
+
+
+async def test_server_configure_no_config_instantiates_without_args(
+    tmp_path: Path,
+) -> None:
+    """configure with empty config map instantiates tools with no args (cls())."""
+    pkg_name = "mock_srv_configure_no_config_pkg"
+    pkg_dir = _create_mock_package(tmp_path, pkg_name)
+    tools_dir = pkg_dir / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "__init__.py").write_text("")
+    (tools_dir / "simpletool.py").write_text(
+        "from amplifier_ipc.protocol.decorators import tool\n\n"
+        "@tool\n"
+        "class SimpleTool:\n"
+        "    name = 'simpletool'\n"
+        "    description = 'A simple tool'\n"
+        "    input_schema = {}\n"
+        "    async def execute(self, input):\n"
+        "        return 'simple_ok'\n"
+    )
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        server = Server(pkg_name)
+        assert server._instances_ready is False
+
+        result = await server.handle_configure({})
+        assert result == {"status": "ok"}
+        assert server._instances_ready is True
+        assert len(server._tool_instances) == 1
+    finally:
+        _cleanup_package(tmp_path, pkg_name)
+
+
 async def test_orchestrator_can_call_local_hook_and_context(
     tmp_path: Path,
 ) -> None:

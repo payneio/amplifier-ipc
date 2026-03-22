@@ -45,10 +45,33 @@ class Server:
     def __init__(self, package_name: str) -> None:
         self._package_name = package_name
 
-        # Discover components and content
-        components = scan_package(package_name)
+        # Discover component CLASSES (not instances) — instantiation is deferred
+        # until after configuration arrives (lazy instantiation for the configure
+        # protocol).
+        discovered = scan_package(package_name)
         self._content_paths: list[str] = scan_content(package_name)
-        self._components: dict[str, list[Any]] = components
+
+        # Store classes for lazy instantiation
+        self._tool_classes: list[type] = discovered.get("tool", [])
+        self._hook_classes: list[type] = discovered.get("hook", [])
+        self._orchestrator_classes: list[type] = discovered.get("orchestrator", [])
+        self._context_manager_classes: list[type] = discovered.get(
+            "context_manager", []
+        )
+        self._provider_classes: list[type] = discovered.get("provider", [])
+
+        # Lazy instantiation state — populated by handle_configure or _ensure_instances
+        self._instances_ready = False
+        self._tool_instances: list[Any] = []
+        self._hook_instances: list[Any] = []
+        self._orchestrator_instances: list[Any] = []
+        self._context_manager_instances: list[Any] = []
+        self._provider_instances: list[Any] = []
+
+        # Runtime lookup tables — built by _build_runtime_state after instantiation
+        self._tools: dict[str, Any] = {}
+        self._hooks: dict[str, list[Any]] = {}
+        self._components: dict[str, list[Any]] = {}
 
         # Resolve the package directory
         mod = importlib.import_module(package_name)
@@ -58,23 +81,89 @@ class Server:
             )
         self._package_dir = Path(mod.__file__).parent
 
-        # Build _tools: name -> instance
-        self._tools: dict[str, Any] = {}
-        for tool_instance in components.get("tool", []):
-            name = getattr(tool_instance, "name", None)
-            if name:
-                self._tools[name] = tool_instance
-
         # Tracks the active orchestrator's IPC client during orchestrator.execute,
         # so tools can use it to make delegate/task calls back to the host.
         self._current_orchestrator_client: Any = None
 
+    # ------------------------------------------------------------------
+    # Lazy instantiation and configuration
+    # ------------------------------------------------------------------
+
+    async def handle_configure(self, params: dict) -> dict:
+        """Instantiate all discovered component classes, passing config when provided.
+
+        Components whose name appears in ``params["config"]`` are instantiated
+        with ``cls(config=comp_config)``; all others are instantiated with no
+        arguments via ``cls()``.  After all components are instantiated the
+        runtime lookup tables (_tools, _hooks, _components) are built.
+
+        Args:
+            params: Dict optionally containing ``config`` — a mapping of
+                component name -> config dict.
+
+        Returns:
+            ``{"status": "ok"}``
+        """
+        config_map: dict = params.get("config", {})
+
+        def _instantiate(classes: list[type], instances: list) -> None:
+            for cls in classes:
+                comp_name = getattr(cls, "name", cls.__name__)
+                comp_config = config_map.get(comp_name)
+                if comp_config is not None:
+                    instances.append(cls(config=comp_config))
+                else:
+                    instances.append(cls())
+
+        _instantiate(self._tool_classes, self._tool_instances)
+        _instantiate(self._hook_classes, self._hook_instances)
+        _instantiate(self._orchestrator_classes, self._orchestrator_instances)
+        _instantiate(self._context_manager_classes, self._context_manager_instances)
+        _instantiate(self._provider_classes, self._provider_instances)
+
+        self._instances_ready = True
+        self._build_runtime_state()
+        return {"status": "ok"}
+
+    def _ensure_instances(self) -> None:
+        """Auto-instantiate all components with no arguments if configure was never called.
+
+        This is a convenience fallback so that callers never need to check
+        ``_instances_ready`` explicitly — any handler that needs instances can
+        simply call ``_ensure_instances()`` at the top of its body.
+        """
+        if not self._instances_ready:
+            for cls in self._tool_classes:
+                self._tool_instances.append(cls())
+            for cls in self._hook_classes:
+                self._hook_instances.append(cls())
+            for cls in self._orchestrator_classes:
+                self._orchestrator_instances.append(cls())
+            for cls in self._context_manager_classes:
+                self._context_manager_instances.append(cls())
+            for cls in self._provider_classes:
+                self._provider_instances.append(cls())
+            self._instances_ready = True
+            self._build_runtime_state()
+
+    def _build_runtime_state(self) -> None:
+        """Build runtime lookup tables from the current instance lists.
+
+        Populates ``_tools`` (name -> instance), ``_hooks`` (event -> sorted
+        list of instances), and ``_components`` (component-type -> list).
+        """
+        # Build _tools: name -> instance
+        self._tools = {}
+        for tool_instance in self._tool_instances:
+            name = getattr(tool_instance, "name", None)
+            if name:
+                self._tools[name] = tool_instance
+
         # Build _hooks: event -> list of instances sorted by priority (ascending)
-        self._hooks: dict[str, list[Any]] = {}
-        # Keep an ordered, deduplicated list of all hook instances for describe
-        self._hook_instances: list[Any] = []
-        seen_hooks: set[Any] = set()
-        for hook_instance in components.get("hook", []):
+        self._hooks = {}
+        seen: set[int] = set()
+        unique_hook_instances: list[Any] = []
+        for hook_instance in self._hook_instances:
             events = getattr(
                 hook_instance,
                 "events",
@@ -82,11 +171,11 @@ class Server:
             )
             for event in events:
                 self._hooks.setdefault(event, []).append(hook_instance)
-            if hook_instance not in seen_hooks:
-                seen_hooks.add(hook_instance)
-                self._hook_instances.append(hook_instance)
+            if id(hook_instance) not in seen:
+                seen.add(id(hook_instance))
+                unique_hook_instances.append(hook_instance)
+        self._hook_instances = unique_hook_instances
 
-        # Sort each event's hook list by priority (ascending = lower runs first)
         for event in self._hooks:
             self._hooks[event].sort(
                 key=lambda h: getattr(
@@ -95,6 +184,13 @@ class Server:
                     getattr(h, "__amplifier_hook_priority__", 0),
                 )
             )
+
+        # Build _components: component-type -> list of instances
+        self._components = {
+            "orchestrator": self._orchestrator_instances,
+            "context_manager": self._context_manager_instances,
+            "provider": self._provider_instances,
+        }
 
     # ------------------------------------------------------------------
     # Main stream loop
@@ -203,6 +299,7 @@ class Server:
             JsonRpcError: INVALID_PARAMS if no orchestrators are registered or
                 the named orchestrator is not found.
         """
+        self._ensure_instances()
         orchestrators = self._components.get("orchestrator", [])
         if not orchestrators:
             raise JsonRpcError(
@@ -275,6 +372,8 @@ class Server:
         """
         if method == "describe":
             return await self._handle_describe()
+        if method == "configure":
+            return await self.handle_configure(params or {})
         if method == "content.read":
             return await self._handle_content_read(params or {})
         if method == "content.list":
@@ -298,50 +397,43 @@ class Server:
     # ------------------------------------------------------------------
 
     async def _handle_describe(self) -> dict[str, Any]:
-        """Return the package name and all discovered capabilities."""
-        tools = []
-        for tool_instance in self._tools.values():
-            tools.append(
-                {
-                    "name": getattr(tool_instance, "name", ""),
-                    "description": getattr(tool_instance, "description", ""),
-                    "input_schema": getattr(tool_instance, "input_schema", {}),
-                }
-            )
+        """Return the package name and all discovered capabilities.
 
-        hooks = []
-        for hook_instance in self._hook_instances:
-            hooks.append(
-                {
-                    "name": getattr(
-                        hook_instance,
-                        "name",
-                        hook_instance.__class__.__name__,
-                    ),
-                    "events": getattr(
-                        hook_instance,
-                        "events",
-                        getattr(hook_instance, "__amplifier_hook_events__", []),
-                    ),
-                    "priority": getattr(
-                        hook_instance,
-                        "priority",
-                        getattr(hook_instance, "__amplifier_hook_priority__", 0),
-                    ),
-                }
-            )
+        Uses class-level metadata so that describe works before configure is
+        called.  Decorator attributes (``name``, ``description``,
+        ``input_schema``, ``__amplifier_hook_events__``, etc.) are set on the
+        class itself, so they are accessible whether or not an instance has
+        been created.
+        """
+        tools = [
+            {
+                "name": getattr(cls, "name", ""),
+                "description": getattr(cls, "description", ""),
+                "input_schema": getattr(cls, "input_schema", {}),
+            }
+            for cls in self._tool_classes
+        ]
+
+        hooks = [
+            {
+                "name": getattr(cls, "name", cls.__name__),
+                "events": getattr(cls, "__amplifier_hook_events__", []),
+                "priority": getattr(cls, "__amplifier_hook_priority__", 0),
+            }
+            for cls in self._hook_classes
+        ]
 
         orchestrators = [
-            {"name": getattr(o, "name", o.__class__.__name__)}
-            for o in self._components.get("orchestrator", [])
+            {"name": getattr(cls, "name", cls.__name__)}
+            for cls in self._orchestrator_classes
         ]
         context_managers = [
-            {"name": getattr(c, "name", c.__class__.__name__)}
-            for c in self._components.get("context_manager", [])
+            {"name": getattr(cls, "name", cls.__name__)}
+            for cls in self._context_manager_classes
         ]
         providers = [
-            {"name": getattr(p, "name", p.__class__.__name__)}
-            for p in self._components.get("provider", [])
+            {"name": getattr(cls, "name", cls.__name__)}
+            for cls in self._provider_classes
         ]
 
         return {
@@ -397,6 +489,7 @@ class Server:
         Raises:
             JsonRpcError: INVALID_PARAMS if ``name`` is missing or unknown.
         """
+        self._ensure_instances()
         name: str | None = params.get("name")
         if not name:
             raise JsonRpcError(INVALID_PARAMS, "Missing required parameter: name")
@@ -427,6 +520,7 @@ class Server:
         Raises:
             JsonRpcError: INVALID_PARAMS if ``event`` is missing.
         """
+        self._ensure_instances()
         event: str | None = params.get("event")
         if not event:
             raise JsonRpcError(INVALID_PARAMS, "Missing required parameter: event")
@@ -459,6 +553,7 @@ class Server:
         """
         from amplifier_ipc.protocol.models import Message
 
+        self._ensure_instances()
         ctx_managers = self._components.get("context_manager", [])
         if not ctx_managers:
             raise JsonRpcError(
@@ -484,6 +579,7 @@ class Server:
         Raises:
             JsonRpcError: INVALID_PARAMS if no context manager is registered.
         """
+        self._ensure_instances()
         ctx_managers = self._components.get("context_manager", [])
         if not ctx_managers:
             raise JsonRpcError(
@@ -511,6 +607,7 @@ class Server:
         Raises:
             JsonRpcError: INVALID_PARAMS if no context manager is registered.
         """
+        self._ensure_instances()
         ctx_managers = self._components.get("context_manager", [])
         if not ctx_managers:
             raise JsonRpcError(
@@ -534,6 +631,7 @@ class Server:
         """
         from amplifier_ipc.protocol.models import ChatRequest
 
+        self._ensure_instances()
         providers = self._components.get("provider", [])
         if not providers:
             raise JsonRpcError(INVALID_PARAMS, "No provider registered in this service")
