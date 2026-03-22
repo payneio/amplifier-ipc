@@ -90,6 +90,34 @@ class ResolvedAgent:
     component_config: dict[str, Any] = field(default_factory=dict)
 
 
+def _to_str_list(value: Any) -> list[str]:
+    """Coerce a YAML value to a list of strings.
+
+    Handles boolean shorthand used in definition files:
+    - ``True``  → empty list (sentinel meaning "all items from this service")
+    - ``False`` → empty list (no items)
+    - ``None``  → empty list
+    - list      → the list as-is
+    """
+    if isinstance(value, bool) or value is None:
+        return []
+    return list(value)
+
+
+def _to_dict(value: Any) -> dict[str, Any]:
+    """Coerce a YAML value to a dict.
+
+    Handles boolean shorthand:
+    - ``True``  → empty dict (sentinel meaning "all context")
+    - ``False`` → empty dict
+    - ``None``  → empty dict
+    - dict      → the dict as-is
+    """
+    if isinstance(value, bool) or value is None or not isinstance(value, dict):
+        return {}
+    return dict(value)
+
+
 def _parse_services(services_data: Any) -> list[ServiceEntry]:
     """Parse a list of service dictionaries into ServiceEntry objects.
 
@@ -136,13 +164,13 @@ def parse_agent_definition(yaml_content: str) -> AgentDefinition:
         orchestrator=data.get("orchestrator"),
         context_manager=data.get("context_manager"),
         provider=data.get("provider"),
-        behaviors=list(data.get("behaviors") or []),
+        behaviors=_to_str_list(data.get("behaviors")),
         services=_parse_services(data.get("services")),
-        tools=list(data.get("tools") or []),
-        hooks=list(data.get("hooks") or []),
-        context=dict(data.get("context") or {}),
-        agents=list(data.get("agents") or []),
-        component_config=dict(data.get("component_config") or {}),
+        tools=_to_str_list(data.get("tools")),
+        hooks=_to_str_list(data.get("hooks")),
+        context=_to_dict(data.get("context")),
+        agents=_to_str_list(data.get("agents")),
+        component_config=_to_dict(data.get("component_config")),
     )
 
 
@@ -162,11 +190,11 @@ def parse_behavior_definition(yaml_content: str) -> BehaviorDefinition:
         uuid=data.get("uuid"),
         version=str(data["version"]) if data.get("version") is not None else None,
         description=data.get("description"),
-        behaviors=list(data.get("behaviors") or []),
+        behaviors=_to_str_list(data.get("behaviors")),
         services=_parse_services(data.get("services")),
-        tools=list(data.get("tools") or []),
-        hooks=list(data.get("hooks") or []),
-        context=dict(data.get("context") or {}),
+        tools=_to_str_list(data.get("tools")),
+        hooks=_to_str_list(data.get("hooks")),
+        context=_to_dict(data.get("context")),
     )
 
 

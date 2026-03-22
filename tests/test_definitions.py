@@ -117,6 +117,63 @@ services:
     assert "behavior-only-service" in service_names
 
 
+def test_parse_agent_definition_tools_bool_true() -> None:
+    """parse_agent_definition() handles boolean shorthand (tools: true) without crashing.
+
+    'true' means 'enable all from this service' — parsed as an empty list sentinel.
+    Same for hooks, agents, and context.
+    """
+    yaml_content = """\
+type: agent
+local_ref: foundation
+uuid: 3898a638-71de-427a-8183-b80eba8b26be
+orchestrator: foundation:streaming
+context_manager: foundation:simple
+provider: providers:anthropic
+tools: true
+hooks: true
+agents: true
+context: true
+"""
+    result = parse_agent_definition(yaml_content)
+
+    assert isinstance(result.tools, list)
+    assert isinstance(result.hooks, list)
+    assert isinstance(result.agents, list)
+    assert isinstance(result.context, dict)
+
+
+def test_parse_agent_definition_tools_bool_false() -> None:
+    """parse_agent_definition() handles 'false' booleans — treated as empty list/dict."""
+    yaml_content = """\
+type: agent
+local_ref: my-agent
+uuid: 12345678-abcd-ef00-0000-000000000000
+tools: false
+hooks: false
+"""
+    result = parse_agent_definition(yaml_content)
+    assert result.tools == []
+    assert result.hooks == []
+
+
+def test_parse_behavior_definition_tools_bool_true() -> None:
+    """parse_behavior_definition() handles boolean shorthand (tools: true) without crashing."""
+    yaml_content = """\
+type: behavior
+local_ref: my-behavior
+uuid: bbbbbbbb-0000-0000-0000-000000000000
+tools: true
+hooks: true
+context: true
+"""
+    result = parse_behavior_definition(yaml_content)
+
+    assert isinstance(result.tools, list)
+    assert isinstance(result.hooks, list)
+    assert isinstance(result.context, dict)
+
+
 async def test_resolve_agent_unknown_raises(tmp_path) -> None:
     """resolve_agent() raises FileNotFoundError for an unregistered agent."""
     registry = Registry(home=tmp_path / "amplifier_home")

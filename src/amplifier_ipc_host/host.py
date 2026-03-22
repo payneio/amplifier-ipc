@@ -176,6 +176,7 @@ class Host:
                 services=self._services,
                 context_manager_key=context_manager_key,
                 provider_key=provider_key,
+                provider_name=self._config.provider or None,
                 state=self._state,
                 on_provider_notification=_queue_provider_notification,
                 spawn_handler=_handle_spawn,
@@ -327,8 +328,10 @@ class Host:
                 await write_message(orchestrator_svc.process.stdin, response)
 
             # Stream token notification
+            # Tolerate both "token" (canonical) and "text" (legacy orchestrator key)
             elif method == "stream.token":
-                token = (message.get("params") or {}).get("token", "")
+                params = message.get("params") or {}
+                token = params.get("token") or params.get("text", "")
                 yield StreamTokenEvent(token=token)
 
             # Stream thinking notification

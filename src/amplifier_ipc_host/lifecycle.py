@@ -39,12 +39,18 @@ async def spawn_service(
         FileNotFoundError: If the command executable is not found.
         OSError: If the subprocess cannot be created.
     """
+    # Use a large stream limit so that messages containing large payloads
+    # (e.g. orchestrator.execute with a full system prompt, or large describe
+    # responses) are not truncated by the default 64 KB asyncio limit.
+    _STREAM_LIMIT = 10 * 1024 * 1024  # 10 MB
+
     process = await asyncio.create_subprocess_exec(
         *command,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=working_dir,
+        limit=_STREAM_LIMIT,
     )
 
     assert process.stdout is not None

@@ -215,7 +215,51 @@ async def test_route_provider_complete() -> None:
     assert len(provider_client.calls) == 1
     method, call_params = provider_client.calls[0]
     assert method == "provider.complete"
-    assert call_params == params
+    # params may contain extra fields (e.g. provider name injected by router)
+    assert call_params.get("messages") == params["messages"]
+
+
+async def test_route_provider_complete_includes_provider_name() -> None:
+    """router injects configured provider_name into provider.complete params.
+
+    When the Router is constructed with a provider_name, that name is included
+    in the params forwarded to the provider service so it can select the correct
+    backend (e.g. 'anthropic' vs 'openai' vs 'azure_openai').
+    """
+    completion = {"content": "Hello from Anthropic"}
+    registry = CapabilityRegistry()
+    registry.register(
+        "providers",
+        {
+            "tools": [],
+            "hooks": [],
+            "orchestrators": [],
+            "context_managers": [],
+            "providers": [{"name": "anthropic"}],
+            "content": [],
+        },
+    )
+    provider_client = FakeClient(responses={"provider.complete": completion})
+    services: dict[str, Any] = {
+        "foundation": FakeService(FakeClient(responses={})),
+        "providers": FakeService(provider_client),
+    }
+    router = Router(
+        registry=registry,
+        services=services,
+        context_manager_key="foundation",
+        provider_key="providers",
+        provider_name="anthropic",
+    )
+
+    params = {"request": {"messages": []}}
+    result = await router.route_request("request.provider_complete", params)
+
+    assert result == completion
+    assert len(provider_client.calls) == 1
+    _, call_params = provider_client.calls[0]
+    # The router must inject the provider name so the service selects the right backend.
+    assert call_params.get("provider") == "anthropic"
 
 
 async def test_route_provider_complete_with_content_blocks() -> None:

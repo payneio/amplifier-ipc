@@ -43,6 +43,7 @@ class Router:
         services: dict[str, Any],
         context_manager_key: str,
         provider_key: str,
+        provider_name: str | None = None,
         state: dict[str, Any] | None = None,
         on_provider_notification: Any | None = None,
         spawn_handler: Callable[..., Coroutine[Any, Any, Any]] | None = None,
@@ -52,6 +53,7 @@ class Router:
         self._services = services
         self._context_manager_key = context_manager_key
         self._provider_key = provider_key
+        self._provider_name = provider_name
         self._state: dict[str, Any] = state if state is not None else {}
         self._on_provider_notification = on_provider_notification
         self._spawn_handler = spawn_handler
@@ -95,9 +97,18 @@ class Router:
         if method == "request.provider_complete":
             provider_client = self._services[self._provider_key].client
             prev_callback = getattr(provider_client, "on_notification", None)
+            # Inject the configured provider name so the service selects the
+            # correct backend (e.g. "anthropic" instead of the first discovered).
+            provider_params: dict[str, Any] = (
+                dict(params) if isinstance(params, dict) else {}
+            )
+            if self._provider_name and "provider" not in provider_params:
+                provider_params["provider"] = self._provider_name
             try:
                 provider_client.on_notification = self._on_provider_notification
-                return await provider_client.request("provider.complete", params)
+                return await provider_client.request(
+                    "provider.complete", provider_params
+                )
             finally:
                 provider_client.on_notification = prev_callback
 
