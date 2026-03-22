@@ -87,33 +87,29 @@ def install(name: str, force: bool, home: Optional[str]) -> None:
                 "Run amplifier-ipc discover to populate the registry."
             )
 
-    # Parse definition YAML to get the services list.
+    # Parse definition YAML to get the singular service block.
     # Definitions use a nested format: top-level key is 'agent' or 'behavior',
-    # with services and other fields in the inner mapping.
+    # with a singular 'service' dict inside the inner mapping.
     definition: dict = yaml.safe_load(def_path.read_text()) or {}
-    inner: dict = definition.get("agent") or definition.get("behavior") or definition
-    services: list[dict] = (inner or {}).get("services") or []
-
-    if not services:
-        click.echo(f"No services to install for '{name}'.")
+    if "agent" in definition:
+        inner = definition["agent"] if isinstance(definition["agent"], dict) else {}
+    elif "behavior" in definition:
+        inner = (
+            definition["behavior"] if isinstance(definition["behavior"], dict) else {}
+        )
+    else:
+        inner = {}
+    service: Optional[dict] = inner.get("service")
+    if not service or not isinstance(service, dict):
+        click.echo(f"No service to install for '{name}'.")
+        return
+    source: Optional[str] = service.get("source")
+    if not source:
+        click.echo(f"Skipping service for '{name}': no source specified.")
         return
 
     # Derive the definition_id from the file stem (matches how Registry stores it).
     definition_id = def_path.stem
-
-    for service in services:
-        source: Optional[str] = (
-            service.get("source") if isinstance(service, dict) else None
-        )
-        if not source:
-            svc_name = (
-                service.get("name", "<unknown>")
-                if isinstance(service, dict)
-                else service
-            )
-            click.echo(f"Skipping service '{svc_name}': no source specified.")
-            continue
-
-        install_service(registry, definition_id, source, force=force)
-        svc_name = service.get("name", source) if isinstance(service, dict) else source
-        click.echo(f"Installed: {svc_name}")
+    install_service(registry, definition_id, source, force=force)
+    command = service.get("command", name)
+    click.echo(f"Installed: {command}")

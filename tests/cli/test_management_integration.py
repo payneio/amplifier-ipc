@@ -40,9 +40,9 @@ agent:
   provider: anthropic
   behaviors:
     - integration-beh
-  services:
-    - name: integration-service
-      source: integration-package>=1.0
+  service:
+    source: integration-package>=1.0
+    command: integration-service
 """
 
 _BEHAVIOR_YAML = """\

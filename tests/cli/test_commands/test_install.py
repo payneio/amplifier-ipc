@@ -10,35 +10,29 @@ from click.testing import CliRunner
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Fixtures — new nested agent:/behavior: format with singular service:
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
-def agent_yaml_with_services() -> str:
+def agent_yaml_with_service() -> str:
+    """New nested format: agent: wrapper with singular service: dict."""
     return """\
-type: agent
-local_ref: my-agent
-uuid: 12345678-abcd-efgh-ijkl-mnopqrstuvwx
-name: My Test Agent
-description: A test agent with services
-services:
-  - name: my-service
+agent:
+  service:
     source: my-package>=1.0
+    command: my-command
 """
 
 
 @pytest.fixture()
-def behavior_yaml_with_services() -> str:
+def behavior_yaml_with_service() -> str:
+    """New nested format: behavior: wrapper with singular service: dict."""
     return """\
-type: behavior
-local_ref: my-behavior
-uuid: 87654321-dcba-hgfe-lkji-xwvutsrqponm
-name: My Test Behavior
-description: A test behavior with services
-services:
-  - name: my-behavior-service
+behavior:
+  service:
     source: behavior-package>=2.0
+    command: my-behavior-command
 """
 
 
@@ -138,20 +132,21 @@ class TestInstallCommandUnknownName:
         ), f"Expected error message in output. Output: {result.output}"
 
 
-class TestInstallCommandCallsInstallService:
-    def test_install_command_calls_install_service(
-        self, tmp_path: Path, agent_yaml_with_services: str
+class TestInstallCommandNestedAgentServiceFormat:
+    """Tests for the new nested agent:/behavior: wrapper with singular service: format."""
+
+    def test_install_command_reads_nested_agent_service(
+        self, tmp_path: Path, agent_yaml_with_service: str
     ) -> None:
-        """install command resolves agent name and calls install_service for each service."""
+        """install command reads singular service: from agent: wrapper."""
         from amplifier_ipc.cli.commands.install import install
 
-        # Create a definition file
-        def_file = tmp_path / "agent_def.yaml"
-        def_file.write_text(agent_yaml_with_services)
+        def_file = tmp_path / "my-agent.yaml"
+        def_file.write_text(agent_yaml_with_service)
 
         mock_registry = MagicMock()
         mock_registry.resolve_agent.return_value = def_file
-        env_path = tmp_path / "environments" / "my-def-id"
+        env_path = tmp_path / "environments" / "my-agent"
         mock_registry.get_environment_path.return_value = env_path
         mock_registry.is_installed.return_value = False
 
@@ -171,17 +166,22 @@ class TestInstallCommandCallsInstallService:
             f"Exit code: {result.exit_code}\nOutput: {result.output}\n"
             f"Exception: {result.exception}"
         )
-        # Should have called _run_uv twice (venv + pip install) for the one service
-        assert mock_run_uv.call_count == 2
+        assert mock_run_uv.call_count == 2, (
+            f"Expected _run_uv called twice, got {mock_run_uv.call_count}. "
+            f"Output: {result.output}"
+        )
+        assert "my-command" in result.output, (
+            f"Expected command name 'my-command' in output. Output: {result.output}"
+        )
 
-    def test_install_command_falls_back_to_behavior(
-        self, tmp_path: Path, behavior_yaml_with_services: str
+    def test_install_command_falls_back_to_behavior_nested_format(
+        self, tmp_path: Path, behavior_yaml_with_service: str
     ) -> None:
-        """install command falls back to resolve_behavior when resolve_agent raises FileNotFoundError."""
+        """install command falls back to resolve_behavior and reads behavior: wrapper."""
         from amplifier_ipc.cli.commands.install import install
 
         def_file = tmp_path / "behavior_def.yaml"
-        def_file.write_text(behavior_yaml_with_services)
+        def_file.write_text(behavior_yaml_with_service)
 
         mock_registry = MagicMock()
         mock_registry.resolve_agent.side_effect = FileNotFoundError("not an agent")
@@ -207,5 +207,122 @@ class TestInstallCommandCallsInstallService:
             f"Exception: {result.exception}"
         )
         mock_registry.resolve_behavior.assert_called_once_with("my-behavior")
-        # Should have called _run_uv twice for the one service
-        assert mock_run_uv.call_count == 2
+        assert mock_run_uv.call_count == 2, (
+            f"Expected _run_uv called twice, got {mock_run_uv.call_count}. "
+            f"Output: {result.output}"
+        )
+        assert "my-behavior-command" in result.output
+
+    def test_install_command_no_service_in_definition(self, tmp_path: Path) -> None:
+        """install command prints info and exits cleanly when no service: key found."""
+        from amplifier_ipc.cli.commands.install import install
+
+        def_file = tmp_path / "my-agent.yaml"
+        def_file.write_text("agent:\n  description: no service here\n")
+
+        mock_registry = MagicMock()
+        mock_registry.resolve_agent.return_value = def_file
+
+        home_dir = tmp_path / "amplifier_home"
+
+        with (
+            patch(
+                "amplifier_ipc.cli.commands.install.Registry",
+                return_value=mock_registry,
+            ),
+            patch("amplifier_ipc.cli.commands.install._run_uv") as mock_run_uv,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(install, ["my-agent", "--home", str(home_dir)])
+
+        assert result.exit_code == 0
+        mock_run_uv.assert_not_called()
+        assert "No service to install" in result.output
+
+    def test_install_command_no_source_in_service(self, tmp_path: Path) -> None:
+        """install command skips installation when service: has no source."""
+        from amplifier_ipc.cli.commands.install import install
+
+        def_file = tmp_path / "my-agent.yaml"
+        def_file.write_text("agent:\n  service:\n    command: my-cmd\n")
+
+        mock_registry = MagicMock()
+        mock_registry.resolve_agent.return_value = def_file
+
+        home_dir = tmp_path / "amplifier_home"
+
+        with (
+            patch(
+                "amplifier_ipc.cli.commands.install.Registry",
+                return_value=mock_registry,
+            ),
+            patch("amplifier_ipc.cli.commands.install._run_uv") as mock_run_uv,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(install, ["my-agent", "--home", str(home_dir)])
+
+        assert result.exit_code == 0
+        mock_run_uv.assert_not_called()
+        assert "Skipping service" in result.output
+
+    def test_install_command_uses_name_as_command_fallback(
+        self, tmp_path: Path
+    ) -> None:
+        """install command echoes name when service: has no command key."""
+        from amplifier_ipc.cli.commands.install import install
+
+        def_file = tmp_path / "my-agent.yaml"
+        def_file.write_text("agent:\n  service:\n    source: some-package>=1.0\n")
+
+        mock_registry = MagicMock()
+        mock_registry.resolve_agent.return_value = def_file
+        env_path = tmp_path / "environments" / "my-agent"
+        mock_registry.get_environment_path.return_value = env_path
+        mock_registry.is_installed.return_value = False
+
+        home_dir = tmp_path / "amplifier_home"
+
+        with (
+            patch(
+                "amplifier_ipc.cli.commands.install.Registry",
+                return_value=mock_registry,
+            ),
+            patch("amplifier_ipc.cli.commands.install._run_uv"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(install, ["my-agent", "--home", str(home_dir)])
+
+        assert result.exit_code == 0
+        # Falls back to CLI name argument when command is absent
+        assert "my-agent" in result.output
+
+    def test_install_command_definition_id_is_file_stem(
+        self, tmp_path: Path, agent_yaml_with_service: str
+    ) -> None:
+        """install command derives definition_id from file stem."""
+        from amplifier_ipc.cli.commands.install import install
+
+        def_file = tmp_path / "some-unique-stem.yaml"
+        def_file.write_text(agent_yaml_with_service)
+
+        mock_registry = MagicMock()
+        mock_registry.resolve_agent.return_value = def_file
+        env_path = tmp_path / "environments" / "some-unique-stem"
+        mock_registry.get_environment_path.return_value = env_path
+        mock_registry.is_installed.return_value = False
+
+        home_dir = tmp_path / "amplifier_home"
+
+        with (
+            patch(
+                "amplifier_ipc.cli.commands.install.Registry",
+                return_value=mock_registry,
+            ),
+            patch("amplifier_ipc.cli.commands.install._run_uv"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(install, ["some-agent", "--home", str(home_dir)])
+
+        assert result.exit_code == 0
+        # Verify install_service was called with definition_id = file stem
+        mock_registry.get_environment_path.assert_called_once_with("some-unique-stem")
