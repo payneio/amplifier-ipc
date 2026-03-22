@@ -155,22 +155,21 @@ class TestDefinitionToSessionConfig:
         registry.ensure_home()
 
         agent_yaml = """\
-type: agent
-local_ref: mock-agent
-uuid: aaaaaaaa-0000-0000-0000-000000000001
-orchestrator: loop
-context_manager: simple
-provider: anthropic
-services:
-  - name: mock_service
-    installer: pip
+agent:
+  ref: mock-agent
+  uuid: aaaaaaaa-0000-0000-0000-000000000001
+  orchestrator: loop
+  context_manager: simple
+  provider: anthropic
+  service:
+    command: mock_service
 """
         registry.register_definition(agent_yaml)
 
         resolved = asyncio.run(resolve_agent(registry, "mock-agent"))
         config = build_session_config(resolved)
 
-        assert config.services == ["mock_service"]
+        assert config.services == ["mock-agent"]
         assert config.orchestrator == "loop"
         assert config.context_manager == "simple"
         assert config.provider == "anthropic"
@@ -201,15 +200,14 @@ class TestHostBuildRegistryFromCliDefinitions:
         registry.ensure_home()
 
         agent_yaml = """\
-type: agent
-local_ref: mock-agent
-uuid: bbbbbbbb-0000-0000-0000-000000000002
-orchestrator: loop
-context_manager: simple
-provider: anthropic
-services:
-  - name: mock_service
-    installer: pip
+agent:
+  ref: mock-agent
+  uuid: bbbbbbbb-0000-0000-0000-000000000002
+  orchestrator: loop
+  context_manager: simple
+  provider: anthropic
+  service:
+    command: mock_service
 """
         registry.register_definition(agent_yaml)
 
@@ -217,7 +215,7 @@ services:
         resolved = await resolve_agent(registry, "mock-agent")
         config = build_session_config(resolved)
 
-        assert config.services == ["mock_service"]
+        assert config.services == ["mock-agent"]
 
         # ── Step 3: Create Host from SessionConfig ────────────────────────────
         settings = HostSettings()
