@@ -9,17 +9,6 @@ description = "Amplifier Providers IPC service — LLM provider integrations"
 requires-python = ">=3.11"
 dependencies = [
     "amplifier-ipc-protocol",
-]
-
-[project.optional-dependencies]
-anthropic = ["anthropic"]
-openai = ["openai"]
-azure = ["openai", "azure-identity"]
-gemini = ["google-generativeai"]
-ollama = ["ollama"]
-vllm = ["openai"]
-copilot = ["openai"]
-all = [
     "anthropic",
     "openai",
     "azure-identity",
