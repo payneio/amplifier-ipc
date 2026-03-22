@@ -188,6 +188,10 @@ class Host:
                 resume_handler=_handle_resume,
             )
 
+            # 5b. Resume session: restore previous transcript if resuming
+            if self._resume_session_id is not None:
+                session_id = await self._restore_from_session()
+
             # 6. Assemble system prompt
             system_prompt = await assemble_system_prompt(self._registry, self._services)
 
@@ -361,6 +365,48 @@ class Host:
             )
 
         return _handle_resume
+
+    # ------------------------------------------------------------------
+    # Session resume helper
+    # ------------------------------------------------------------------
+
+    async def _restore_from_session(self) -> str:
+        """Restore transcript from the resume session for continuation.
+
+        Called from :meth:`run` when ``_resume_session_id`` is set, after the
+        router is built.  Loads the previous session's transcript, replays all
+        messages into the context manager, and updates :attr:`_persistence` and
+        :attr:`_state` so that new writes continue into the previous session
+        directory.
+
+        Returns:
+            The ``_resume_session_id`` to use as the active session ID going
+            forward.
+
+        Raises:
+            RuntimeError: If the router has not been initialised yet.
+        """
+        if self._router is None:
+            raise RuntimeError("Router has not been initialised")
+
+        assert self._resume_session_id is not None  # guard — callers check this
+
+        prev_persistence = SessionPersistence(
+            self._resume_session_id, self._session_dir
+        )
+        prev_transcript = prev_persistence.load_transcript()
+
+        for message_data in prev_transcript:
+            await self._router.route_request(
+                "request.context_add_message",
+                {"message": message_data},
+            )
+
+        # Reuse the previous session ID and its persistence/state
+        self._persistence = prev_persistence
+        self._state = prev_persistence.load_state()
+
+        return self._resume_session_id
 
     # ------------------------------------------------------------------
     # Orchestrator turn loop

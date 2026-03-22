@@ -690,6 +690,81 @@ async def test_host_send_approval_unblocks_loop() -> None:
     assert events[1].result == "done"
 
 
+async def test_host_resume_loads_previous_transcript() -> None:
+    """Host restores a previous session transcript when _resume_session_id is set.
+
+    Verifies _resume_session_id is set correctly, and that _restore_from_session():
+    1. Loads the previous session's transcript.
+    2. Replays each message via route_request('request.context_add_message', ...).
+    3. Returns the previous session ID (for reuse as the active session_id).
+    4. Updates self._persistence to the previous session's persistence object.
+    5. Updates self._state from the previous session's state.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from amplifier_ipc_host.persistence import SessionPersistence
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        session_dir = Path(tmpdir)
+
+        # Create a previous session with a transcript and state
+        prev_session_id = "prev-session-abc"
+        prev_persistence = SessionPersistence(prev_session_id, session_dir)
+        prev_persistence.append_message({"role": "user", "content": "Hello"})
+        prev_persistence.append_message({"role": "assistant", "content": "Hi there!"})
+        prev_persistence.save_state({"some_key": "some_value"})
+
+        config = SessionConfig(
+            services=[],
+            orchestrator="loop",
+            context_manager="simple",
+            provider="anthropic",
+        )
+        settings = HostSettings()
+
+        host = Host(config=config, settings=settings, session_dir=session_dir)
+
+        # Verify _resume_session_id is initially None
+        assert host._resume_session_id is None
+
+        # Set it and verify it's stored correctly
+        host.set_resume_session_id(prev_session_id)
+        assert host._resume_session_id == prev_session_id
+
+        # Set up a mock router that records context_add_message calls
+        context_add_calls: list[dict[str, Any]] = []
+
+        async def mock_route_request(method: str, params: Any) -> Any:
+            if method == "request.context_add_message":
+                context_add_calls.append(params)
+            return {}
+
+        mock_router = MagicMock()
+        mock_router.route_request = mock_route_request
+        host._router = mock_router
+
+        # Call the restore method directly (this is what run() calls internally)
+        returned_session_id = await host._restore_from_session()
+
+        # Verify session ID is the resume session ID (for reuse)
+        assert returned_session_id == prev_session_id
+
+        # Verify all transcript messages were replayed via context_add_message
+        assert len(context_add_calls) == 2
+        assert context_add_calls[0] == {"message": {"role": "user", "content": "Hello"}}
+        assert context_add_calls[1] == {
+            "message": {"role": "assistant", "content": "Hi there!"}
+        }
+
+        # Verify persistence is updated to the resumed session's directory
+        assert host._persistence is not None
+        assert host._persistence._session_dir == session_dir / prev_session_id
+
+        # Verify state is loaded from the resumed session
+        assert host._state == {"some_key": "some_value"}
+
+
 async def test_host_send_approval_is_non_blocking() -> None:
     """send_approval() is non-blocking (uses put_nowait under the hood)."""
     config = SessionConfig(
