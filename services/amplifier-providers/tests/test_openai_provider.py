@@ -316,8 +316,9 @@ class TestOpenAIComplete:
         """Create provider with a fake API key; real client is injected per test."""
         self.provider = OpenAIProvider(config={"api_key": "test-key"})
 
-    async def test_complete_returns_chat_response(self) -> None:
+    def test_complete_returns_chat_response(self) -> None:
         """complete() returns a ChatResponse with correct text content."""
+        import asyncio
         from unittest.mock import AsyncMock, MagicMock
 
         mock_response = _make_openai_response(content="Hello from GPT!")
@@ -326,7 +327,7 @@ class TestOpenAIComplete:
         self.provider._client = mock_client
 
         request = ChatRequest(messages=[Message(role="user", content="Hello")])
-        result = await self.provider.complete(request)
+        result = asyncio.run(self.provider.complete(request))
 
         assert isinstance(result, ChatResponse)
         assert result.text == "Hello from GPT!"
