@@ -52,6 +52,9 @@ async def _run_agent(
         agent_name, extra_behaviors=behaviors if behaviors else None
     )
 
+    if session is not None:
+        host.set_resume_session_id(session)
+
     if message is not None:
         # Single-shot mode: run one prompt and stream events
         async for event in host.run(message):

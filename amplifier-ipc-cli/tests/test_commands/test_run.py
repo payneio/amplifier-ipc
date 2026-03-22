@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from click.testing import CliRunner
 
@@ -117,3 +117,47 @@ class TestVersionCommand:
             f"Exit code: {result.exit_code}\nOutput: {result.output}"
         )
         assert "amplifier-ipc-cli" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Test 6: test_run_with_session_flag_passes_session_id
+# ---------------------------------------------------------------------------
+
+
+class TestRunWithSessionFlag:
+    def test_run_with_session_flag_passes_session_id(self) -> None:
+        """run --agent foundation --session abc123 'hello' passes session_id to host.
+
+        After launch_session, _run_agent must call host.set_resume_session_id(session)
+        when the --session flag is provided.
+        """
+        from amplifier_ipc_cli.main import cli
+
+        runner = CliRunner()
+
+        # Create a mock host with set_resume_session_id tracked
+        mock_host = MagicMock()
+        mock_host.set_resume_session_id = MagicMock()
+
+        # Mock host.run as an async generator that yields no events
+        async def mock_run(message: str):  # type: ignore[return]
+            return
+            yield  # makes this an async generator
+
+        mock_host.run = mock_run
+
+        with patch(
+            "amplifier_ipc_cli.commands.run.launch_session", new_callable=AsyncMock
+        ) as mock_launch:
+            with patch("amplifier_ipc_cli.commands.run.KeyManager") as mock_km:
+                mock_launch.return_value = mock_host
+                mock_km.return_value.load_keys = MagicMock()
+                result = runner.invoke(
+                    cli,
+                    ["run", "--agent", "foundation", "--session", "abc123", "hello"],
+                )
+
+        assert result.exit_code == 0, (
+            f"Exit code: {result.exit_code}\nOutput: {result.output}"
+        )
+        mock_host.set_resume_session_id.assert_called_once_with("abc123")

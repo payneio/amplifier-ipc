@@ -79,6 +79,7 @@ class Host:
             asyncio.Queue()
         )
         self._approval_queue: asyncio.Queue[bool] = asyncio.Queue()
+        self._resume_session_id: str | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -95,6 +96,17 @@ class Host:
             approved: ``True`` to approve the pending action, ``False`` to deny.
         """
         self._approval_queue.put_nowait(approved)
+
+    def set_resume_session_id(self, session_id: str) -> None:
+        """Set the session ID to resume when running this session.
+
+        Call this after :func:`~amplifier_ipc_cli.session_launcher.launch_session`
+        to indicate that the session should continue from an existing session.
+
+        Args:
+            session_id: The ID of the session to resume.
+        """
+        self._resume_session_id = session_id
 
     async def run(self, prompt: str) -> AsyncIterator[HostEvent]:
         """Execute a full session turn, yielding events as they occur.
