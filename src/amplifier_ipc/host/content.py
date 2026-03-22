@@ -43,7 +43,7 @@ async def resolve_mention(mention: str, registry: Any, services: dict[str, Any])
 
     Args:
         mention: The mention string, with or without a leading ``@``.
-        registry: A :class:`~amplifier_ipc_host.registry.CapabilityRegistry`
+        registry: A :class:`~amplifier_ipc.host.registry.CapabilityRegistry`
             instance used to look up which service owns *namespace*.
         services: Mapping of service key → service object (must expose a
             ``.client.request(method, params)`` coroutine).

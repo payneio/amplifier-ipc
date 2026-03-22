@@ -24,8 +24,7 @@ from amplifier_ipc.protocol.client import Client
 # Path helpers
 # ---------------------------------------------------------------------------
 
-# The amplifier-ipc-protocol source lives alongside amplifier-ipc-host
-_PROTOCOL_SRC = Path(__file__).parent.parent.parent / "amplifier-ipc-protocol" / "src"
+_IPC_SRC = Path(__file__).parent.parent.parent / "src"
 
 
 # ---------------------------------------------------------------------------
@@ -100,9 +99,9 @@ def _create_mock_service_package(tmp_path: Path) -> Path:
 
 
 def _build_subprocess_env(pkg_parent: Path) -> dict[str, str]:
-    """Build environment dict with PYTHONPATH including pkg_parent and protocol src."""
+    """Build environment dict with PYTHONPATH including pkg_parent and ipc src."""
     existing = os.environ.get("PYTHONPATH", "")
-    extra_paths = [str(pkg_parent), str(_PROTOCOL_SRC)]
+    extra_paths = [str(pkg_parent), str(_IPC_SRC)]
     if existing:
         extra_paths.append(existing)
     env = dict(os.environ)

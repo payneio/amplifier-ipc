@@ -118,7 +118,7 @@ async def interactive_repl(
     """Run an interactive REPL loop for multi-turn conversations.
 
     Args:
-        host:        The :class:`~amplifier_ipc_host.host.Host` instance.
+        host:        The :class:`~amplifier_ipc.host.Host` instance.
         agent_name:  Agent name displayed in the banner.
         console:     Optional Rich :class:`~rich.console.Console` for output.
                      Defaults to a new stderr console.

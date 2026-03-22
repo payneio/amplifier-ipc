@@ -88,7 +88,7 @@ class Host:
     def send_approval(self, approved: bool) -> None:
         """Submit an approval decision to unblock the orchestrator loop.
 
-        Called by the CLI when an :class:`~amplifier_ipc_host.events.ApprovalRequestEvent`
+        Called by the CLI when an :class:`~amplifier_ipc.host.events.ApprovalRequestEvent`
         is received.  The orchestrator loop awaits this value after yielding
         the event, so calling this method unblocks it.
 
@@ -100,7 +100,7 @@ class Host:
     def set_resume_session_id(self, session_id: str) -> None:
         """Set the session ID to resume when running this session.
 
-        Call this after :func:`~amplifier_ipc_cli.session_launcher.launch_session`
+        Call this after :func:`~amplifier_ipc.cli.session_launcher.launch_session`
         to indicate that the session should continue from an existing session.
 
         Args:
@@ -243,7 +243,7 @@ class Host:
         The returned coroutine function handles ``request.session_spawn`` by
         building a ``parent_config`` dict populated from the host's resolved
         configuration and capability registry, then delegating to
-        :func:`~amplifier_ipc_host.spawner.spawn_child_session`.
+        :func:`~amplifier_ipc.host.spawner.spawn_child_session`.
 
         Extracting this into a factory method makes the spawn logic directly
         testable without running the full :meth:`run` lifecycle.
@@ -253,7 +253,7 @@ class Host:
 
         Returns:
             An async callable ``(params: Any) -> Any`` suitable for passing
-            as the ``spawn_handler`` argument to :class:`~amplifier_ipc_host.router.Router`.
+            as the ``spawn_handler`` argument to :class:`~amplifier_ipc.host.router.Router`.
         """
 
         async def _handle_spawn(params: Any) -> Any:
@@ -300,7 +300,7 @@ class Host:
         The returned coroutine function handles ``request.session_resume`` by
         loading the child session's transcript, prepending it as context lines
         in ``role: content`` format, and delegating to
-        :func:`~amplifier_ipc_host.spawner._run_child_session`.
+        :func:`~amplifier_ipc.host.spawner._run_child_session`.
 
         Extracting this into a factory method makes the resume logic directly
         testable without running the full :meth:`run` lifecycle.
@@ -310,7 +310,7 @@ class Host:
 
         Returns:
             An async callable ``(params: Any) -> Any`` suitable for passing
-            as the ``resume_handler`` argument to :class:`~amplifier_ipc_host.router.Router`.
+            as the ``resume_handler`` argument to :class:`~amplifier_ipc.host.router.Router`.
         """
 
         async def _handle_resume(params: Any) -> Any:
@@ -609,7 +609,7 @@ class Host:
         The IPC protocol server wraps capabilities under a ``capabilities`` key
         and represents content as ``{\"paths\": [...]}`` rather than a flat list.
         This method normalises the nested format into the flat dict expected by
-        :meth:`~amplifier_ipc_host.registry.CapabilityRegistry.register`.
+        :meth:`~amplifier_ipc.host.registry.CapabilityRegistry.register`.
 
         Uses a 10-second timeout per service.
         """

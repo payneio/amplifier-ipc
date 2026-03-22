@@ -47,7 +47,7 @@ class CLIApprovalHandler:
         user's yes/no response.
 
         Args:
-            event: The :class:`~amplifier_ipc_host.events.ApprovalRequestEvent`
+            event: The :class:`~amplifier_ipc.host.events.ApprovalRequestEvent`
                    to handle.
 
         Returns:

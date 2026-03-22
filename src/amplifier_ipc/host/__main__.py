@@ -23,7 +23,7 @@ async def _consume_events(host: Host, prompt: str) -> None:
     """Consume the host event stream and print output to stdout.
 
     Stream tokens are printed immediately as they arrive.  The final
-    :class:`~amplifier_ipc_host.events.CompleteEvent` result is printed if no
+    :class:`~amplifier_ipc.host.events.CompleteEvent` result is printed if no
     stream tokens were emitted (i.e. non-streaming orchestrators).
 
     Args:

@@ -197,7 +197,7 @@ services:
         with patch("amplifier_ipc.cli.session_launcher.Host") as mock_host_class:
             mock_host_class.return_value = mock_host_instance
 
-            result = asyncio.run(
+            _ = asyncio.run(
                 launch_session(
                     "test-agent",
                     registry=registry,

@@ -1,7 +1,7 @@
 """Session spawner — thin bridge for agent delegation in sub-sessions.
 
 When the orchestrator's ``delegate`` tool fires, the CLI intercepts and
-creates a child :class:`~amplifier_ipc_host.host.Host` instance using this
+creates a child :class:`~amplifier_ipc.host.Host` instance using this
 module.
 """
 
@@ -88,7 +88,7 @@ def merge_child_config(
     parent values when not explicitly overridden by the child.
 
     Args:
-        parent: The parent session's :class:`~amplifier_ipc_host.config.SessionConfig`.
+        parent: The parent session's :class:`~amplifier_ipc.host.config.SessionConfig`.
         child_services: Additional service names required by the child agent.
         orchestrator: Optional orchestrator override for the child session.
         context_manager: Optional context_manager override for the child session.
@@ -96,7 +96,7 @@ def merge_child_config(
         component_config: Optional component_config override (merged on top of parent).
 
     Returns:
-        A new :class:`~amplifier_ipc_host.config.SessionConfig` for the child session.
+        A new :class:`~amplifier_ipc.host.config.SessionConfig` for the child session.
     """
     # Deduplicate services: parent first, then child additions
     seen: set[str] = set()
@@ -141,12 +141,12 @@ async def spawn_sub_session(
     Resolves the child agent from the registry, builds its :class:`SessionConfig`,
     merges it with the parent config, creates a :class:`Host` instance, runs
     it with the given instruction, and returns the final response text from
-    the :class:`~amplifier_ipc_host.events.CompleteEvent`.
+    the :class:`~amplifier_ipc.host.events.CompleteEvent`.
 
     Args:
         request: The :class:`SpawnRequest` describing what to spawn.
         parent_config: The parent session's :class:`SessionConfig` to merge from.
-        registry: The :class:`~amplifier_ipc_cli.registry.Registry` used for
+        registry: The :class:`~amplifier_ipc.cli.registry.Registry` used for
             agent resolution.
         settings: Optional :class:`HostSettings` for the child Host.  Defaults
             to a new :class:`HostSettings` if not provided.
@@ -156,11 +156,11 @@ async def spawn_sub_session(
 
     Returns:
         The response string from the child agent's
-        :class:`~amplifier_ipc_host.events.CompleteEvent`.
+        :class:`~amplifier_ipc.host.events.CompleteEvent`.
 
     Raises:
         RuntimeError: If the child session completes without emitting a
-            :class:`~amplifier_ipc_host.events.CompleteEvent`.
+            :class:`~amplifier_ipc.host.events.CompleteEvent`.
     """
     from amplifier_ipc.host.definitions import resolve_agent
     from amplifier_ipc.cli.session_launcher import build_session_config

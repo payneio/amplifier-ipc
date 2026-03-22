@@ -320,7 +320,7 @@ async def _run_child_session(
             services, orchestrator, context_manager, provider keys).
         instruction: The instruction to pass to the child Host.
         request: The original spawn request parameters.
-        settings: Optional :class:`~amplifier_ipc_host.config.HostSettings`;
+        settings: Optional :class:`~amplifier_ipc.host.config.HostSettings`;
             a default instance is created when ``None``.
         session_dir: Optional session directory path forwarded to :class:`Host`.
 
@@ -329,9 +329,9 @@ async def _run_child_session(
 
         * ``session_id``: The child session ID.
         * ``response``: The text result from the final
-          :class:`~amplifier_ipc_host.events.CompleteEvent`, or ``""`` if
+          :class:`~amplifier_ipc.host.events.CompleteEvent`, or ``""`` if
           none was emitted.
-        * ``turn_count``: Number of :class:`~amplifier_ipc_host.events.CompleteEvent`
+        * ``turn_count``: Number of :class:`~amplifier_ipc.host.events.CompleteEvent`
           instances received (0 or 1).
         * ``metadata``: Reserved dict for future use.
     """
