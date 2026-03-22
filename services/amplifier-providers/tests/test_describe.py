@@ -89,9 +89,9 @@ def test_stub_providers_raise_not_implemented() -> None:
     """Remaining stub providers must raise NotImplementedError on complete().
 
     AzureOpenAIProvider is no longer a stub — it has a full implementation.
+    OllamaProvider is no longer a stub — it has a full implementation.
     """
     stub_imports = [
-        ("amplifier_providers.providers.ollama_provider", "OllamaProvider"),
         ("amplifier_providers.providers.vllm_provider", "VllmProvider"),
         (
             "amplifier_providers.providers.github_copilot_provider",
