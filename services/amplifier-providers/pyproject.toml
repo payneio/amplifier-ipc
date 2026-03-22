@@ -48,6 +48,7 @@ amplifier-ipc-protocol = { path = "../../amplifier-ipc-protocol" }
 [dependency-groups]
 dev = [
     "anthropic>=0.86.0",
+    "openai>=2.29.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
 ]
