@@ -28,8 +28,6 @@ logger = logging.getLogger(__name__)
 COPILOT_TOKEN_URL = "https://api.github.com/copilot_internal/v2/token"
 COPILOT_API_BASE = "https://api.githubcopilot.com"
 
-DEFAULT_MODEL = "gpt-4o"
-
 
 @provider
 class GitHubCopilotProvider(OpenAIProvider):
