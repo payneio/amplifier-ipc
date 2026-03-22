@@ -414,6 +414,125 @@ async def test_host_spawn_handler_passes_parent_config() -> None:
     assert any(h["name"] == "pre_tool" for h in pc["hooks"])
 
 
+async def test_host_resume_handler_wired() -> None:
+    """Router receives resume_handler that handles request.session_resume,
+    returns response and session_id correctly.
+
+    Verifies that _build_resume_handler builds a closure that:
+    1. Loads the child session's transcript from persistence.
+    2. Prepends the transcript as context lines (role: content format).
+    3. Calls _run_child_session with the full instruction.
+    4. Returns a result dict with response and session_id.
+    5. The Router is wired with resume_handler so request.session_resume routes correctly.
+    """
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from amplifier_ipc_host.persistence import SessionPersistence
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        session_dir = Path(tmpdir)
+
+        # Create a child session with a transcript so the handler can load it
+        child_session_id = "child-session-abc"
+        child_persistence = SessionPersistence(child_session_id, session_dir)
+        child_persistence.append_message({"role": "user", "content": "Old question"})
+        child_persistence.append_message({"role": "assistant", "content": "Old answer"})
+
+        registry = CapabilityRegistry()
+        registry.register(
+            "foundation",
+            {
+                "tools": [{"name": "bash", "description": "Run bash"}],
+                "hooks": [],
+                "orchestrators": [{"name": "loop"}],
+                "context_managers": [{"name": "simple"}],
+                "providers": [{"name": "anthropic"}],
+                "content": [],
+            },
+        )
+
+        config = SessionConfig(
+            services=["foundation"],
+            orchestrator="loop",
+            context_manager="simple",
+            provider="anthropic",
+        )
+        settings = HostSettings()
+
+        host = Host(config=config, settings=settings, session_dir=session_dir)
+        host._registry = registry
+        host._services = {
+            "foundation": FakeService(FakeClient()),
+            "ctx": FakeService(FakeClient()),
+            "provider": FakeService(FakeClient()),
+        }
+
+        captured: list[dict[str, Any]] = []
+
+        async def mock_run_child_session(
+            child_session_id: str,
+            child_config: dict,
+            instruction: str,
+            request: Any,
+            settings: Any = None,
+            session_dir: Any = None,
+        ) -> dict:
+            captured.append(
+                {
+                    "child_session_id": child_session_id,
+                    "instruction": instruction,
+                    "child_config": child_config,
+                }
+            )
+            return {
+                "session_id": child_session_id,
+                "response": "resumed response",
+                "turn_count": 1,
+                "metadata": {},
+            }
+
+        resume_handler = host._build_resume_handler("parent-sess-id")
+
+        host._router = Router(
+            registry=registry,
+            services=host._services,
+            context_manager_key="ctx",
+            provider_key="provider",
+            resume_handler=resume_handler,
+        )
+
+        with patch(
+            "amplifier_ipc_host.host._run_child_session", mock_run_child_session
+        ):
+            result = await host._handle_orchestrator_request(
+                "request.session_resume",
+                {"session_id": child_session_id, "instruction": "Follow-up question"},
+            )
+
+        # Verify response and session_id are returned correctly
+        assert result["response"] == "resumed response"
+        assert result["session_id"] == child_session_id
+
+        # Verify _run_child_session was called once with the child session id
+        assert len(captured) == 1
+        assert captured[0]["child_session_id"] == child_session_id
+
+        # Verify transcript context was prepended in role: content format
+        full_instruction = captured[0]["instruction"]
+        assert "user: Old question" in full_instruction
+        assert "assistant: Old answer" in full_instruction
+        assert "Follow-up question" in full_instruction
+
+        # Verify child_config was built from parent config
+        pc = captured[0]["child_config"]
+        assert pc["services"] == ["foundation"]
+        assert pc["orchestrator"] == "loop"
+        assert pc["context_manager"] == "simple"
+        assert pc["provider"] == "anthropic"
+
+
 async def test_orchestrator_loop_yields_content_block_events() -> None:
     """_orchestrator_loop yields StreamContentBlockStartEvent, StreamTokenEvent,
     StreamContentBlockEndEvent, then CompleteEvent for a full content-block sequence."""

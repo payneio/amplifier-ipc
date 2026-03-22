@@ -36,7 +36,11 @@ from amplifier_ipc_host.lifecycle import ServiceProcess, shutdown_service, spawn
 from amplifier_ipc_host.persistence import SessionPersistence
 from amplifier_ipc_host.registry import CapabilityRegistry
 from amplifier_ipc_host.router import Router
-from amplifier_ipc_host.spawner import SpawnRequest, spawn_child_session
+from amplifier_ipc_host.spawner import (
+    SpawnRequest,
+    _run_child_session,
+    spawn_child_session,
+)
 from amplifier_ipc_protocol.errors import JsonRpcError, make_error_response
 from amplifier_ipc_protocol.framing import read_message, write_message
 
@@ -145,6 +149,7 @@ class Host:
                     self._provider_notification_queue.put_nowait(msg)
 
             _handle_spawn = self._build_spawn_handler(session_id)
+            _handle_resume = self._build_resume_handler(session_id)
 
             self._router = Router(
                 registry=self._registry,
@@ -155,6 +160,7 @@ class Host:
                 state=self._state,
                 on_provider_notification=_queue_provider_notification,
                 spawn_handler=_handle_spawn,
+                resume_handler=_handle_resume,
             )
 
             # 6. Assemble system prompt
@@ -258,6 +264,78 @@ class Host:
             )
 
         return _handle_spawn
+
+    def _build_resume_handler(self, session_id: str) -> Any:
+        """Build and return the async ``_handle_resume`` closure for *session_id*.
+
+        The returned coroutine function handles ``request.session_resume`` by
+        loading the child session's transcript, prepending it as context lines
+        in ``role: content`` format, and delegating to
+        :func:`~amplifier_ipc_host.spawner._run_child_session`.
+
+        Extracting this into a factory method makes the resume logic directly
+        testable without running the full :meth:`run` lifecycle.
+
+        Args:
+            session_id: The current (parent) session's ID (captured in closure).
+
+        Returns:
+            An async callable ``(params: Any) -> Any`` suitable for passing
+            as the ``resume_handler`` argument to :class:`~amplifier_ipc_host.router.Router`.
+        """
+
+        async def _handle_resume(params: Any) -> Any:
+            """Handle request.session_resume from the orchestrator."""
+            p = params if isinstance(params, dict) else {}
+
+            # 1. Extract session_id and instruction from params
+            child_session_id: str = p.get("session_id", "")
+            instruction: str = p.get("instruction", "")
+
+            # 2. Create SessionPersistence for the child session
+            child_persistence = SessionPersistence(child_session_id, self._session_dir)
+
+            # 3. Load the child session's transcript
+            child_transcript = child_persistence.load_transcript()
+
+            # 4. Build child_config from parent config
+            child_config: dict[str, Any] = {
+                "services": list(self._config.services),
+                "orchestrator": self._config.orchestrator,
+                "context_manager": self._config.context_manager,
+                "provider": self._config.provider,
+                "component_config": dict(self._config.component_config),
+                "tools": self._registry.get_all_tool_specs(),
+                "hooks": self._registry.get_all_hook_descriptors(),
+            }
+
+            # 5. Prepend previous transcript as context lines (role: content format)
+            context_lines = "\n".join(
+                f"{msg.get('role', 'unknown')}: {msg.get('content', '')}"
+                for msg in child_transcript
+            )
+
+            # 6. Build the full instruction (context + new instruction)
+            if context_lines:
+                full_instruction = f"{context_lines}\n\n{instruction}"
+            else:
+                full_instruction = instruction
+
+            # Build a minimal SpawnRequest for the child session run
+            spawn_request = SpawnRequest(
+                agent="self",
+                instruction=full_instruction,
+            )
+
+            return await _run_child_session(
+                child_session_id=child_session_id,
+                child_config=child_config,
+                instruction=full_instruction,
+                request=spawn_request,
+                session_dir=self._session_dir,
+            )
+
+        return _handle_resume
 
     # ------------------------------------------------------------------
     # Orchestrator turn loop
