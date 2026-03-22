@@ -385,3 +385,81 @@ class TestResetDryRun:
         )
         # The file should still exist since it's a dry run
         assert sessions_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# Tests: reset definitions includes alias files
+# ---------------------------------------------------------------------------
+
+
+class TestResetDefinitionsIncludesAliasFiles:
+    """reset --remove definitions must include agents.yaml and behaviors.yaml."""
+
+    def test_get_target_paths_definitions_includes_agents_yaml(self, tmp_path):
+        from amplifier_ipc_cli.commands.reset import _get_target_paths
+
+        paths = _get_target_paths("definitions", tmp_path)
+        path_strs = [str(p) for p in paths]
+        assert any("agents.yaml" in s for s in path_strs), (
+            f"Expected agents.yaml in definitions paths, got: {path_strs}"
+        )
+
+    def test_get_target_paths_definitions_includes_behaviors_yaml(self, tmp_path):
+        from amplifier_ipc_cli.commands.reset import _get_target_paths
+
+        paths = _get_target_paths("definitions", tmp_path)
+        path_strs = [str(p) for p in paths]
+        assert any("behaviors.yaml" in s for s in path_strs), (
+            f"Expected behaviors.yaml in definitions paths, got: {path_strs}"
+        )
+
+    def test_get_target_paths_all_includes_agents_yaml(self, tmp_path):
+        from amplifier_ipc_cli.commands.reset import _get_target_paths
+
+        paths = _get_target_paths("all", tmp_path)
+        path_strs = [str(p) for p in paths]
+        assert any("agents.yaml" in s for s in path_strs), (
+            f"Expected agents.yaml in 'all' paths, got: {path_strs}"
+        )
+
+    def test_reset_definitions_deletes_agents_yaml(self, tmp_path):
+        """reset --remove definitions actually removes agents.yaml when it exists."""
+        from amplifier_ipc_cli.commands.reset import reset_cmd
+
+        amp_dir = tmp_path / ".amplifier"
+        amp_dir.mkdir(parents=True)
+        (amp_dir / "definitions").mkdir()
+        agents_yaml = amp_dir / "agents.yaml"
+        agents_yaml.write_text("my-agent: agent_my-agent_12345678\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            reset_cmd,
+            ["--remove", "definitions", "--home", str(amp_dir)],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, f"Output: {result.output}"
+        assert not agents_yaml.exists(), (
+            "agents.yaml should be removed by reset --remove definitions"
+        )
+
+    def test_reset_home_option_overrides_default(self, tmp_path):
+        """reset --home overrides the default ~/.amplifier path."""
+        from amplifier_ipc_cli.commands.reset import reset_cmd
+
+        amp_dir = tmp_path / "custom-amp"
+        amp_dir.mkdir(parents=True)
+        sessions_dir = amp_dir / "sessions"
+        sessions_dir.mkdir()
+        (sessions_dir / "session.txt").write_text("data")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            reset_cmd,
+            ["--remove", "sessions", "--home", str(amp_dir)],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, f"Output: {result.output}"
+        assert not sessions_dir.exists(), (
+            "sessions dir should be removed from the --home path"
+        )

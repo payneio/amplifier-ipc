@@ -223,6 +223,61 @@ class Registry:
         """
         return self.get_environment_path(definition_id).is_dir()
 
+    def unregister_definition(self, name: str, kind: str = "agent") -> str:
+        """Remove a definition and all its alias entries.
+
+        Args:
+            name: The local_ref alias or URL alias to look up.
+            kind: "agent" or "behavior"
+
+        Returns:
+            The definition_id that was removed.
+
+        Raises:
+            FileNotFoundError: If the name is not registered.
+        """
+        if kind == "agent":
+            alias_file = self.home / "agents.yaml"
+        else:
+            alias_file = self.home / "behaviors.yaml"
+
+        # Resolve alias → definition_id (raises FileNotFoundError if not found)
+        alias_data: dict = {}
+        if alias_file.exists():
+            alias_data = yaml.safe_load(alias_file.read_text()) or {}
+
+        definition_id = alias_data.get(name)
+        if definition_id is None:
+            raise FileNotFoundError(f"{kind} '{name}' not found in registry.")
+
+        # Delete the definition file
+        def_file = self.home / "definitions" / f"{definition_id}.yaml"
+        if def_file.exists():
+            def_file.unlink()
+
+        # Remove ALL alias entries that point to this definition_id
+        cleaned = {k: v for k, v in alias_data.items() if v != definition_id}
+        alias_file.write_text(yaml.dump(cleaned, default_flow_style=False))
+
+        return definition_id
+
+    def uninstall_environment(self, definition_id: str) -> bool:
+        """Remove the environment directory for a definition.
+
+        Args:
+            definition_id: The definition identifier.
+
+        Returns:
+            True if removed, False if it didn't exist.
+        """
+        import shutil
+
+        env_path = self.get_environment_path(definition_id)
+        if not env_path.is_dir():
+            return False
+        shutil.rmtree(env_path)
+        return True
+
     def get_source_meta(self, definition_id: str) -> Optional[dict]:
         """Read the _meta block from a stored definition file.
 

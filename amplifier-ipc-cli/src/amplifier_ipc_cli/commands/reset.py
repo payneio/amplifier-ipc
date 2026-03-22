@@ -30,7 +30,11 @@ def _get_target_paths(target: str, amp_dir: Path) -> list[Path]:
     """
     mapping: dict[str, list[Path]] = {
         "environments": [amp_dir / "environments"],
-        "definitions": [amp_dir / "definitions"],
+        "definitions": [
+            amp_dir / "definitions",
+            amp_dir / "agents.yaml",
+            amp_dir / "behaviors.yaml",
+        ],
         "sessions": [amp_dir / "sessions"],
         "keys": [amp_dir / "keys.env"],
     }
@@ -73,13 +77,20 @@ def _remove_path(path: Path) -> None:
     default=False,
     help="Show what would be removed without actually removing anything.",
 )
-def reset_cmd(remove: str, dry_run: bool) -> None:
+@click.option(
+    "--home",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Amplifier home directory (default: ~/.amplifier).",
+)
+def reset_cmd(remove: str, dry_run: bool, home: Path | None) -> None:
     """Remove amplifier data from the ~/.amplifier/ directory.
 
     Use --remove to specify which category of data to wipe.
     Use --dry-run to preview what would be deleted without making changes.
+    Use --home to target a non-default amplifier directory.
     """
-    amp_dir = Path.home() / ".amplifier"
+    amp_dir = home or Path.home() / ".amplifier"
     targets = _get_target_paths(remove, amp_dir)
 
     if not targets:
