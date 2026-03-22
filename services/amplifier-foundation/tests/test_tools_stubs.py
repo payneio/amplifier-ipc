@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from amplifier_ipc_protocol.discovery import scan_package
+from amplifier_ipc.protocol.discovery import scan_package
 
 STUB_TOOL_NAMES = ["mcp", "recipes", "apply_patch", "python_check", "shadow"]
 

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from amplifier_ipc_protocol import HookAction, HookResult, hook
+from amplifier_ipc.protocol import HookAction, HookResult, hook
 
 logger = logging.getLogger(__name__)
 

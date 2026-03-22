@@ -10,8 +10,8 @@ anthropic = pytest.importorskip("anthropic")
 
 import httpx
 
-from amplifier_ipc_protocol import ChatRequest, ChatResponse, Message
-from amplifier_ipc_protocol.models import (
+from amplifier_ipc.protocol import ChatRequest, ChatResponse, Message
+from amplifier_ipc.protocol.models import (
     TextBlock,
     ThinkingBlock,
     ToolCallBlock,

@@ -10,7 +10,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import aiohttp
-from amplifier_ipc_protocol import ToolResult, tool
+from amplifier_ipc.protocol import ToolResult, tool
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 

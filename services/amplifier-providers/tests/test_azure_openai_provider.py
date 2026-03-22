@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from amplifier_ipc_protocol import ChatRequest, ChatResponse, Message
+from amplifier_ipc.protocol import ChatRequest, ChatResponse, Message
 
 from amplifier_providers.providers.azure_openai_provider import AzureOpenAIProvider
 

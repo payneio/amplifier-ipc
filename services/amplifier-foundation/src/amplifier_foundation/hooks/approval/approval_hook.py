@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from amplifier_ipc_protocol.models import HookAction, HookResult
+from amplifier_ipc.protocol.models import HookAction, HookResult
 
 from .audit import ApprovalRequest, ApprovalResponse, audit_log
 from .config import DEFAULT_RULES, check_auto_action

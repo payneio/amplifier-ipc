@@ -12,7 +12,7 @@ import subprocess
 import sys
 from typing import Any
 
-from amplifier_ipc_protocol import ToolResult
+from amplifier_ipc.protocol import ToolResult
 
 from .safety import SafetyConfig, SafetyValidator
 

@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from amplifier_ipc_protocol import ToolResult, tool
+from amplifier_ipc.protocol import ToolResult, tool
 
 from .discovery import (
     discover_skills,

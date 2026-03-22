@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from amplifier_ipc_protocol import ChatRequest
-from amplifier_ipc_protocol import ChatResponse
-from amplifier_ipc_protocol import TextBlock
-from amplifier_ipc_protocol import ToolCall
-from amplifier_ipc_protocol import Usage
-from amplifier_ipc_protocol import provider
+from amplifier_ipc.protocol import ChatRequest
+from amplifier_ipc.protocol import ChatResponse
+from amplifier_ipc.protocol import TextBlock
+from amplifier_ipc.protocol import ToolCall
+from amplifier_ipc.protocol import Usage
+from amplifier_ipc.protocol import provider
 
 __all__ = ["MockProvider"]
 

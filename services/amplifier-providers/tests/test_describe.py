@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from amplifier_ipc_protocol.discovery import scan_package
-from amplifier_ipc_protocol.server import Server
+from amplifier_ipc.protocol.discovery import scan_package
+from amplifier_ipc.protocol.server import Server
 
 EXPECTED_PROVIDERS = {
     "mock",

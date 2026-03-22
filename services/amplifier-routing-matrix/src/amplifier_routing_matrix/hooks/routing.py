@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from amplifier_ipc_protocol import HookAction, HookResult, hook
+from amplifier_ipc.protocol import HookAction, HookResult, hook
 
 from .matrix_loader import compose_matrix, load_matrix
 

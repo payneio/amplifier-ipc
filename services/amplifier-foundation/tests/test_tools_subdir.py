@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import pytest
 
-from amplifier_ipc_protocol.discovery import scan_package
+from amplifier_ipc.protocol.discovery import scan_package
 
 
 @pytest.fixture(scope="module")

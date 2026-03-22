@@ -10,7 +10,7 @@ Usage::
 
 from __future__ import annotations
 
-from amplifier_ipc_protocol import Server
+from amplifier_ipc.protocol import Server
 
 
 def main() -> None:

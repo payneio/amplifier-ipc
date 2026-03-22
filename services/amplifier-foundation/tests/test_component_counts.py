@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from amplifier_ipc_protocol.discovery import scan_package, scan_content
+from amplifier_ipc.protocol.discovery import scan_package, scan_content
 
 
 # ---------------------------------------------------------------------------

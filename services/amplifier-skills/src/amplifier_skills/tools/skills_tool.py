@@ -4,7 +4,7 @@ scan_package filters by obj.__module__ == mod.__name__, so a plain re-import
 won't work. We define a thin subclass here so __module__ matches this file.
 """
 
-from amplifier_ipc_protocol import tool
+from amplifier_ipc.protocol import tool
 
 from amplifier_skills.tools.skills.tool import SkillsTool as _SkillsToolBase
 

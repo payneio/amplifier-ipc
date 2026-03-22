@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from amplifier_ipc_protocol import ChatRequest, ChatResponse, Message
+from amplifier_ipc.protocol import ChatRequest, ChatResponse, Message
 
 from amplifier_providers.providers.vllm_provider import VllmProvider
 

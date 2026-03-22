@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from amplifier_ipc_protocol.models import HookAction, HookResult
+from amplifier_ipc.protocol.models import HookAction, HookResult
 
 from .executor import HookExecutor
 from .loader import HookConfigLoader

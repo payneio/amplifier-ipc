@@ -7,7 +7,7 @@ scan_package() discovers them (obj.__module__ == mod.__name__).
 
 from __future__ import annotations
 
-from amplifier_ipc_protocol import tool
+from amplifier_ipc.protocol import tool
 
 from amplifier_foundation.tools.filesystem.edit import EditTool as _EditTool
 from amplifier_foundation.tools.filesystem.read import ReadTool as _ReadTool

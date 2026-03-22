@@ -13,8 +13,8 @@ import os
 import uuid
 from typing import Any
 
-from amplifier_ipc_protocol import ChatRequest, ChatResponse, provider
-from amplifier_ipc_protocol.models import (
+from amplifier_ipc.protocol import ChatRequest, ChatResponse, provider
+from amplifier_ipc.protocol.models import (
     TextBlock,
     ThinkingBlock,
     ToolCall,

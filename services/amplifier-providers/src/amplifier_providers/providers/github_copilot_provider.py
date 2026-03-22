@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from amplifier_ipc_protocol import ChatRequest, ChatResponse, provider
+from amplifier_ipc.protocol import ChatRequest, ChatResponse, provider
 
 from amplifier_providers.providers.openai_provider import (
     OpenAIProvider,

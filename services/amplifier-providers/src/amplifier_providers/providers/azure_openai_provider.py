@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from amplifier_ipc_protocol import ChatRequest, ChatResponse, provider
+from amplifier_ipc.protocol import ChatRequest, ChatResponse, provider
 
 from amplifier_providers.providers.openai_provider import OpenAIProvider
 

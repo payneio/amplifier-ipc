@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from amplifier_ipc_protocol.discovery import scan_package
+from amplifier_ipc.protocol.discovery import scan_package
 
 
 # ---------------------------------------------------------------------------

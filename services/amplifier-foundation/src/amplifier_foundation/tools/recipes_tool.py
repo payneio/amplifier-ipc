@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from amplifier_ipc_protocol import ToolResult, tool
+from amplifier_ipc.protocol import ToolResult, tool
 
 
 @tool

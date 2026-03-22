@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from amplifier_ipc_protocol.discovery import scan_content, scan_package
+from amplifier_ipc.protocol.discovery import scan_content, scan_package
 
 
 def test_discovers_no_tools() -> None:

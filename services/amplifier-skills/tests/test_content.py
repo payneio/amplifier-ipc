@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from amplifier_ipc_protocol.discovery import scan_content
+from amplifier_ipc.protocol.discovery import scan_content
 
 
 PROJECT_ROOT = Path(__file__).parent.parent

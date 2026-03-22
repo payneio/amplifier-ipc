@@ -7,7 +7,7 @@ name = "amplifier-foundation"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "amplifier-ipc-protocol",
+    "amplifier-ipc",
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "rich>=13.0",
@@ -39,4 +39,4 @@ pythonVersion = "3.11"
 extraPaths = ["src"]
 
 [tool.uv.sources]
-amplifier-ipc-protocol = { path = "../../amplifier-ipc-protocol" }
+amplifier-ipc = { path = "../../." }

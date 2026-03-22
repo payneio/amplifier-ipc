@@ -6,7 +6,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from amplifier_ipc_protocol import Message, ToolCall, context_manager
+from amplifier_ipc.protocol import Message, ToolCall, context_manager
 
 
 logger = logging.getLogger(__name__)

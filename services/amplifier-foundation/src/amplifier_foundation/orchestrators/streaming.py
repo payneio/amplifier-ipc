@@ -14,7 +14,7 @@ import logging
 import time
 from typing import Any
 
-from amplifier_ipc_protocol import (
+from amplifier_ipc.protocol import (
     ChatRequest,
     ChatResponse,
     HookAction,

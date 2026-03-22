@@ -6,8 +6,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from amplifier_ipc_protocol import hook
-from amplifier_ipc_protocol.models import HookAction, HookResult
+from amplifier_ipc.protocol import hook
+from amplifier_ipc.protocol.models import HookAction, HookResult
 
 from .routing.matrix_loader import load_matrix
 

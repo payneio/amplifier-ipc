@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from amplifier_ipc_protocol import ChatRequest, ChatResponse, Message
+from amplifier_ipc.protocol import ChatRequest, ChatResponse, Message
 
 from amplifier_providers.providers.ollama_provider import OllamaProvider
 
@@ -101,7 +101,7 @@ class TestOllamaConvertResponse:
             "eval_count": 42,
             "prompt_eval_count": 10,
         }
-        from amplifier_ipc_protocol.models import TextBlock
+        from amplifier_ipc.protocol.models import TextBlock
 
         result = self.provider._convert_to_chat_response(response)
 

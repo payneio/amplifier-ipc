@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from amplifier_ipc_protocol import ToolResult, tool
+from amplifier_ipc.protocol import ToolResult, tool
 
 
 logger = logging.getLogger(__name__)

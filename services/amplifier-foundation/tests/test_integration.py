@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from amplifier_ipc_protocol.server import Server
+from amplifier_ipc.protocol.server import Server
 
 
 # ---------------------------------------------------------------------------

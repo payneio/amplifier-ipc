@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-from amplifier_ipc_protocol import ToolResult
+from amplifier_ipc.protocol import ToolResult
 
 
 class ReadTool:

@@ -16,8 +16,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-from amplifier_ipc_protocol import ChatRequest, ChatResponse, Message, ToolSpec
-from amplifier_ipc_protocol.server import Server
+from amplifier_ipc.protocol import ChatRequest, ChatResponse, Message, ToolSpec
+from amplifier_ipc.protocol.server import Server
 
 
 # ---------------------------------------------------------------------------

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from amplifier_ipc_protocol import ChatRequest, ChatResponse, Message
-from amplifier_ipc_protocol.models import ToolSpec
+from amplifier_ipc.protocol import ChatRequest, ChatResponse, Message
+from amplifier_ipc.protocol.models import ToolSpec
 
 from amplifier_providers.providers.gemini_provider import GeminiProvider
 

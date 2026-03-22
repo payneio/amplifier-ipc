@@ -16,8 +16,8 @@ import random
 from dataclasses import dataclass
 from typing import Any
 
-from amplifier_ipc_protocol import ChatRequest, ChatResponse, provider
-from amplifier_ipc_protocol.models import (
+from amplifier_ipc.protocol import ChatRequest, ChatResponse, provider
+from amplifier_ipc.protocol.models import (
     TextBlock,
     ThinkingBlock,
     ToolCall,
@@ -757,7 +757,7 @@ class AnthropicProvider:
         The content contains a structured error explaining what happened and
         instructing the model to retry.
         """
-        from amplifier_ipc_protocol import Message  # noqa: PLC0415
+        from amplifier_ipc.protocol import Message  # noqa: PLC0415
 
         content = (
             f"[SYSTEM ERROR: Tool result missing from conversation history] "

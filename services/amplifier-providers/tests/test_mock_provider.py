@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from amplifier_ipc_protocol import ChatRequest, ChatResponse, Message
-from amplifier_ipc_protocol.discovery import scan_package
-from amplifier_ipc_protocol.server import Server
+from amplifier_ipc.protocol import ChatRequest, ChatResponse, Message
+from amplifier_ipc.protocol.discovery import scan_package
+from amplifier_ipc.protocol.server import Server
 from amplifier_providers.providers.mock import MockProvider
 
 

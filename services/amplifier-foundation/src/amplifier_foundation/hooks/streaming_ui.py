@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from amplifier_ipc_protocol import hook
-from amplifier_ipc_protocol.models import HookAction, HookResult
+from amplifier_ipc.protocol import hook
+from amplifier_ipc.protocol.models import HookAction, HookResult
 
 logger = logging.getLogger(__name__)
 

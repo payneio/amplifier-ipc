@@ -7,7 +7,7 @@ scan_package() discovers them (obj.__module__ == mod.__name__).
 
 from __future__ import annotations
 
-from amplifier_ipc_protocol import tool
+from amplifier_ipc.protocol import tool
 
 from amplifier_foundation.tools.search.glob import GlobTool as _GlobTool
 from amplifier_foundation.tools.search.grep import GrepTool as _GrepTool

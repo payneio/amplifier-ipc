@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from amplifier_ipc_protocol import ChatRequest, ChatResponse, Message
-from amplifier_ipc_protocol.models import (
+from amplifier_ipc.protocol import ChatRequest, ChatResponse, Message
+from amplifier_ipc.protocol.models import (
     TextBlock,
     ToolCallBlock,
     ToolSpec,
