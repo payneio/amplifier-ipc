@@ -765,6 +765,67 @@ async def test_host_resume_loads_previous_transcript() -> None:
         assert host._state == {"some_key": "some_value"}
 
 
+async def test_host_sends_configure_after_describe() -> None:
+    """_build_registry sends configure after describe for services with service_configs.
+
+    After calling describe on each service and registering its capabilities,
+    the host should call configure with the merged service config if
+    _service_configs contains an entry for that service ref.
+
+    Services without a config entry should only receive describe (no configure).
+    """
+    describe_result = {
+        "capabilities": {
+            "tools": [],
+            "hooks": [],
+            "orchestrators": [],
+            "context_managers": [],
+            "providers": [],
+            "content": [],
+        },
+    }
+
+    # Service that has config
+    client_with_config = FakeClient(
+        responses={"describe": describe_result, "configure": {}}
+    )
+    service_with_config = FakeService(client_with_config)
+
+    # Service that has NO config — configure should NOT be called on it
+    client_no_config = FakeClient(responses={"describe": describe_result})
+    service_no_config = FakeService(client_no_config)
+
+    config = SessionConfig(
+        services=["svc-a", "svc-b"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+
+    host = Host(config=config, settings=settings)
+    host._services = {
+        "svc-a": service_with_config,
+        "svc-b": service_no_config,
+    }
+
+    # Inject service config only for "svc-a"
+    service_config = {"model": "claude-3-5-sonnet", "temperature": 0.7}
+    host._service_configs = {"svc-a": service_config}
+
+    await host._build_registry()
+
+    # svc-a: describe first, then configure with the merged config
+    assert len(client_with_config.calls) == 2
+    assert client_with_config.calls[0][0] == "describe"
+    assert client_with_config.calls[1][0] == "configure"
+    assert client_with_config.calls[1][1] == {"config": service_config}
+
+    # svc-b: only describe (no config entry)
+    assert len(client_no_config.calls) == 1
+    assert client_no_config.calls[0][0] == "describe"
+
+
 async def test_host_send_approval_is_non_blocking() -> None:
     """send_approval() is non-blocking (uses put_nowait under the hood)."""
     config = SessionConfig(

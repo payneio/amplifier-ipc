@@ -71,6 +71,7 @@ class Host:
 
         # Internal state — populated during run()
         self._services: dict[str, Any] = {}
+        self._service_configs: dict[str, Any] = {}
         self._registry: CapabilityRegistry = CapabilityRegistry()
         self._router: Router | None = None
         self._persistence: SessionPersistence | None = None
@@ -640,6 +641,11 @@ class Host:
                 "content": content_paths,
             }
             self._registry.register(service_key, flat)
+
+            # Send configure with merged config for this service (if any)
+            service_config = self._service_configs.get(service_key, {})
+            if service_config:
+                await service.client.request("configure", {"config": service_config})
 
     async def _spawn_services(self) -> None:
         """Spawn all services declared in the session config."""
