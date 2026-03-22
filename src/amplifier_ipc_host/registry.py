@@ -49,23 +49,38 @@ class CapabilityRegistry:
 
         # Hooks — one entry per (service, hook_name, event, priority) tuple
         # Policy: duplicate hook names across services are all retained (hooks fan-out).
+        #
+        # Protocol supports two hook-event formats:
+        #   - "event": "tool:pre"          (singular string — legacy/unit-test format)
+        #   - "events": ["tool:pre", ...]  (plural list — real service format)
         for hook_descriptor in describe_result.get("hooks", []):
             try:
                 hook_name = hook_descriptor["name"]
-                event = hook_descriptor["event"]
                 priority = hook_descriptor["priority"]
             except KeyError as exc:
                 raise KeyError(
                     f"Hook descriptor from service '{service_key}' is missing key {exc}: {hook_descriptor!r}"
                 ) from exc
-            self._hook_entries.append(
-                {
-                    "service_key": service_key,
-                    "hook_name": hook_name,
-                    "event": event,
-                    "priority": priority,
-                }
-            )
+
+            # Resolve event(s): accept both plural list and singular string.
+            if "events" in hook_descriptor:
+                events: list[str] = list(hook_descriptor["events"])
+            elif "event" in hook_descriptor:
+                events = [hook_descriptor["event"]]
+            else:
+                raise KeyError(
+                    f"Hook descriptor from service '{service_key}' is missing 'event' or 'events' key: {hook_descriptor!r}"
+                )
+
+            for event in events:
+                self._hook_entries.append(
+                    {
+                        "service_key": service_key,
+                        "hook_name": hook_name,
+                        "event": event,
+                        "priority": priority,
+                    }
+                )
             self._all_hook_descriptors.append(hook_descriptor)
 
         # Orchestrators

@@ -27,6 +27,9 @@ packages = ["src/amplifier_ipc_host"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "slow: marks tests as slow-running (requires real service subprocesses)",
+]
 
 [tool.pyright]
 pythonVersion = "3.11"

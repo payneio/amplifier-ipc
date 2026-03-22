@@ -8,6 +8,7 @@ the orchestrator turn loop, persists the transcript, and tears everything down.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -182,6 +183,23 @@ class Host:
 
             # 6. Assemble system prompt
             system_prompt = await assemble_system_prompt(self._registry, self._services)
+
+            # 6b. Stop the orchestrator service's Client background read loop.
+            #
+            # _build_registry() and assemble_system_prompt() use service.client.request()
+            # which starts an asyncio background read task on process.stdout.
+            # _orchestrator_loop() reads directly from the same process.stdout, so the
+            # two readers conflict.  Cancelling the idle read task before the loop starts
+            # avoids the error:
+            #   RuntimeError: readuntil() called while another coroutine is already waiting
+            orch_service = self._services[orchestrator_key]
+            orch_client = getattr(orch_service, "client", None)
+            if orch_client is not None:
+                read_task = getattr(orch_client, "_read_task", None)
+                if read_task is not None and not read_task.done():
+                    read_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await read_task
 
             # 7. Orchestrator turn loop — yield events as they arrive
             async for event in self._orchestrator_loop(
