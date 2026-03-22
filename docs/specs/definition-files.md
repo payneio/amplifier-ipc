@@ -191,6 +191,98 @@ Definitions that provide only context or content files and no runtime service om
 
 ---
 
+## Component Configuration
+
+The `config:` block declares configuration for service components. It lives at the same level as `tools:`, `hooks:`, and other fields inside a definition. Keys are component names, optionally prefixed with `<ref>:` to target included behaviors' components.
+
+### Behavior-level config (defaults for own components)
+
+```yaml
+behavior:
+  ref: modes
+  tools: true
+  hooks: true
+  config:
+    mode-tool:
+      gate_policy: warn
+    mode-hooks:
+      search_paths: []
+```
+
+A behavior's `config:` block sets default values for its own service's components. The keys are bare component names (shorthand for `<this_ref>:<component_name>`).
+
+### Agent-level config (own components + behavior overrides)
+
+```yaml
+agent:
+  ref: amplifier-dev
+  behaviors:
+    - modes: https://...
+
+  config:
+    # Own service components (bare name = this ref's service)
+    streaming:
+      max_iterations: 50
+    bash:
+      timeout: 60
+    # Override an included behavior's component config
+    modes:mode-tool:
+      gate_policy: block
+    modes:mode-hooks:
+      search_paths: ['@superpowers:modes']
+```
+
+An agent's `config:` block can configure its own components AND override config from included behaviors. Use the `<ref>:<component_name>` syntax to target a specific behavior's component.
+
+### Resolution order
+
+Outer definitions override inner definitions:
+
+1. **Agent `config:`** (highest priority)
+2. **Behavior `config:`** (defaults)
+3. **Component defaults** (hardcoded in the component class)
+
+If a behavior sets `gate_policy: warn` and the agent sets `modes:mode-tool: {gate_policy: block}`, the component receives `block`.
+
+### Config delivery to services
+
+Configuration is delivered to service processes during startup, after the `describe` handshake:
+
+1. **`scan_package()`** discovers component classes but does NOT instantiate them
+2. **`describe`** reports capabilities from class metadata (decorators set component type, name, events, etc. on the class)
+3. **Host sends `configure`** with the merged config for that service's components:
+   ```json
+   {
+     "method": "configure",
+     "params": {
+       "config": {
+         "mode-tool": {"gate_policy": "block"},
+         "mode-hooks": {"search_paths": ["@superpowers:modes"]}
+       }
+     }
+   }
+   ```
+4. **Server instantiates components** with their config: `instance = cls(config={"gate_policy": "block"})` or `instance = cls()` for components with no config
+5. Components are ready for use
+
+The startup sequence is: **spawn → describe → configure → ready**
+
+### All config is static
+
+Component configuration is set once at session startup. It does not change per-call. All existing config values fall into these categories:
+
+| Category | Examples |
+|---|---|
+| Feature toggles | `enabled: true`, `show_thinking_stream: true` |
+| Path templates | `session_log_template: ~/.amplifier/projects/{project}/sessions/{session_id}/events.jsonl` |
+| Numeric thresholds | `read_threshold: 30`, `max_turns: 10`, `timeout: 60` |
+| Plugin/extension lists | `skills: [git+https://github.com/...]` |
+| Exclusion/allow lists | `exclude_tools: [tool-delegate]`, `allowlist: [session_id, turn_id]` |
+| Named presets | `default_matrix: balanced`, `gate_policy: warn`, `engine: native` |
+| Injection roles | `inject_role: user` |
+
+---
+
 ## Local Development Overrides
 
 Definitions use `git+` URLs for production sources. For local development, use settings file overrides instead of modifying definitions.
@@ -296,6 +388,7 @@ amplifier-ipc reset --remove all               # remove everything
 | `agents` | bool | no | yes | no | Contributes sub-agents from own service |
 | `context` | bool | no | yes | yes | Contributes context from own service |
 | `behaviors` | list of `{alias: url}` | no | yes | yes | Composed behaviors |
+| `config` | object | no | yes | yes | Per-component configuration (see [Component Configuration](#component-configuration)) |
 | `service` | object | no | yes | yes | Service install/run configuration |
 | `service.stack` | string | if `service` | yes | yes | Language toolchain (`uv`, `cargo`, `npm`) |
 | `service.source` | string | if `service` | yes | yes | Package source (`git+` URL) |
