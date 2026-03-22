@@ -9,7 +9,8 @@ from amplifier_ipc.host.definitions import (
     BehaviorDefinition,
     ResolvedAgent,
     ServiceEntry,
-    _to_str_list,
+    _to_behavior_list,
+    _to_bool,
     parse_agent_definition,
     parse_behavior_definition,
     resolve_agent,
@@ -39,47 +40,78 @@ def test_service_entry_has_stack_and_command_fields() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _to_str_list unit tests
+# _to_bool unit tests
 # ---------------------------------------------------------------------------
 
 
-def test_to_str_list_none() -> None:
-    """_to_str_list(None) returns an empty list."""
-    assert _to_str_list(None) == []
+def test_to_bool_none() -> None:
+    """_to_bool(None) returns False."""
+    assert _to_bool(None) is False
 
 
-def test_to_str_list_true() -> None:
-    """_to_str_list(True) returns an empty list."""
-    assert _to_str_list(True) == []
+def test_to_bool_true() -> None:
+    """_to_bool(True) returns True."""
+    assert _to_bool(True) is True
 
 
-def test_to_str_list_false() -> None:
-    """_to_str_list(False) returns an empty list."""
-    assert _to_str_list(False) == []
+def test_to_bool_false() -> None:
+    """_to_bool(False) returns False."""
+    assert _to_bool(False) is False
 
 
-def test_to_str_list_flat_string_list() -> None:
-    """_to_str_list(['a', 'b']) returns the list unchanged."""
-    assert _to_str_list(["a", "b"]) == ["a", "b"]
+def test_to_bool_nonempty_list() -> None:
+    """_to_bool(['a', 'b']) returns True (non-empty list is truthy)."""
+    assert _to_bool(["a", "b"]) is True
 
 
-def test_to_str_list_list_of_single_key_dicts() -> None:
-    """_to_str_list([{'modes': 'url1'}, {'skills': 'url2'}]) extracts URL values."""
-    result = _to_str_list([{"modes": "url1"}, {"skills": "url2"}])
-    assert result == ["url1", "url2"]
+def test_to_bool_empty_list() -> None:
+    """_to_bool([]) returns False (empty list is falsy)."""
+    assert _to_bool([]) is False
 
 
-def test_to_str_list_plain_dict() -> None:
-    """_to_str_list({'modes': 'url1', 'skills': 'url2'}) extracts dict values."""
-    result = _to_str_list({"modes": "url1", "skills": "url2"})
-    assert set(result) == {"url1", "url2"}
+# ---------------------------------------------------------------------------
+# _to_behavior_list unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_to_behavior_list_none() -> None:
+    """_to_behavior_list(None) returns an empty list."""
+    assert _to_behavior_list(None) == []
+
+
+def test_to_behavior_list_true() -> None:
+    """_to_behavior_list(True) returns an empty list."""
+    assert _to_behavior_list(True) == []
+
+
+def test_to_behavior_list_false() -> None:
+    """_to_behavior_list(False) returns an empty list."""
+    assert _to_behavior_list(False) == []
+
+
+def test_to_behavior_list_flat_string_list() -> None:
+    """_to_behavior_list(['a', 'b']) wraps each string as {'ref': value}."""
+    assert _to_behavior_list(["a", "b"]) == [{"ref": "a"}, {"ref": "b"}]
+
+
+def test_to_behavior_list_list_of_single_key_dicts() -> None:
+    """_to_behavior_list([{'modes': 'url1'}, {'skills': 'url2'}]) preserves alias+url dicts."""
+    result = _to_behavior_list([{"modes": "url1"}, {"skills": "url2"}])
+    assert result == [{"modes": "url1"}, {"skills": "url2"}]
+
+
+def test_to_behavior_list_plain_dict() -> None:
+    """_to_behavior_list({'modes': 'url1', 'skills': 'url2'}) wraps in a list."""
+    result = _to_behavior_list({"modes": "url1", "skills": "url2"})
     assert len(result) == 2
+    assert {"modes": "url1"} in result
+    assert {"skills": "url2"} in result
 
 
-def test_to_str_list_mixed_list() -> None:
-    """_to_str_list(['local-ref', {'modes': 'url1'}]) handles mixed strings and dicts."""
-    result = _to_str_list(["local-ref", {"modes": "url1"}])
-    assert result == ["local-ref", "url1"]
+def test_to_behavior_list_mixed_list() -> None:
+    """_to_behavior_list(['local-ref', {'modes': 'url1'}]) handles mixed strings and dicts."""
+    result = _to_behavior_list(["local-ref", {"modes": "url1"}])
+    assert result == [{"ref": "local-ref"}, {"modes": "url1"}]
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +120,7 @@ def test_to_str_list_mixed_list() -> None:
 
 
 def test_parse_agent_definition_behaviors_dict_list_format() -> None:
-    """parse_agent_definition() extracts URLs from list-of-dicts behavior format."""
+    """parse_agent_definition() preserves alias+url dicts from list-of-dicts behavior format."""
     yaml_content = """\
 type: agent
 local_ref: my-agent
@@ -99,13 +131,13 @@ behaviors:
 """
     result = parse_agent_definition(yaml_content)
     assert result.behaviors == [
-        "https://example.com/modes-behavior.yaml",
-        "https://example.com/skills-behavior.yaml",
+        {"modes": "https://example.com/modes-behavior.yaml"},
+        {"skills": "https://example.com/skills-behavior.yaml"},
     ]
 
 
 def test_parse_agent_definition_behaviors_plain_dict_format() -> None:
-    """parse_agent_definition() extracts URLs from plain-dict behavior format."""
+    """parse_agent_definition() wraps a plain-dict behavior block as a list of alias+url dicts."""
     yaml_content = """\
 type: agent
 local_ref: my-agent
@@ -114,11 +146,11 @@ behaviors:
   modes: https://example.com/modes-behavior.yaml
 """
     result = parse_agent_definition(yaml_content)
-    assert result.behaviors == ["https://example.com/modes-behavior.yaml"]
+    assert result.behaviors == [{"modes": "https://example.com/modes-behavior.yaml"}]
 
 
 def test_parse_behavior_definition_behaviors_dict_list_format() -> None:
-    """parse_behavior_definition() extracts URLs from list-of-dicts nested behavior format."""
+    """parse_behavior_definition() preserves alias+url dicts from list-of-dicts nested behavior format."""
     yaml_content = """\
 type: behavior
 local_ref: my-behavior
@@ -129,8 +161,8 @@ behaviors:
 """
     result = parse_behavior_definition(yaml_content)
     assert result.behaviors == [
-        "https://example.com/tools-behavior.yaml",
-        "https://example.com/context-behavior.yaml",
+        {"tools": "https://example.com/tools-behavior.yaml"},
+        {"context": "https://example.com/context-behavior.yaml"},
     ]
 
 
@@ -192,17 +224,16 @@ services:
     result = parse_agent_definition(yaml_content)
 
     assert isinstance(result, AgentDefinition)
-    assert result.type == "agent"
-    assert result.local_ref == "my-agent"
+    assert result.ref == "my-agent"
     assert result.uuid == "12345678-abcd-ef00-0000-000000000000"
     assert result.version == "1"
     assert result.description == "A test agent"
     assert result.orchestrator == "default"
     assert result.provider == "anthropic"
-    assert result.behaviors == ["some-behavior"]
-    assert len(result.services) == 1
-    assert result.services[0].command == "my-service"
-    assert result.services[0].stack == "pip"
+    assert result.behaviors == [{"ref": "some-behavior"}]
+    assert result.service is not None
+    assert result.service.command == "my-service"
+    assert result.service.stack == "pip"
 
 
 def test_parse_behavior_definition_basic() -> None:
@@ -216,23 +247,20 @@ description: A test behavior
 services:
   - command: behavior-service
     source: https://example.com/service
-tools:
-  - bash
-  - read_file
+tools: true
 """
 
     result = parse_behavior_definition(yaml_content)
 
     assert isinstance(result, BehaviorDefinition)
-    assert result.type == "behavior"
-    assert result.local_ref == "my-behavior"
+    assert result.ref == "my-behavior"
     assert result.uuid == "abcdefab-0000-0000-0000-000000000000"
     assert result.version == "2"
     assert result.description == "A test behavior"
-    assert len(result.services) == 1
-    assert result.services[0].command == "behavior-service"
-    assert result.services[0].source == "https://example.com/service"
-    assert result.tools == ["bash", "read_file"]
+    assert result.service is not None
+    assert result.service.command == "behavior-service"
+    assert result.service.source == "https://example.com/service"
+    assert result.tools is True
 
 
 async def test_resolve_agent_deduplicates_services(tmp_path) -> None:
@@ -240,25 +268,35 @@ async def test_resolve_agent_deduplicates_services(tmp_path) -> None:
     registry = Registry(home=tmp_path / "amplifier_home")
     registry.ensure_home()
 
-    # Register a behavior with a service
-    behavior_yaml = """\
+    # Register first behavior (shared service, also declared by agent)
+    behavior1_yaml = """\
 type: behavior
-local_ref: my-behavior
+local_ref: shared-behavior
 uuid: bbbbbbbb-0000-0000-0000-000000000000
 services:
   - stack: pip
     command: shared-service
+"""
+    registry.register_definition(behavior1_yaml)
+
+    # Register second behavior (unique service)
+    behavior2_yaml = """\
+type: behavior
+local_ref: unique-behavior
+uuid: cccccccc-0000-0000-0000-000000000000
+services:
   - command: behavior-only-service
 """
-    registry.register_definition(behavior_yaml)
+    registry.register_definition(behavior2_yaml)
 
-    # Register an agent that also declares the same shared-service
+    # Register an agent that also declares the same shared-service and references both behaviors
     agent_yaml = """\
 type: agent
 local_ref: my-agent
 uuid: aaaaaaaa-0000-0000-0000-000000000000
 behaviors:
-  - my-behavior
+  - shared-behavior
+  - unique-behavior
 services:
   - stack: pip
     command: shared-service
@@ -275,9 +313,9 @@ services:
 
 
 def test_parse_agent_definition_tools_bool_true() -> None:
-    """parse_agent_definition() handles boolean shorthand (tools: true) without crashing.
+    """parse_agent_definition() handles boolean shorthand (tools: true) as bool True.
 
-    'true' means 'enable all from this service' — parsed as an empty list sentinel.
+    'true' means the capability is enabled — stored as bool True.
     Same for hooks, agents, and context.
     """
     yaml_content = """\
@@ -294,14 +332,14 @@ context: true
 """
     result = parse_agent_definition(yaml_content)
 
-    assert isinstance(result.tools, list)
-    assert isinstance(result.hooks, list)
-    assert isinstance(result.agents, list)
-    assert isinstance(result.context, dict)
+    assert result.tools is True
+    assert result.hooks is True
+    assert result.agents is True
+    assert result.context is True
 
 
 def test_parse_agent_definition_tools_bool_false() -> None:
-    """parse_agent_definition() handles 'false' booleans — treated as empty list/dict."""
+    """parse_agent_definition() handles 'false' booleans — stored as bool False."""
     yaml_content = """\
 type: agent
 local_ref: my-agent
@@ -310,12 +348,12 @@ tools: false
 hooks: false
 """
     result = parse_agent_definition(yaml_content)
-    assert result.tools == []
-    assert result.hooks == []
+    assert result.tools is False
+    assert result.hooks is False
 
 
 def test_parse_behavior_definition_tools_bool_true() -> None:
-    """parse_behavior_definition() handles boolean shorthand (tools: true) without crashing."""
+    """parse_behavior_definition() handles boolean shorthand (tools: true) as bool True."""
     yaml_content = """\
 type: behavior
 local_ref: my-behavior
@@ -326,9 +364,9 @@ context: true
 """
     result = parse_behavior_definition(yaml_content)
 
-    assert isinstance(result.tools, list)
-    assert isinstance(result.hooks, list)
-    assert isinstance(result.context, dict)
+    assert result.tools is True
+    assert result.hooks is True
+    assert result.context is True
 
 
 async def test_resolve_agent_unknown_raises(tmp_path) -> None:
@@ -338,6 +376,30 @@ async def test_resolve_agent_unknown_raises(tmp_path) -> None:
 
     with pytest.raises(FileNotFoundError, match="nonexistent-agent"):
         await resolve_agent(registry, "nonexistent-agent")
+
+
+def test_agent_definition_has_ref_not_local_ref() -> None:
+    """AgentDefinition uses 'ref' instead of 'local_ref' and has no 'type' field."""
+    agent = AgentDefinition(ref="my-agent")
+    assert agent.ref == "my-agent"
+    assert not hasattr(agent, "local_ref"), (
+        "AgentDefinition should not have a 'local_ref' attribute"
+    )
+    assert not hasattr(agent, "type"), (
+        "AgentDefinition should not have a 'type' attribute"
+    )
+
+
+def test_behavior_definition_has_ref_not_local_ref() -> None:
+    """BehaviorDefinition uses 'ref' instead of 'local_ref' and has no 'type' field."""
+    behavior = BehaviorDefinition(ref="my-behavior")
+    assert behavior.ref == "my-behavior"
+    assert not hasattr(behavior, "local_ref"), (
+        "BehaviorDefinition should not have a 'local_ref' attribute"
+    )
+    assert not hasattr(behavior, "type"), (
+        "BehaviorDefinition should not have a 'type' attribute"
+    )
 
 
 def test_relative_source_resolved_against_definition_dir(tmp_path) -> None:
@@ -369,8 +431,8 @@ services:
     # Parse with path so relative sources are resolved
     result = parse_agent_definition(yaml_content, path=definition_path)
 
-    assert len(result.services) == 1
-    svc = result.services[0]
+    assert result.service is not None
+    svc = result.service
     assert svc.source is not None
     resolved = Path(svc.source)
     assert resolved.is_absolute(), f"Expected absolute path, got: {svc.source}"
