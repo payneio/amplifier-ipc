@@ -10,7 +10,6 @@ import importlib
 import inspect
 import logging
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,19 +23,21 @@ def _get_package_dir(package_name: str) -> Path:
     return Path(mod.__file__).parent  # type: ignore[arg-type]
 
 
-def scan_package(package_name: str) -> dict[str, list[Any]]:
+def scan_package(package_name: str) -> dict[str, list[type]]:
     """Scan COMPONENT_DIRS subdirectories for classes marked with __amplifier_component__.
 
     For each .py file (skipping __init__.py) found in any of the conventional
     component subdirectories, the module is imported and all classes defined in
     that module (``obj.__module__ == mod.__name__``) that carry the
-    ``__amplifier_component__`` attribute are instantiated (no arguments) and
-    grouped by their component type string.
+    ``__amplifier_component__`` attribute are collected and grouped by their
+    component type string.
 
-    Returns a dict mapping component-type strings to lists of instances.
-    Import or instantiation failures are logged as warnings and skipped.
+    Returns a dict mapping component-type strings to lists of classes.
+    Classes are NOT instantiated here — instantiation is deferred until after
+    configuration arrives (lazy instantiation for the configuration protocol).
+    Import failures are logged as warnings and skipped.
     """
-    result: dict[str, list[Any]] = {}
+    result: dict[str, list[type]] = {}
     pkg_dir = _get_package_dir(package_name)
 
     for dir_name in COMPONENT_DIRS:
@@ -65,13 +66,7 @@ def scan_package(package_name: str) -> dict[str, list[Any]]:
                 if component_type is None:
                     continue
 
-                try:
-                    instance = obj()
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed to instantiate %s: %s", obj.__name__, exc)
-                    continue
-
-                result.setdefault(component_type, []).append(instance)
+                result.setdefault(component_type, []).append(obj)
 
     return result
 

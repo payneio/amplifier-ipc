@@ -44,7 +44,7 @@ def test_scan_package_finds_tools(tmp_path: Path) -> None:
         result = scan_package("mock_tools_pkg")
         assert "tool" in result
         assert len(result["tool"]) == 1
-        assert result["tool"][0].__class__.__name__ == "Adder"
+        assert result["tool"][0].__name__ == "Adder"
     finally:
         sys.path.remove(str(tmp_path))
         for key in list(sys.modules.keys()):
@@ -70,7 +70,7 @@ def test_scan_package_finds_hooks(tmp_path: Path) -> None:
         result = scan_package("mock_hooks_pkg")
         assert "hook" in result
         assert len(result["hook"]) == 1
-        assert result["hook"][0].__class__.__name__ == "ApprovalHook"
+        assert result["hook"][0].__name__ == "ApprovalHook"
     finally:
         sys.path.remove(str(tmp_path))
         for key in list(sys.modules.keys()):
@@ -113,6 +113,35 @@ def test_scan_package_finds_multiple_types(tmp_path: Path) -> None:
         sys.path.remove(str(tmp_path))
         for key in list(sys.modules.keys()):
             if key == "mock_multi_pkg" or key.startswith("mock_multi_pkg."):
+                del sys.modules[key]
+
+
+def test_scan_package_returns_classes_not_instances(tmp_path: Path) -> None:
+    """scan_package returns class objects, not instances (lazy instantiation)."""
+    pkg_dir = _create_mock_package(tmp_path, "mock_classes_pkg")
+    tools_dir = pkg_dir / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "__init__.py").write_text("")
+    (tools_dir / "my_tool.py").write_text(
+        "from amplifier_ipc.protocol.decorators import tool\n\n"
+        "@tool\n"
+        "class MyTool:\n"
+        "    pass\n"
+    )
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        result = scan_package("mock_classes_pkg")
+        for component_type, items in result.items():
+            for item in items:
+                assert isinstance(item, type), (
+                    f"Expected a class, got instance of {type(item).__name__} "
+                    f"for component_type={component_type}"
+                )
+    finally:
+        sys.path.remove(str(tmp_path))
+        for key in list(sys.modules.keys()):
+            if key == "mock_classes_pkg" or key.startswith("mock_classes_pkg."):
                 del sys.modules[key]
 
 
