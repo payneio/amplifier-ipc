@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from amplifier_ipc_host.config import SessionConfig, load_settings
+from amplifier_ipc_host.config import (
+    HostSettings,
+    ServiceOverride,
+    SessionConfig,
+    load_settings,
+)
 from amplifier_ipc_host.host import Host
 
 from amplifier_ipc_host.definition_registry import Registry
-from amplifier_ipc_host.definitions import ResolvedAgent, resolve_agent
+from amplifier_ipc_host.definitions import ResolvedAgent, ServiceEntry, resolve_agent
 
 
 def build_session_config(resolved: ResolvedAgent) -> SessionConfig:
@@ -32,6 +37,37 @@ def build_session_config(resolved: ResolvedAgent) -> SessionConfig:
     )
 
 
+def _build_service_overrides(
+    services: list[ServiceEntry],
+    existing_overrides: dict[str, ServiceOverride],
+) -> dict[str, ServiceOverride]:
+    """Build ServiceOverride entries for services that have a source path.
+
+    For each service with a non-empty ``source`` field, creates a
+    ``ServiceOverride`` that runs the service via
+    ``uv run --directory <source> <name>``.  Services already covered by
+    *existing_overrides* are left unchanged (settings file takes priority).
+
+    Args:
+        services: Resolved service entries, each optionally carrying a source path.
+        existing_overrides: Overrides already loaded from settings files.
+
+    Returns:
+        A merged dict of service overrides: existing_overrides plus any new
+        source-based entries (settings overrides take priority on conflict).
+    """
+    merged: dict[str, ServiceOverride] = dict(existing_overrides)
+
+    for svc in services:
+        if svc.source and svc.name not in merged:
+            merged[svc.name] = ServiceOverride(
+                command=["uv", "run", "--directory", svc.source, svc.name],
+                working_dir=svc.source,
+            )
+
+    return merged
+
+
 async def launch_session(
     agent_name: str,
     extra_behaviors: list[str] | None = None,
@@ -45,7 +81,10 @@ async def launch_session(
     2. Calls resolve_agent() to walk the behavior tree and collect services.
     3. Builds a SessionConfig from the resolved agent.
     4. Loads HostSettings from the standard settings files (user + project).
-    5. Returns a Host constructed with the config and settings.
+    5. Builds service overrides for any service with a ``source:`` path,
+       adding them to HostSettings so the Host can spawn them via
+       ``uv run --directory`` without requiring hardcoded settings.yaml entries.
+    6. Returns a Host constructed with the config and settings.
 
     Args:
         agent_name: The local_ref alias of the agent to launch.
@@ -79,5 +118,12 @@ async def launch_session(
         user_settings_path=effective_user_path,
         project_settings_path=effective_project_path,
     )
+
+    # Build service overrides for source-based services.
+    # Settings file overrides take priority (they are passed as existing_overrides).
+    merged_overrides = _build_service_overrides(
+        resolved.services, settings.service_overrides
+    )
+    settings = HostSettings(service_overrides=merged_overrides)
 
     return Host(config, settings)

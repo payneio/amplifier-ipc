@@ -29,36 +29,10 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "amplifier-ipc-protocol" },
-]
-
-[package.optional-dependencies]
-all = [
     { name = "anthropic" },
     { name = "azure-identity" },
     { name = "google-generativeai" },
     { name = "ollama" },
-    { name = "openai" },
-]
-anthropic = [
-    { name = "anthropic" },
-]
-azure = [
-    { name = "azure-identity" },
-    { name = "openai" },
-]
-copilot = [
-    { name = "openai" },
-]
-gemini = [
-    { name = "google-generativeai" },
-]
-ollama = [
-    { name = "ollama" },
-]
-openai = [
-    { name = "openai" },
-]
-vllm = [
     { name = "openai" },
 ]
 
@@ -74,21 +48,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "amplifier-ipc-protocol", directory = "../../amplifier-ipc-protocol" },
-    { name = "anthropic", marker = "extra == 'all'" },
-    { name = "anthropic", marker = "extra == 'anthropic'" },
-    { name = "azure-identity", marker = "extra == 'all'" },
-    { name = "azure-identity", marker = "extra == 'azure'" },
-    { name = "google-generativeai", marker = "extra == 'all'" },
-    { name = "google-generativeai", marker = "extra == 'gemini'" },
-    { name = "ollama", marker = "extra == 'all'" },
-    { name = "ollama", marker = "extra == 'ollama'" },
-    { name = "openai", marker = "extra == 'all'" },
-    { name = "openai", marker = "extra == 'azure'" },
-    { name = "openai", marker = "extra == 'copilot'" },
-    { name = "openai", marker = "extra == 'openai'" },
-    { name = "openai", marker = "extra == 'vllm'" },
+    { name = "anthropic" },
+    { name = "azure-identity" },
+    { name = "google-generativeai" },
+    { name = "ollama" },
+    { name = "openai" },
 ]
-provides-extras = ["anthropic", "openai", "azure", "gemini", "ollama", "vllm", "copilot", "all"]
 
 [package.metadata.requires-dev]
 dev = [

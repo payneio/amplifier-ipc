@@ -214,3 +214,119 @@ services:
         override = host_settings.service_overrides["my-service"]
         assert override.command == ["python", "-m", "my_service"]
         assert override.working_dir == "/tmp/my-service"
+
+
+# ---------------------------------------------------------------------------
+# Test 6: test_launch_session_builds_uv_run_override_for_source_services
+# ---------------------------------------------------------------------------
+
+
+class TestLaunchSessionBuildsUvRunOverride:
+    def test_launch_session_builds_uv_run_override_for_source_services(
+        self, tmp_path: Path
+    ) -> None:
+        """launch_session builds 'uv run --directory <source>' overrides for source services.
+
+        Services with a source: path in their definition should automatically
+        get a ServiceOverride using 'uv run --directory <source> <name>' so
+        that the Host can spawn them without any hardcoded settings.yaml entries.
+        """
+        from amplifier_ipc_cli.registry import Registry
+        from amplifier_ipc_cli.session_launcher import launch_session
+
+        source_path = str(tmp_path / "my-service-src")
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+
+        agent_yaml = f"""\
+type: agent
+local_ref: source-agent
+uuid: aaaaaaaa-0000-0000-0000-000000000010
+orchestrator: streaming
+context_manager: simple
+provider: anthropic
+services:
+  - name: my-source-service
+    source: {source_path}
+"""
+        registry.register_definition(agent_yaml)
+
+        mock_host_instance = MagicMock()
+
+        with patch("amplifier_ipc_cli.session_launcher.Host") as mock_host_class:
+            mock_host_class.return_value = mock_host_instance
+
+            asyncio.run(launch_session("source-agent", registry=registry))
+
+        assert mock_host_class.call_count == 1
+        call_args = mock_host_class.call_args
+        host_settings = call_args[0][1]  # second positional arg
+
+        # A uv run override should have been built for the source service
+        assert "my-source-service" in host_settings.service_overrides
+        override = host_settings.service_overrides["my-source-service"]
+        assert override.command == [
+            "uv",
+            "run",
+            "--directory",
+            source_path,
+            "my-source-service",
+        ]
+        assert override.working_dir == source_path
+
+    def test_launch_session_settings_override_takes_priority_over_source(
+        self, tmp_path: Path
+    ) -> None:
+        """Settings file overrides take priority over source-path auto-discovery."""
+        from amplifier_ipc_cli.registry import Registry
+        from amplifier_ipc_cli.session_launcher import launch_session
+
+        source_path = str(tmp_path / "my-service-src")
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+
+        agent_yaml = f"""\
+type: agent
+local_ref: priority-agent
+uuid: aaaaaaaa-0000-0000-0000-000000000011
+orchestrator: streaming
+context_manager: simple
+provider: anthropic
+services:
+  - name: my-service
+    source: {source_path}
+"""
+        registry.register_definition(agent_yaml)
+
+        # Settings file overrides this service with a custom command
+        project_settings_dir = tmp_path / ".amplifier"
+        project_settings_dir.mkdir()
+        project_settings_path = project_settings_dir / "settings.yaml"
+        project_settings_path.write_text(
+            "amplifier_ipc:\n"
+            "  service_overrides:\n"
+            "    my-service:\n"
+            "      command: [custom-command]\n"
+        )
+
+        mock_host_instance = MagicMock()
+
+        with patch("amplifier_ipc_cli.session_launcher.Host") as mock_host_class:
+            mock_host_class.return_value = mock_host_instance
+
+            asyncio.run(
+                launch_session(
+                    "priority-agent",
+                    registry=registry,
+                    project_settings_path=project_settings_path,
+                )
+            )
+
+        call_args = mock_host_class.call_args
+        host_settings = call_args[0][1]
+
+        # Settings override should win — not the uv run auto-discovery
+        override = host_settings.service_overrides["my-service"]
+        assert override.command == ["custom-command"]

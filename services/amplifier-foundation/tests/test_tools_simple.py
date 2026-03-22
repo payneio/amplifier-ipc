@@ -59,24 +59,25 @@ def test_web_search_requires_query(all_tools: dict) -> None:
     assert result.error is not None, "Expected error to be set when query is missing"
 
 
-def test_delegate_stub_returns_not_implemented(all_tools: dict) -> None:
-    """DelegateTool stub must return a not-implemented error on execute."""
+def test_delegate_without_client_fails_gracefully(all_tools: dict) -> None:
+    """DelegateTool returns success=False (not an exception) when client is not injected.
+
+    The server injects a client before calling execute(); without one the tool
+    should still return a ToolResult with success=False rather than raising.
+    """
     tool = all_tools.get("delegate")
     assert tool is not None, "delegate tool not found"
+
+    # Ensure client is None (no server injection)
+    tool.client = None
 
     result = asyncio.run(
         tool.execute({"agent": "test:agent", "instruction": "do something"})
     )
 
-    assert result.success is False, "Expected DelegateTool stub to return success=False"
-    assert result.error is not None, "Expected DelegateTool stub to return an error"
-
-    # Verify the error message mentions stub / not implemented
-    error_msg = (
-        result.error.get("message", "")
-        if isinstance(result.error, dict)
-        else str(result.error)
+    assert result.success is False, (
+        "Expected DelegateTool to return success=False when client is None"
     )
-    assert "not yet implemented" in error_msg, (
-        f"Expected 'not yet implemented' in error message, got: {error_msg!r}"
+    assert result.error is not None, (
+        "Expected DelegateTool to return an error dict when client is None"
     )
