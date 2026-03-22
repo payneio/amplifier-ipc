@@ -91,13 +91,9 @@ def test_stub_providers_raise_not_implemented() -> None:
     AzureOpenAIProvider is no longer a stub — it has a full implementation.
     OllamaProvider is no longer a stub — it has a full implementation.
     VllmProvider is no longer a stub — it has a full implementation.
+    GitHubCopilotProvider is no longer a stub — it has a full implementation.
     """
-    stub_imports = [
-        (
-            "amplifier_providers.providers.github_copilot_provider",
-            "GitHubCopilotProvider",
-        ),
-    ]
+    stub_imports: list[tuple[str, str]] = []
 
     request = ChatRequest(messages=[Message(role="user", content="Hello")])
 
