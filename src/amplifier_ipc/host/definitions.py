@@ -82,7 +82,8 @@ class BehaviorDefinition:
 class ResolvedAgent:
     """Resolved agent configuration after merging behaviors into an agent definition."""
 
-    services: list[ServiceEntry] = field(default_factory=list)
+    services: list[tuple[str, ServiceEntry]] = field(default_factory=list)
+    service_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
     orchestrator: str | None = None
     context_manager: str | None = None
     provider: str | None = None
@@ -214,17 +215,29 @@ async def resolve_agent(
 ) -> ResolvedAgent:
     """Resolve an agent by walking its behavior tree and collecting services.
 
-    Looks up the agent definition, collects its services, then recursively
-    walks the behavior tree collecting and deduplicating services by identity (stack, source, command).
+    Looks up the agent definition, collects its service (if any) keyed by the
+    agent's own ref, splits the agent-level ``component_config`` into per-service
+    buckets (keys prefixed as ``service_ref:key`` route to that service; bare keys
+    go to the agent's own service bucket), then recursively walks the behavior
+    tree.  For each behavior encountered:
+
+    - Its service is collected if the behavior's ref has not been seen yet
+      (deduplication by ref).
+    - Its ``component_config`` is merged with the agent's matching bucket:
+      behavior config provides defaults, agent config wins at the key level.
+
+    URL-based behavior names are fetched and auto-registered the first time
+    they are encountered; subsequent references resolve locally.
 
     Args:
         registry: Registry instance used to resolve agent and behavior paths.
-        agent_name: The local_ref alias of the agent to resolve.
+        agent_name: The ref alias of the agent to resolve.
         extra_behaviors: Optional additional behavior names to merge into the
                          resolved agent after its own behavior tree is walked.
 
     Returns:
-        ResolvedAgent populated with deduplicated services and agent config.
+        ResolvedAgent with ``services`` as ``list[tuple[str, ServiceEntry]]``
+        keyed by ref and ``service_configs`` mapping service ref to merged config.
 
     Raises:
         FileNotFoundError: If the agent is not found in the registry.
@@ -234,19 +247,34 @@ async def resolve_agent(
 
     # Step 2: Parse agent definition YAML.
     agent_def = parse_agent_definition(agent_path.read_text())
+    agent_ref = agent_def.ref or agent_name
 
-    # Step 3: Collect service from agent, keyed by identity for deduplication.
-    services_by_key: dict[tuple[str | None, str | None, str | None], ServiceEntry] = {}
+    # Step 3: Collect agent's own service, keyed by its ref.
+    services_by_ref: dict[str, ServiceEntry] = {}
     if agent_def.service is not None:
-        svc = agent_def.service
-        key = (svc.stack, svc.source, svc.command)
-        services_by_key[key] = svc
+        services_by_ref[agent_ref] = agent_def.service
+
+    # Step 4: Split agent-level component_config into per-service buckets.
+    # Keys like "modes:gate_policy" route to service "modes" with key "gate_policy".
+    # Bare keys (no colon) go to the agent's own service bucket.
+    agent_config_buckets: dict[str, dict[str, Any]] = {}
+    for key, value in agent_def.component_config.items():
+        if ":" in key:
+            service_ref, _, component_key = key.partition(":")
+            agent_config_buckets.setdefault(service_ref, {})[component_key] = value
+        else:
+            agent_config_buckets.setdefault(agent_ref, {})[key] = value
+
+    # Pre-populate service_configs for the agent's own bare-key bucket.
+    service_configs: dict[str, dict[str, Any]] = {}
+    if agent_ref in agent_config_buckets:
+        service_configs[agent_ref] = dict(agent_config_buckets[agent_ref])
 
     visited_behaviors: set[str] = set()
 
-    # Step 4: Inner recursive coroutine that walks one behavior.
+    # Step 5: Inner recursive coroutine that walks one behavior.
     async def _walk_behavior(behavior_name: str) -> None:
-        """Resolve a behavior, collect its services, and recurse into nested behaviors.
+        """Resolve a behavior, collect its service, merge config, and recurse.
 
         When a behavior is not found locally and the name looks like a URL,
         the behavior YAML is fetched, auto-registered (with a ``_meta`` block),
@@ -286,13 +314,20 @@ async def resolve_agent(
 
         # Parse the behavior definition.
         behavior_def = parse_behavior_definition(behavior_path.read_text())
+        behavior_ref = behavior_def.ref or behavior_name
 
-        # Collect service, deduplicating by identity.
-        if behavior_def.service is not None:
-            svc = behavior_def.service
-            key = (svc.stack, svc.source, svc.command)
-            if key not in services_by_key:
-                services_by_key[key] = svc
+        # Collect service, deduplicating by ref.
+        if behavior_def.service is not None and behavior_ref not in services_by_ref:
+            services_by_ref[behavior_ref] = behavior_def.service
+
+        # Merge config for this behavior (first visit wins).
+        if behavior_ref not in service_configs:
+            behavior_config = dict(behavior_def.component_config)
+            agent_bucket = agent_config_buckets.get(behavior_ref, {})
+            # Behavior provides defaults; agent bucket wins at key level.
+            merged = {**behavior_config, **agent_bucket}
+            if merged:
+                service_configs[behavior_ref] = merged
 
         # Recurse into nested behaviors (each entry is a {alias: ref} dict).
         for behavior_dict in behavior_def.behaviors:
@@ -304,14 +339,15 @@ async def resolve_agent(
         for behavior_name in behavior_dict.values():
             await _walk_behavior(behavior_name)
 
-    # Step 5: Walk extra_behaviors if provided.
+    # Step 6: Walk extra_behaviors if provided.
     if extra_behaviors:
         for behavior_name in extra_behaviors:
             await _walk_behavior(behavior_name)
 
-    # Step 6: Return ResolvedAgent.
+    # Step 7: Return ResolvedAgent with services as list[tuple[str, ServiceEntry]].
     return ResolvedAgent(
-        services=list(services_by_key.values()),
+        services=list(services_by_ref.items()),
+        service_configs=service_configs,
         orchestrator=agent_def.orchestrator,
         context_manager=agent_def.context_manager,
         provider=agent_def.provider,

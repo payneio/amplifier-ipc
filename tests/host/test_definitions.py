@@ -293,98 +293,131 @@ behavior:
 
 
 # ---------------------------------------------------------------------------
-# resolve_agent integration tests (kept for Task 6)
+# resolve_agent integration tests
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="resolve_agent uses old flat-format registry; will be fixed in Task 6",
-    strict=True,
-)
-async def test_resolve_agent_dict_format_behaviors(tmp_path) -> None:
-    """resolve_agent() correctly walks behaviors specified in list-of-dicts format."""
+async def test_resolve_agent_walks_behavior_tree(tmp_path) -> None:
+    """resolve_agent() walks the behavior tree and collects services from both agent and behavior."""
     registry = Registry(home=tmp_path / "amplifier_home")
     registry.ensure_home()
 
-    # Register a behavior
+    # Register a behavior with its own service
     behavior_yaml = """\
-type: behavior
-local_ref: my-behavior
-uuid: cccccccc-0000-0000-0000-000000000000
-services:
-  - stack: uv
+behavior:
+  ref: my-behavior
+  uuid: cccccccc-0000-0000-0000-000000000000
+  service:
+    stack: uv
     command: behavior-service
 """
     registry.register_definition(behavior_yaml)
 
-    # Agent uses list-of-dicts syntax for behaviors
+    # Register agent with its own service, referencing the behavior
     agent_yaml = """\
-type: agent
-local_ref: my-agent
-uuid: dddddddd-0000-0000-0000-000000000000
-behaviors:
-  - mybehav: my-behavior
+agent:
+  ref: my-agent
+  uuid: dddddddd-0000-0000-0000-000000000000
+  service:
+    stack: uv
+    command: agent-service
+  behaviors:
+    - my-behavior
 """
     registry.register_definition(agent_yaml)
 
     result = await resolve_agent(registry, "my-agent")
 
     assert isinstance(result, ResolvedAgent)
-    service_commands = [s.command for s in result.services]
-    assert "behavior-service" in service_commands
+    # Both agent and behavior contribute a service → 2 total
+    assert len(result.services) == 2
+    service_refs = [ref for ref, _ in result.services]
+    assert "my-agent" in service_refs
+    assert "my-behavior" in service_refs
 
 
-@pytest.mark.xfail(
-    reason="resolve_agent uses old flat-format registry; will be fixed in Task 6",
-    strict=True,
-)
-async def test_resolve_agent_deduplicates_services(tmp_path) -> None:
-    """resolve_agent() deduplicates services by identity across agent and behavior definitions."""
+async def test_resolve_agent_deduplicates_by_ref(tmp_path) -> None:
+    """resolve_agent() does not duplicate a behavior's service when referenced multiple times."""
     registry = Registry(home=tmp_path / "amplifier_home")
     registry.ensure_home()
 
-    # Register first behavior (shared service, also declared by agent)
-    behavior1_yaml = """\
-type: behavior
-local_ref: shared-behavior
-uuid: bbbbbbbb-0000-0000-0000-000000000000
-services:
-  - stack: pip
+    # Register a shared behavior with a service
+    shared_yaml = """\
+behavior:
+  ref: shared-behavior
+  uuid: aaaaaaaa-0000-0000-0000-000000000000
+  service:
     command: shared-service
 """
-    registry.register_definition(behavior1_yaml)
+    registry.register_definition(shared_yaml)
 
-    # Register second behavior (unique service)
-    behavior2_yaml = """\
-type: behavior
-local_ref: unique-behavior
-uuid: cccccccc-0000-0000-0000-000000000000
-services:
-  - command: behavior-only-service
+    # Register a wrapper behavior that also references shared-behavior
+    wrapper_yaml = """\
+behavior:
+  ref: wrapper-behavior
+  uuid: bbbbbbbb-0000-0000-0000-000000000000
+  behaviors:
+    - shared-behavior
 """
-    registry.register_definition(behavior2_yaml)
+    registry.register_definition(wrapper_yaml)
 
-    # Register an agent that also declares the same shared-service and references both behaviors
+    # Agent references wrapper-behavior AND shared-behavior directly
     agent_yaml = """\
-type: agent
-local_ref: my-agent
-uuid: aaaaaaaa-0000-0000-0000-000000000000
-behaviors:
-  - shared-behavior
-  - unique-behavior
-services:
-  - stack: pip
-    command: shared-service
+agent:
+  ref: my-agent
+  uuid: cccccccc-0000-0000-0000-000000000000
+  behaviors:
+    - wrapper-behavior
+    - shared-behavior
 """
     registry.register_definition(agent_yaml)
 
     result = await resolve_agent(registry, "my-agent")
 
     assert isinstance(result, ResolvedAgent)
-    # Services should be deduplicated — shared-service appears once
-    service_commands = [s.command for s in result.services]
-    assert service_commands.count("shared-service") == 1
-    assert "behavior-only-service" in service_commands
+    # shared-behavior service must appear exactly once (deduplicated by ref)
+    service_refs = [ref for ref, _ in result.services]
+    assert service_refs.count("shared-behavior") == 1
+
+
+async def test_resolve_agent_merges_config(tmp_path) -> None:
+    """resolve_agent() merges config: behavior provides defaults, agent wins at key level."""
+    registry = Registry(home=tmp_path / "amplifier_home")
+    registry.ensure_home()
+
+    # Behavior has gate_policy:warn and verbose:true in its config
+    behavior_yaml = """\
+behavior:
+  ref: my-behavior
+  uuid: eeeeeeee-0000-0000-0000-000000000000
+  service:
+    command: behavior-service
+  config:
+    gate_policy: warn
+    verbose: true
+"""
+    registry.register_definition(behavior_yaml)
+
+    # Agent overrides gate_policy to "block" for "my-behavior" service via prefixed key
+    agent_yaml = """\
+agent:
+  ref: my-agent
+  uuid: ffffffff-0000-0000-0000-000000000000
+  behaviors:
+    - my-behavior
+  component_config:
+    my-behavior:gate_policy: block
+"""
+    registry.register_definition(agent_yaml)
+
+    result = await resolve_agent(registry, "my-agent")
+
+    assert isinstance(result, ResolvedAgent)
+    merged = result.service_configs.get("my-behavior", {})
+    # Agent wins on gate_policy (block overrides warn)
+    assert merged.get("gate_policy") == "block"
+    # verbose:true from behavior is preserved (agent didn't override it)
+    assert merged.get("verbose") is True
 
 
 async def test_resolve_agent_unknown_raises(tmp_path) -> None:
