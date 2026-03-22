@@ -8,6 +8,7 @@ over newline-delimited JSON-RPC 2.0 framing.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from amplifier_ipc_protocol.client import Client
 from amplifier_ipc_protocol.content import read_content
 from amplifier_ipc_protocol.discovery import scan_content, scan_package
 from amplifier_ipc_protocol.errors import (
@@ -130,6 +132,26 @@ class Server:
             if "id" not in message:
                 continue
 
+            # orchestrator.execute requires bidirectional access to reader/writer
+            # so it is handled here rather than in _dispatch().
+            if method == "orchestrator.execute":
+                try:
+                    result = await self._handle_orchestrator_execute(
+                        params or {}, reader, writer
+                    )
+                    await write_message(
+                        writer,
+                        {"jsonrpc": "2.0", "id": msg_id, "result": result},
+                    )
+                except JsonRpcError as exc:
+                    await write_message(writer, exc.to_response(msg_id))
+                except Exception as exc:  # noqa: BLE001
+                    await write_message(
+                        writer,
+                        make_error_response(msg_id, INTERNAL_ERROR, str(exc)),
+                    )
+                continue
+
             try:
                 result = await self._dispatch(method, params)
                 await write_message(
@@ -143,6 +165,97 @@ class Server:
                     writer,
                     make_error_response(msg_id, INTERNAL_ERROR, str(exc)),
                 )
+
+    # ------------------------------------------------------------------
+    # Orchestrator execution
+    # ------------------------------------------------------------------
+
+    async def _handle_orchestrator_execute(
+        self,
+        params: dict[str, Any],
+        reader: asyncio.StreamReader,
+        writer: Any,
+    ) -> Any:
+        """Run the named (or first) orchestrator component and return its result.
+
+        This method is called from :meth:`handle_stream` rather than
+        ``_dispatch`` because the orchestrator needs a :class:`Client` that
+        shares the *same* reader/writer as the server so it can make
+        ``request.*`` calls back to the host while the main dispatch loop is
+        suspended awaiting this coroutine.
+
+        Args:
+            params: The ``orchestrator.execute`` params dict, expected to
+                contain at minimum ``prompt`` and optionally ``system_prompt``,
+                ``orchestrator`` (name), and ``config``.
+            reader: The asyncio StreamReader backing the server's stdin.
+            writer: The writer backing the server's stdout.
+
+        Returns:
+            Whatever the orchestrator's ``execute()`` coroutine returns
+            (typically a ``str`` with the final assistant response text).
+
+        Raises:
+            JsonRpcError: INVALID_PARAMS if no orchestrators are registered or
+                the named orchestrator is not found.
+        """
+        orchestrators = self._components.get("orchestrator", [])
+        if not orchestrators:
+            raise JsonRpcError(
+                INVALID_PARAMS, "No orchestrators registered in this service"
+            )
+
+        # Select orchestrator by name if specified, else use the first one.
+        orchestrator_name = params.get("orchestrator")
+        if orchestrator_name:
+            orch_instance = next(
+                (
+                    o
+                    for o in orchestrators
+                    if getattr(o, "name", None) == orchestrator_name
+                ),
+                None,
+            )
+            if orch_instance is None:
+                raise JsonRpcError(
+                    INVALID_PARAMS,
+                    f"Orchestrator '{orchestrator_name}' not found in this service",
+                )
+        else:
+            orch_instance = orchestrators[0]
+
+        prompt: str = params.get("prompt", "")
+        system_prompt: str = params.get("system_prompt", "")
+
+        # Merge system_prompt into config so the orchestrator can access it.
+        config: dict[str, Any] = dict(params.get("config") or {})
+        if system_prompt:
+            config.setdefault("system_prompt", system_prompt)
+
+        # Use a local client that handles same-service calls (hooks, context,
+        # tools) without going through IPC.  This avoids the deadlock that
+        # would occur if those calls were routed back to this service via the
+        # host while handle_stream() is suspended awaiting this coroutine.
+        # Only truly external calls (e.g. request.provider_complete) are
+        # forwarded to the host over the real reader/writer channel.
+        client = _OrchestratorLocalClient(
+            server=self, ipc_reader=reader, ipc_writer=writer
+        )
+        try:
+            return await orch_instance.execute(
+                prompt=prompt, config=config, client=client
+            )
+        finally:
+            # Cancel any background IPC read task started by the local client.
+            ipc = client._ipc_client
+            if (
+                ipc is not None
+                and ipc._read_task is not None
+                and not ipc._read_task.done()
+            ):
+                ipc._read_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await ipc._read_task
 
     # ------------------------------------------------------------------
     # Dispatcher
@@ -164,6 +277,14 @@ class Server:
             return await self._handle_tool_execute(params or {})
         if method == "hook.emit":
             return await self._handle_hook_emit(params or {})
+        if method == "context.add_message":
+            return await self._handle_context_add_message(params or {})
+        if method == "context.get_messages":
+            return await self._handle_context_get_messages(params or {})
+        if method == "context.clear":
+            return await self._handle_context_clear()
+        if method == "provider.complete":
+            return await self._handle_provider_complete(params or {})
         raise JsonRpcError(METHOD_NOT_FOUND, f"Method not found: {method!r}")
 
     # ------------------------------------------------------------------
@@ -315,6 +436,126 @@ class Server:
 
         return final_result.model_dump(mode="json")
 
+    async def _handle_context_add_message(self, params: dict[str, Any]) -> Any:
+        """Add a message to the registered context manager.
+
+        Args:
+            params: Must contain ``message`` (a serialised :class:`Message` dict).
+
+        Raises:
+            JsonRpcError: INVALID_PARAMS if no context manager is registered or
+                ``message`` is missing.
+        """
+        from amplifier_ipc_protocol.models import Message
+
+        ctx_managers = self._components.get("context_manager", [])
+        if not ctx_managers:
+            raise JsonRpcError(
+                INVALID_PARAMS, "No context manager registered in this service"
+            )
+        ctx = ctx_managers[0]
+
+        message_data = params.get("message")
+        if message_data is None:
+            raise JsonRpcError(INVALID_PARAMS, "Missing required parameter: message")
+
+        message = Message.model_validate(message_data)
+        await ctx.add_message(message)
+        return {"ok": True}
+
+    async def _handle_context_get_messages(self, params: dict[str, Any]) -> Any:
+        """Return messages from the registered context manager.
+
+        Args:
+            params: Optional ``provider_info`` dict passed through to the
+                context manager.
+
+        Raises:
+            JsonRpcError: INVALID_PARAMS if no context manager is registered.
+        """
+        ctx_managers = self._components.get("context_manager", [])
+        if not ctx_managers:
+            raise JsonRpcError(
+                INVALID_PARAMS, "No context manager registered in this service"
+            )
+        ctx = ctx_managers[0]
+
+        provider_info: dict[str, Any] = dict(params) if params else {}
+        messages = await ctx.get_messages(provider_info)
+
+        # Serialise pydantic models if needed
+        result = []
+        for m in messages:
+            if isinstance(m, BaseModel):
+                result.append(m.model_dump(mode="json"))
+            elif isinstance(m, dict):
+                result.append(m)
+            else:
+                result.append(m)
+        return result
+
+    async def _handle_context_clear(self) -> Any:
+        """Clear messages in the registered context manager.
+
+        Raises:
+            JsonRpcError: INVALID_PARAMS if no context manager is registered.
+        """
+        ctx_managers = self._components.get("context_manager", [])
+        if not ctx_managers:
+            raise JsonRpcError(
+                INVALID_PARAMS, "No context manager registered in this service"
+            )
+        ctx = ctx_managers[0]
+        await ctx.clear()
+        return {"ok": True}
+
+    async def _handle_provider_complete(self, params: dict[str, Any]) -> Any:
+        """Call the registered provider's complete() method.
+
+        Args:
+            params: Must contain ``request`` (a serialised :class:`ChatRequest`
+                dict) and optionally ``provider`` (name to select among multiple
+                registered providers).
+
+        Raises:
+            JsonRpcError: INVALID_PARAMS if no provider is registered, the
+                named provider is not found, or ``request`` is missing.
+        """
+        from amplifier_ipc_protocol.models import ChatRequest
+
+        providers = self._components.get("provider", [])
+        if not providers:
+            raise JsonRpcError(INVALID_PARAMS, "No provider registered in this service")
+
+        provider_name = params.get("provider")
+        if provider_name:
+            provider_instance = next(
+                (p for p in providers if getattr(p, "name", None) == provider_name),
+                None,
+            )
+            if provider_instance is None:
+                raise JsonRpcError(
+                    INVALID_PARAMS,
+                    f"Provider '{provider_name}' not found in this service",
+                )
+        else:
+            provider_instance = providers[0]
+
+        request_data = params.get("request")
+        if request_data is None:
+            raise JsonRpcError(INVALID_PARAMS, "Missing required parameter: request")
+
+        request = ChatRequest.model_validate(request_data)
+        # Pass through any extra kwargs from params (e.g. model, temperature)
+        extra_kwargs = {
+            k: v for k, v in params.items() if k not in ("request", "provider")
+        }
+        response = await provider_instance.complete(request, **extra_kwargs)
+
+        if isinstance(response, BaseModel):
+            return response.model_dump(mode="json")
+        return response
+
     # ------------------------------------------------------------------
     # Entry point for service processes
     # ------------------------------------------------------------------
@@ -327,8 +568,13 @@ class Server:
         """Internal async entry point — sets up stdin/stdout streams."""
         loop = asyncio.get_running_loop()
 
+        # Use a large limit (10 MB) so that messages containing large payloads
+        # (e.g. orchestrator.execute with a full system prompt) are not truncated
+        # by the default 64 KB asyncio.StreamReader limit.
+        _STREAM_LIMIT = 10 * 1024 * 1024  # 10 MB
+
         # --- stdin as StreamReader ---
-        reader = asyncio.StreamReader()
+        reader = asyncio.StreamReader(limit=_STREAM_LIMIT)
         read_protocol = asyncio.StreamReaderProtocol(reader)
         await loop.connect_read_pipe(lambda: read_protocol, sys.stdin)
 
@@ -339,6 +585,75 @@ class Server:
         writer = _StdoutWriter(write_transport)
 
         await self.handle_stream(reader, writer)
+
+
+class _OrchestratorLocalClient:
+    """Pseudo-client for orchestrator.execute that avoids same-service IPC deadlocks.
+
+    When the orchestrator's ``execute()`` runs, the server's ``handle_stream()``
+    loop is suspended.  Any ``request.*`` call that would normally route back to
+    THIS service via the host would deadlock: the service can't read from stdin
+    while suspended.
+
+    This client handles calls to same-service components (hooks, context manager,
+    tools) by dispatching them directly to the server's handler methods.  Only
+    calls to external services (e.g. ``request.provider_complete``) are forwarded
+    to the host over the real IPC channel.
+
+    Notifications (``send_notification``) are always written to the actual stdout
+    so that the host's orchestrator loop receives them (stream.token etc.).
+    """
+
+    def __init__(
+        self,
+        server: "Server",
+        ipc_reader: asyncio.StreamReader,
+        ipc_writer: Any,
+    ) -> None:
+        self._server = server
+        self._ipc_reader = ipc_reader
+        self._ipc_writer = ipc_writer
+        self._ipc_client: Client | None = None
+
+    async def request(self, method: str, params: Any = None) -> Any:
+        """Route a request either locally or via IPC.
+
+        Same-service operations are dispatched directly to the server's
+        internal handler methods; external operations go through the host.
+        """
+        p: dict[str, Any] = dict(params) if isinstance(params, dict) else {}
+
+        if method == "request.hook_emit":
+            return await self._server._handle_hook_emit(p)
+
+        if method == "request.context_add_message":
+            return await self._server._handle_context_add_message(p)
+
+        if method == "request.context_get_messages":
+            return await self._server._handle_context_get_messages(p)
+
+        if method == "request.context_clear":
+            return await self._server._handle_context_clear()
+
+        if method == "request.tool_execute":
+            return await self._server._handle_tool_execute(p)
+
+        # Any other request (e.g. request.provider_complete, request.state_*,
+        # request.session_spawn) must go through the host via IPC.
+        return await self._ipc_request(method, params)
+
+    async def send_notification(self, method: str, params: Any = None) -> None:
+        """Write a JSON-RPC notification directly to the IPC writer (stdout)."""
+        msg: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+        if params is not None:
+            msg["params"] = params
+        await write_message(self._ipc_writer, msg)
+
+    async def _ipc_request(self, method: str, params: Any = None) -> Any:
+        """Send a request to the host and await its response over the IPC channel."""
+        if self._ipc_client is None:
+            self._ipc_client = Client(reader=self._ipc_reader, writer=self._ipc_writer)
+        return await self._ipc_client.request(method, params)
 
 
 class _StdoutWriter:

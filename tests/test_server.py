@@ -302,3 +302,239 @@ async def test_tool_execute(tmp_path: Path) -> None:
     result = responses[0]["result"]
     assert result["success"] is True
     assert result["output"] == "hello"
+
+
+async def test_context_manager_add_and_get_messages(tmp_path: Path) -> None:
+    """context.add_message stores a message; context.get_messages returns it.
+
+    The server must dispatch context.add_message and context.get_messages
+    to the registered context manager component.
+    """
+    pkg_name = "mock_ctx_pkg"
+    pkg_dir = _create_mock_package(tmp_path, pkg_name)
+
+    ctx_dir = pkg_dir / "context_managers"
+    ctx_dir.mkdir()
+    (ctx_dir / "__init__.py").write_text("")
+    (ctx_dir / "mem_ctx.py").write_text(
+        "from amplifier_ipc_protocol.decorators import context_manager\n"
+        "from amplifier_ipc_protocol.models import Message\n"
+        "from typing import Any\n\n"
+        "@context_manager\n"
+        "class MemContextManager:\n"
+        "    name = 'mem'\n"
+        "    def __init__(self):\n"
+        "        self._messages = []\n"
+        "    async def add_message(self, message: Message) -> None:\n"
+        "        self._messages.append(message)\n"
+        "    async def get_messages(self, provider_info: dict) -> list:\n"
+        "        return [m.model_dump() for m in self._messages]\n"
+        "    async def clear(self) -> None:\n"
+        "        self._messages = []\n"
+    )
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        server = Server(pkg_name)
+        responses = await _send_and_collect(
+            server,
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 10,
+                    "method": "context.add_message",
+                    "params": {"message": {"role": "user", "content": "hello"}},
+                },
+                {
+                    "jsonrpc": "2.0",
+                    "id": 11,
+                    "method": "context.get_messages",
+                    "params": {},
+                },
+            ],
+        )
+    finally:
+        _cleanup_package(tmp_path, pkg_name)
+
+    assert len(responses) == 2
+    assert "result" in responses[0], f"add_message failed: {responses[0]}"
+    assert "result" in responses[1], f"get_messages failed: {responses[1]}"
+    messages = responses[1]["result"]
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "hello"
+
+
+async def test_provider_complete_dispatches_to_provider(tmp_path: Path) -> None:
+    """provider.complete calls the registered provider's complete() method."""
+    pkg_name = "mock_provider_pkg"
+    pkg_dir = _create_mock_package(tmp_path, pkg_name)
+
+    prov_dir = pkg_dir / "providers"
+    prov_dir.mkdir()
+    (prov_dir / "__init__.py").write_text("")
+    (prov_dir / "echo_prov.py").write_text(
+        "from amplifier_ipc_protocol.decorators import provider\n"
+        "from amplifier_ipc_protocol.models import ChatRequest, ChatResponse\n\n"
+        "@provider\n"
+        "class EchoProvider:\n"
+        "    name = 'echo'\n"
+        "    async def complete(self, request: ChatRequest, **kwargs) -> ChatResponse:\n"
+        "        return ChatResponse(content='echo', tool_calls=[])\n"
+    )
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        server = Server(pkg_name)
+        responses = await _send_and_collect(
+            server,
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 20,
+                    "method": "provider.complete",
+                    "params": {
+                        "request": {
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": "hi",
+                                    "tool_calls": [],
+                                    "tool_results": [],
+                                }
+                            ],
+                            "tools": None,
+                            "reasoning_effort": None,
+                        }
+                    },
+                }
+            ],
+        )
+    finally:
+        _cleanup_package(tmp_path, pkg_name)
+
+    assert len(responses) == 1
+    assert "result" in responses[0], f"provider.complete failed: {responses[0]}"
+    result = responses[0]["result"]
+    assert result["content"] == "echo"
+
+
+async def test_orchestrator_execute_dispatches_to_orchestrator(
+    tmp_path: Path,
+) -> None:
+    """orchestrator.execute calls the registered orchestrator's execute() method.
+
+    The orchestrator receives the prompt, config (with system_prompt), and a client
+    that it can use to make requests back to the host.  The server returns whatever
+    execute() returns as the JSON-RPC response result.
+    """
+    pkg_name = "mock_orch_pkg_exec"
+    pkg_dir = _create_mock_package(tmp_path, pkg_name)
+
+    # Create an orchestrators/ sub-package with a minimal orchestrator
+    orch_dir = pkg_dir / "orchestrators"
+    orch_dir.mkdir()
+    (orch_dir / "__init__.py").write_text("")
+    (orch_dir / "simple_orch.py").write_text(
+        "from amplifier_ipc_protocol.decorators import orchestrator\n"
+        "from typing import Any\n\n"
+        "@orchestrator\n"
+        "class SimpleOrchestrator:\n"
+        "    name = 'simple'\n"
+        "    async def execute(self, prompt: str, config: dict, client: Any) -> str:\n"
+        "        return f'Echo: {prompt}'\n"
+    )
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        server = Server(pkg_name)
+        responses = await _send_and_collect(
+            server,
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 99,
+                    "method": "orchestrator.execute",
+                    "params": {"prompt": "hello world", "system_prompt": "be helpful"},
+                }
+            ],
+        )
+    finally:
+        _cleanup_package(tmp_path, pkg_name)
+
+    assert len(responses) == 1
+    assert "result" in responses[0], f"Expected result, got: {responses[0]}"
+    assert responses[0]["result"] == "Echo: hello world"
+
+
+async def test_orchestrator_can_call_local_hook_and_context(
+    tmp_path: Path,
+) -> None:
+    """Orchestrator using client.request() for hooks/context does NOT deadlock.
+
+    When an orchestrator calls request.hook_emit or request.context_* via its
+    client, the server handles these locally (without going through IPC), so
+    the server's own handle_stream() loop does not need to be running concurrently.
+    This avoids the deadlock that would occur if those calls were routed back to
+    the same service over IPC.
+    """
+    pkg_name = "mock_orch_local_pkg"
+    pkg_dir = _create_mock_package(tmp_path, pkg_name)
+
+    orch_dir = pkg_dir / "orchestrators"
+    orch_dir.mkdir()
+    (orch_dir / "__init__.py").write_text("")
+    (orch_dir / "local_orch.py").write_text(
+        "from amplifier_ipc_protocol.decorators import orchestrator\n"
+        "from typing import Any\n\n"
+        "@orchestrator\n"
+        "class LocalOrchestrator:\n"
+        "    name = 'local'\n"
+        "    async def execute(self, prompt: str, config: dict, client: Any) -> str:\n"
+        "        # Add a context message\n"
+        "        await client.request('request.context_add_message', {'message': {'role': 'user', 'content': prompt}})\n"
+        "        # Retrieve messages\n"
+        "        msgs = await client.request('request.context_get_messages', {})\n"
+        "        count = len(msgs) if msgs else 0\n"
+        "        # Emit a hook (handled locally)\n"
+        "        await client.request('request.hook_emit', {'event': 'prompt:submit', 'data': {'prompt': prompt}})\n"
+        "        return f'processed {count} messages'\n"
+    )
+
+    ctx_dir = pkg_dir / "context_managers"
+    ctx_dir.mkdir()
+    (ctx_dir / "__init__.py").write_text("")
+    (ctx_dir / "mem.py").write_text(
+        "from amplifier_ipc_protocol.decorators import context_manager\n"
+        "from amplifier_ipc_protocol.models import Message\n"
+        "from typing import Any\n\n"
+        "@context_manager\n"
+        "class Mem:\n"
+        "    name = 'mem'\n"
+        "    def __init__(self): self._messages = []\n"
+        "    async def add_message(self, message: Message): self._messages.append(message)\n"
+        "    async def get_messages(self, pi: dict): return [m.model_dump() for m in self._messages]\n"
+        "    async def clear(self): self._messages = []\n"
+    )
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        server = Server(pkg_name)
+        responses = await _send_and_collect(
+            server,
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 77,
+                    "method": "orchestrator.execute",
+                    "params": {"prompt": "hello", "system_prompt": ""},
+                }
+            ],
+        )
+    finally:
+        _cleanup_package(tmp_path, pkg_name)
+
+    assert len(responses) == 1
+    assert "result" in responses[0], f"Expected result, got: {responses[0]}"
+    # The orchestrator added 1 message before calling get_messages
+    assert responses[0]["result"] == "processed 1 messages"

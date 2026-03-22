@@ -136,3 +136,60 @@ async def test_round_trip():
     reader = _make_reader_from_bytes(sink.value)
     result = await read_message(reader)
     assert result == msg
+
+
+@pytest.mark.asyncio
+async def test_read_message_large_payload_with_adequate_limit():
+    """read_message succeeds when the reader limit is large enough for the payload.
+
+    This verifies that a message larger than the default 64 KB StreamReader limit
+    can be processed when a sufficiently large limit is used — as required by
+    protocol messages that embed large system prompts.
+    """
+    large_payload = "x" * (128 * 1024)  # 128 KB string
+    msg = {
+        "jsonrpc": "2.0",
+        "method": "orchestrator.execute",
+        "params": {"prompt": large_payload},
+        "id": 1,
+    }
+
+    sink = _WriteSink()
+    await write_message(sink, msg)
+
+    # Use a reader with a 10 MB limit — large enough to hold the payload.
+    reader = asyncio.StreamReader(limit=10 * 1024 * 1024)
+    reader.feed_data(sink.value)
+    reader.feed_eof()
+
+    result = await read_message(reader)
+    assert result is not None
+    assert result["id"] == 1
+    assert result["params"]["prompt"] == large_payload
+
+
+@pytest.mark.asyncio
+async def test_read_message_large_payload_exceeds_default_limit():
+    """read_message raises ValueError when payload exceeds the default 64 KB limit.
+
+    This is the failure mode that necessitates using a larger StreamReader limit
+    in the server and service lifecycle.
+    """
+    large_payload = "x" * (128 * 1024)  # 128 KB string
+    msg = {
+        "jsonrpc": "2.0",
+        "method": "orchestrator.execute",
+        "params": {"prompt": large_payload},
+        "id": 1,
+    }
+
+    sink = _WriteSink()
+    await write_message(sink, msg)
+
+    # Default 64 KB limit — too small for a 128 KB payload.
+    reader = asyncio.StreamReader()  # default limit = 65536 bytes
+    reader.feed_data(sink.value)
+    reader.feed_eof()
+
+    with pytest.raises(ValueError):
+        await read_message(reader)
