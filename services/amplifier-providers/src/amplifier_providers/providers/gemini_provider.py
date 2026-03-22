@@ -100,6 +100,15 @@ class GeminiProvider:
             self._model = genai.GenerativeModel(model_name=self.model)
         return self._model
 
+    def _get_protos(self) -> Any:
+        """Return the google.generativeai.protos module, or None if SDK not installed."""
+        try:
+            from google.generativeai import protos  # type: ignore[import-untyped]  # noqa: PLC0415
+
+            return protos
+        except ImportError:
+            return None
+
     # ------------------------------------------------------------------
     # Message conversion — Amplifier → Gemini Content/Part API
     # ------------------------------------------------------------------
@@ -120,10 +129,7 @@ class GeminiProvider:
             - Assistant messages → role="model"
             - Tool result messages → function_response parts in role="user" Content
         """
-        try:
-            from google.generativeai import protos  # type: ignore[import-untyped]  # noqa: PLC0415
-        except ImportError:
-            protos = None  # type: ignore[assignment]
+        protos = self._get_protos()
 
         contents: list[dict[str, Any]] = []
         system_parts: list[str] = []
@@ -269,22 +275,8 @@ class GeminiProvider:
         if not tools:
             return []
 
-        try:
-            from google.generativeai import protos  # type: ignore[import-untyped]  # noqa: PLC0415
-
-            declarations = []
-            for tool in tools:
-                params = tool.parameters or {}
-                # Build Schema from JSON Schema parameters dict
-                schema = _dict_to_schema(params, protos)
-                fd = protos.FunctionDeclaration(
-                    name=tool.name,
-                    description=tool.description or "",
-                    parameters=schema,
-                )
-                declarations.append(fd)
-            return declarations
-        except ImportError:
+        protos = self._get_protos()
+        if protos is None:
             # Fallback for test environments without SDK
             return [
                 type(
@@ -298,6 +290,19 @@ class GeminiProvider:
                 )()
                 for tool in tools
             ]
+
+        declarations = []
+        for tool in tools:
+            params = tool.parameters or {}
+            # Build Schema from JSON Schema parameters dict
+            schema = _dict_to_schema(params, protos)
+            fd = protos.FunctionDeclaration(
+                name=tool.name,
+                description=tool.description or "",
+                parameters=schema,
+            )
+            declarations.append(fd)
+        return declarations
 
     def _convert_to_chat_response(self, response: Any) -> ChatResponse:
         """Convert a Gemini generate_content response to ChatResponse.
@@ -398,11 +403,9 @@ class GeminiProvider:
             "max_output_tokens": max_tokens_val,
         }
 
-        temperature: float | None = (
+        generation_config["temperature"] = (
             request.temperature if request.temperature is not None else self.temperature
         )
-        if temperature is not None:
-            generation_config["temperature"] = temperature
 
         # thinking_budget handling — use explicit None-check so 0 is valid
         thinking_budget: int | None = None
@@ -431,13 +434,12 @@ class GeminiProvider:
         if request.tools:
             gemini_tools = self._convert_tools_from_request(request.tools)
             if gemini_tools:
-                try:
-                    from google.generativeai import protos  # type: ignore[import-untyped]  # noqa: PLC0415
-
+                protos = self._get_protos()
+                if protos is not None:
                     api_params["tools"] = [
                         protos.Tool(function_declarations=gemini_tools)
                     ]
-                except ImportError:
+                else:
                     api_params["tools"] = gemini_tools
 
         # Get model (lazy init)
@@ -447,10 +449,10 @@ class GeminiProvider:
         try:
             response = await model.generate_content_async(**api_params)
         except Exception as exc:
-            raise ProviderError(
-                str(exc),
-                retryable=True,
-            ) from exc
+            # Mark as retryable only for likely-transient errors
+            exc_str = str(exc)
+            retryable = "timeout" in exc_str.lower() or "503" in exc_str
+            raise ProviderError(exc_str, retryable=retryable) from exc
 
         return self._convert_to_chat_response(response)
 

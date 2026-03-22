@@ -82,14 +82,20 @@ class MockGeminiResponse:
 def _make_gemini_response(
     parts: list | None = None,
     finish_reason: str = "STOP",
-    **usage_kwargs,
+    prompt_token_count: int = 100,
+    candidates_token_count: int = 50,
+    total_token_count: int = 150,
 ) -> MockGeminiResponse:
     """Helper to create a MockGeminiResponse with optional usage overrides."""
     parts = parts or [MockPart(text="Hello!")]
     candidate = MockCandidate(parts=parts, finish_reason=finish_reason)
     return MockGeminiResponse(
         candidates=[candidate],
-        usage_metadata=MockUsageMetadata(**usage_kwargs),
+        usage_metadata=MockUsageMetadata(
+            prompt_token_count=prompt_token_count,
+            candidates_token_count=candidates_token_count,
+            total_token_count=total_token_count,
+        ),
     )
 
 
