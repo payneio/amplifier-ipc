@@ -86,9 +86,8 @@ def test_stub_provider_files_exist() -> None:
 
 
 def test_stub_providers_raise_not_implemented() -> None:
-    """All 7 stub providers must raise NotImplementedError on complete()."""
+    """All 6 stub providers must raise NotImplementedError on complete()."""
     stub_imports = [
-        ("amplifier_providers.providers.anthropic_provider", "AnthropicProvider"),
         ("amplifier_providers.providers.openai_provider", "OpenAIProvider"),
         ("amplifier_providers.providers.azure_openai_provider", "AzureOpenAIProvider"),
         ("amplifier_providers.providers.gemini_provider", "GeminiProvider"),
