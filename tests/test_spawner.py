@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from amplifier_ipc_host.spawner import (
     SpawnRequest,
+    _run_child_session,
     check_self_delegation_depth,
     filter_hooks,
     filter_tools,
@@ -263,15 +264,74 @@ def test_format_parent_context_all_includes_everything() -> None:
 
 
 # ---------------------------------------------------------------------------
-# spawn_child_session (2 tests)
+# _run_child_session (2 tests)
 # ---------------------------------------------------------------------------
 
 
-def test_spawn_child_session_depth_limit_exceeded() -> None:
+async def test_run_child_session_creates_host_and_runs() -> None:
+    """Host is created with SessionConfig/HostSettings; CompleteEvent result is returned."""
+    from amplifier_ipc_host.events import CompleteEvent
+
+    async def mock_run(prompt: str):  # type: ignore[return]
+        yield CompleteEvent(result="Hello from child")
+
+    with patch("amplifier_ipc_host.host.Host") as MockHost:
+        mock_host_instance = MagicMock()
+        MockHost.return_value = mock_host_instance
+        mock_host_instance.run = mock_run
+
+        result = await _run_child_session(
+            child_session_id="child-123",
+            child_config={
+                "services": ["svc"],
+                "orchestrator": "orch",
+                "context_manager": "cm",
+                "provider": "prov",
+            },
+            instruction="Hello child",
+            request=SpawnRequest(agent="self", instruction="Hello child"),
+        )
+
+    assert MockHost.called
+    assert result["session_id"] == "child-123"
+    assert result["response"] == "Hello from child"
+    assert "turn_count" in result
+    assert "metadata" in result
+
+
+async def test_run_child_session_handles_no_complete_event() -> None:
+    """Returns empty response when no CompleteEvent is yielded by the host."""
+    from amplifier_ipc_host.events import StreamTokenEvent
+
+    async def mock_run_no_complete(prompt: str):  # type: ignore[return]
+        yield StreamTokenEvent(token="some token")
+
+    with patch("amplifier_ipc_host.host.Host") as MockHost:
+        mock_host_instance = MagicMock()
+        MockHost.return_value = mock_host_instance
+        mock_host_instance.run = mock_run_no_complete
+
+        result = await _run_child_session(
+            child_session_id="child-456",
+            child_config={},
+            instruction="Do something",
+            request=SpawnRequest(agent="self", instruction="Do something"),
+        )
+
+    assert result["session_id"] == "child-456"
+    assert result["response"] == ""
+
+
+# ---------------------------------------------------------------------------
+# spawn_child_session (3 tests - async)
+# ---------------------------------------------------------------------------
+
+
+async def test_spawn_child_session_depth_limit_exceeded() -> None:
     """Raises ValueError when current_depth >= 3 (default max_depth)."""
     request = SpawnRequest(agent="self", instruction="Do something")
     with pytest.raises(ValueError):
-        spawn_child_session(
+        await spawn_child_session(
             parent_session_id="parent-123",
             parent_config={"tools": []},
             transcript=[],
@@ -280,7 +340,7 @@ def test_spawn_child_session_depth_limit_exceeded() -> None:
         )
 
 
-def test_spawn_child_session_self_delegation() -> None:
+async def test_spawn_child_session_self_delegation() -> None:
     """Self-delegation clones parent config, excludes delegate tool, calls _run_child_session."""
     parent_config = {
         "tools": [
@@ -292,9 +352,16 @@ def test_spawn_child_session_self_delegation() -> None:
     }
     request = SpawnRequest(agent="self", instruction="Do something")
 
-    with patch("amplifier_ipc_host.spawner._run_child_session") as mock_run:
-        mock_run.return_value = "result"
-        spawn_child_session(
+    with patch(
+        "amplifier_ipc_host.spawner._run_child_session", new_callable=AsyncMock
+    ) as mock_run:
+        mock_run.return_value = {
+            "session_id": "child-123",
+            "response": "result",
+            "turn_count": 1,
+            "metadata": {},
+        }
+        await spawn_child_session(
             parent_session_id="parent-123",
             parent_config=parent_config,
             transcript=[],
@@ -312,7 +379,7 @@ def test_spawn_child_session_self_delegation() -> None:
     assert "grep" in tool_names
 
 
-def test_spawn_child_session_recent_depth_requires_context_turns() -> None:
+async def test_spawn_child_session_recent_depth_requires_context_turns() -> None:
     """Raises ValueError when context_depth='recent' but context_turns is not set."""
     request = SpawnRequest(
         agent="self",
@@ -321,7 +388,7 @@ def test_spawn_child_session_recent_depth_requires_context_turns() -> None:
         context_turns=None,  # not set — should be caught
     )
     with pytest.raises(ValueError, match="context_turns"):
-        spawn_child_session(
+        await spawn_child_session(
             parent_session_id="parent-123",
             parent_config={"tools": []},
             transcript=[{"role": "user", "content": "hi"}],

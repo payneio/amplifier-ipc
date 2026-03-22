@@ -164,7 +164,7 @@ class Host:
                 transcript = (
                     self._persistence.load_transcript() if self._persistence else []
                 )
-                return spawn_child_session(
+                return await spawn_child_session(
                     parent_session_id=session_id,
                     parent_config={},  # TODO: expose full SessionConfig as dict
                     transcript=transcript,

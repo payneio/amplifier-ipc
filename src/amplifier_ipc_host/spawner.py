@@ -304,21 +304,74 @@ class SpawnRequest:
 # ---------------------------------------------------------------------------
 
 
-def _run_child_session(
+async def _run_child_session(
     child_session_id: str,
     child_config: dict[str, Any],
     instruction: str,
     request: SpawnRequest,
-) -> Any:
-    """Execute a child session.
+    settings: Any | None = None,
+    session_dir: Any | None = None,
+) -> dict[str, Any]:
+    """Execute a child session by creating and running a child Host.
 
-    .. note::
-        This is a placeholder.  Full implementation is deferred to Phase 2.
+    Args:
+        child_session_id: The pre-generated ID for this child session.
+        child_config: Configuration dict for the child session (may contain
+            services, orchestrator, context_manager, provider keys).
+        instruction: The instruction to pass to the child Host.
+        request: The original spawn request parameters.
+        settings: Optional :class:`~amplifier_ipc_host.config.HostSettings`;
+            a default instance is created when ``None``.
+        session_dir: Optional session directory path forwarded to :class:`Host`.
 
-    Raises:
-        NotImplementedError: Always.
+    Returns:
+        A dict with keys:
+
+        * ``session_id``: The child session ID.
+        * ``response``: The text result from the final
+          :class:`~amplifier_ipc_host.events.CompleteEvent`, or ``""`` if
+          none was emitted.
+        * ``turn_count``: Number of :class:`~amplifier_ipc_host.events.CompleteEvent`
+          instances received (0 or 1).
+        * ``metadata``: Reserved dict for future use.
     """
-    raise NotImplementedError("Full implementation deferred to Phase 2")
+    # Lazy imports to avoid the circular dependency:
+    # host.py → spawner.py (spawn_child_session)
+    # spawner.py → host.py (Host)
+    from amplifier_ipc_host.config import HostSettings, SessionConfig  # noqa: PLC0415
+    from amplifier_ipc_host.events import CompleteEvent  # noqa: PLC0415
+    from amplifier_ipc_host.host import Host  # noqa: PLC0415
+
+    # 1. Build SessionConfig from child_config dict
+    session_config = SessionConfig(
+        services=child_config.get("services", []),
+        orchestrator=child_config.get("orchestrator", ""),
+        context_manager=child_config.get("context_manager", ""),
+        provider=child_config.get("provider", ""),
+        component_config=child_config.get("component_config", {}),
+    )
+
+    # 2. Create HostSettings if not provided
+    host_settings: HostSettings = settings if settings is not None else HostSettings()
+
+    # 3. Create Host instance
+    host = Host(session_config, host_settings, session_dir)
+
+    # 4. Run the host, iterating async events, collecting CompleteEvent response
+    response = ""
+    turn_count = 0
+    async for event in host.run(instruction):
+        if isinstance(event, CompleteEvent):
+            response = event.result
+            turn_count += 1
+
+    # 5. Return result dict
+    return {
+        "session_id": child_session_id,
+        "response": response,
+        "turn_count": turn_count,
+        "metadata": {},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +379,7 @@ def _run_child_session(
 # ---------------------------------------------------------------------------
 
 
-def spawn_child_session(
+async def spawn_child_session(
     parent_session_id: str,
     parent_config: dict[str, Any],
     transcript: list[dict[str, Any]],
@@ -398,5 +451,5 @@ def spawn_child_session(
     else:
         instruction = request.instruction
 
-    # 7. Execute child session (Phase 2 implementation)
-    return _run_child_session(child_session_id, child_config, instruction, request)
+    # 7. Execute child session
+    return await _run_child_session(child_session_id, child_config, instruction, request)
