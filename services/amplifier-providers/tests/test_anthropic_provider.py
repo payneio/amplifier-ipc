@@ -17,6 +17,7 @@ from amplifier_ipc_protocol.models import (
 from amplifier_providers.providers.anthropic_provider import (
     AnthropicProvider,
     ProviderError,
+    _RateLimitState,
     _translate_anthropic_error,
     retry_with_backoff,
 )
@@ -704,3 +705,69 @@ class TestToolResultRepair:
         ]
         result = self.provider._find_missing_tool_results(messages)
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# TestRateLimitState
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimitState:
+    """Tests for _RateLimitState and maybe_throttle pre-emptive throttling."""
+
+    async def test_no_throttle_when_no_retry_after(self) -> None:
+        """No delay when retry_after is not set. Elapsed time should be < 0.1s."""
+        import time
+
+        state = _RateLimitState()
+        start = time.monotonic()
+        await state.maybe_throttle()
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 0.1
+
+    async def test_throttle_when_retry_after_set(self) -> None:
+        """Sets retry_after=0.1 (100ms); verifies elapsed >= 0.08s and retry_after cleared."""
+        import time
+
+        state = _RateLimitState()
+        state.retry_after = 0.1
+        start = time.monotonic()
+        await state.maybe_throttle()
+        elapsed = time.monotonic() - start
+
+        assert elapsed >= 0.08
+        assert state.retry_after is None
+
+    def test_update_from_response_with_headers(self) -> None:
+        """MockResponse with headers dict updates all state fields correctly."""
+
+        class _MockResponseWithHeaders:
+            def __init__(self) -> None:
+                self.headers = {
+                    "anthropic-ratelimit-requests-limit": "100",
+                    "anthropic-ratelimit-requests-remaining": "50",
+                    "anthropic-ratelimit-tokens-limit": "100000",
+                    "anthropic-ratelimit-tokens-remaining": "80000",
+                }
+
+        state = _RateLimitState()
+        state.update_from_response(_MockResponseWithHeaders())
+
+        assert state.requests_limit == 100
+        assert state.requests_remaining == 50
+        assert state.tokens_limit == 100000
+        assert state.tokens_remaining == 80000
+
+    def test_update_from_response_without_headers(self) -> None:
+        """MagicMock(spec=[]) has no headers attribute; should not crash; state stays at defaults."""
+        from unittest.mock import MagicMock
+
+        state = _RateLimitState()
+        response = MagicMock(spec=[])
+        state.update_from_response(response)  # must not raise
+
+        assert state.requests_limit is None
+        assert state.requests_remaining is None
+        assert state.tokens_limit is None
+        assert state.tokens_remaining is None
