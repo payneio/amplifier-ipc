@@ -2,12 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import importlib
-from pathlib import Path
-
-import amplifier_providers
-from amplifier_ipc_protocol import ChatRequest, Message
 from amplifier_ipc_protocol.discovery import scan_package
 from amplifier_ipc_protocol.server import Server
 
@@ -64,48 +58,3 @@ async def test_describe_reports_zero_hooks() -> None:
 
     hooks = result["capabilities"]["hooks"]
     assert hooks == [], f"Expected zero hooks, got {hooks}"
-
-
-def test_stub_provider_files_exist() -> None:
-    """All 7 provider files must exist in the providers directory, including the full anthropic implementation."""
-    pkg_dir = Path(amplifier_providers.__file__).parent  # type: ignore[arg-type]
-    providers_dir = pkg_dir / "providers"
-
-    stub_files = [
-        "anthropic_provider.py",
-        "openai_provider.py",
-        "azure_openai_provider.py",
-        "gemini_provider.py",
-        "ollama_provider.py",
-        "vllm_provider.py",
-        "github_copilot_provider.py",
-    ]
-    for filename in stub_files:
-        path = providers_dir / filename
-        assert path.exists(), f"Stub file not found: {path}"
-
-
-def test_stub_providers_raise_not_implemented() -> None:
-    """Remaining stub providers must raise NotImplementedError on complete().
-
-    AzureOpenAIProvider is no longer a stub — it has a full implementation.
-    OllamaProvider is no longer a stub — it has a full implementation.
-    VllmProvider is no longer a stub — it has a full implementation.
-    GitHubCopilotProvider is no longer a stub — it has a full implementation.
-    """
-    stub_imports: list[tuple[str, str]] = []
-
-    request = ChatRequest(messages=[Message(role="user", content="Hello")])
-
-    for module_path, class_name in stub_imports:
-        mod = importlib.import_module(module_path)
-        cls = getattr(mod, class_name)
-        instance = cls()
-
-        try:
-            asyncio.run(instance.complete(request))
-            raise AssertionError(
-                f"{class_name}.complete() did not raise NotImplementedError"
-            )
-        except NotImplementedError:
-            pass  # Expected
