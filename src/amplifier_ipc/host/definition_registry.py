@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -88,9 +89,8 @@ class Registry:
             Requires ``ensure_home()`` to have been called first so that the
             home directory structure and alias files exist.
         """
-        # Self-defending: initialise home if it hasn't been set up yet.
-        if not (self.home / "agents.yaml").exists():
-            self.ensure_home()
+        # Idempotent guard: ensure full home structure exists before writing.
+        self.ensure_home()
 
         parsed = yaml.safe_load(yaml_content)
         if not isinstance(parsed, dict):
@@ -286,8 +286,6 @@ class Registry:
         Returns:
             True if removed, False if it didn't exist.
         """
-        import shutil
-
         env_path = self.get_environment_path(definition_id)
         if not env_path.is_dir():
             return False

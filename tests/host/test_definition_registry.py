@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from amplifier_ipc.host.definition_registry import Registry
 
@@ -26,8 +27,6 @@ def test_ensure_home_creates_structure(tmp_path: Path) -> None:
     assert (home / "behaviors.yaml").is_file(), "behaviors.yaml should be created"
 
     # Alias files should be initialized as empty mappings
-    import yaml
-
     agents_data = yaml.safe_load((home / "agents.yaml").read_text())
     behaviors_data = yaml.safe_load((home / "behaviors.yaml").read_text())
     assert agents_data == {} or agents_data is None
@@ -56,8 +55,6 @@ def test_register_agent_definition(tmp_path: Path) -> None:
     assert def_file.is_file(), "definition file should be created"
 
     # agents.yaml should map ref → definition_id
-    import yaml
-
     alias_data = yaml.safe_load((registry.home / "agents.yaml").read_text())
     assert alias_data["my-agent"] == definition_id
 
@@ -79,8 +76,6 @@ def test_register_behavior_definition(tmp_path: Path) -> None:
     assert definition_id == "behavior_my-behavior_abcdefab-0000-0000-0000-000000000000"
 
     # behaviors.yaml should be updated; agents.yaml should remain empty
-    import yaml
-
     behaviors_data = yaml.safe_load((registry.home / "behaviors.yaml").read_text())
     agents_data = yaml.safe_load((registry.home / "agents.yaml").read_text())
 
@@ -179,8 +174,6 @@ def test_unregister_definition_removes_alias_entries(tmp_path: Path) -> None:
     )
     registry.register_definition(yaml_content)
 
-    import yaml
-
     # ref alias should exist before unregister
     alias_data = yaml.safe_load((registry.home / "agents.yaml").read_text()) or {}
     assert "my-agent" in alias_data
@@ -204,8 +197,6 @@ def test_unregister_definition_removes_source_url_alias(tmp_path: Path) -> None:
     )
     source_url = "https://example.com/url-agent.yaml"
     registry.register_definition(yaml_content, source_url=source_url)
-
-    import yaml
 
     alias_data = yaml.safe_load((registry.home / "agents.yaml").read_text()) or {}
     assert source_url in alias_data, "source_url alias must exist after register"
@@ -260,8 +251,6 @@ def test_unregister_behavior_definition(tmp_path: Path) -> None:
     returned_id = registry.unregister_definition("my-behavior", kind="behavior")
 
     assert returned_id == definition_id
-
-    import yaml
 
     alias_data = yaml.safe_load((registry.home / "behaviors.yaml").read_text()) or {}
     assert "my-behavior" not in alias_data
