@@ -86,9 +86,11 @@ def test_stub_provider_files_exist() -> None:
 
 
 def test_stub_providers_raise_not_implemented() -> None:
-    """All 4 stub providers must raise NotImplementedError on complete()."""
+    """Remaining stub providers must raise NotImplementedError on complete().
+
+    AzureOpenAIProvider is no longer a stub — it has a full implementation.
+    """
     stub_imports = [
-        ("amplifier_providers.providers.azure_openai_provider", "AzureOpenAIProvider"),
         ("amplifier_providers.providers.ollama_provider", "OllamaProvider"),
         ("amplifier_providers.providers.vllm_provider", "VllmProvider"),
         (
