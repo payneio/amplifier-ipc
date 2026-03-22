@@ -38,15 +38,20 @@ def _try_parse_definition(yaml_path: Path, results: list[dict[str, Any]]) -> Non
     if not isinstance(parsed, dict):
         return
 
-    def_type = parsed.get("type")
-    if def_type not in ("agent", "behavior"):
+    if "agent" in parsed:
+        def_type = "agent"
+        inner = parsed["agent"] if isinstance(parsed["agent"], dict) else {}
+    elif "behavior" in parsed:
+        def_type = "behavior"
+        inner = parsed["behavior"] if isinstance(parsed["behavior"], dict) else {}
+    else:
         return
 
-    local_ref = parsed.get("local_ref", "")
+    ref = inner.get("ref", "")
     results.append(
         {
             "type": def_type,
-            "local_ref": local_ref,
+            "ref": ref,
             "path": str(yaml_path.resolve()),
             "raw_content": raw_content,
         }
@@ -181,8 +186,7 @@ def discover(location: str, register: bool, install: bool, home: str | None) -> 
         console.print(f"[green]Found {count} definition(s):[/green]")
         for item in definitions:
             console.print(
-                f"  [{item['type']}] {item['local_ref'] or '(no local_ref)'}"
-                f"  {item['path']}"
+                f"  [{item['type']}] {item['ref'] or '(no ref)'}  {item['path']}"
             )
 
     if register and definitions:
@@ -191,6 +195,4 @@ def discover(location: str, register: bool, install: bool, home: str | None) -> 
         registry.ensure_home()
         for item in definitions:
             registry.register_definition(item["raw_content"])
-            console.print(
-                f"[blue]Registered[/blue] {item['type']} '{item['local_ref']}'"
-            )
+            console.print(f"[blue]Registered[/blue] {item['type']} '{item['ref']}'")

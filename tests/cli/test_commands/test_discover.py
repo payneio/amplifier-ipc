@@ -18,22 +18,22 @@ from click.testing import CliRunner
 @pytest.fixture()
 def agent_yaml_content() -> str:
     return """\
-type: agent
-local_ref: my-agent
-uuid: 12345678-abcd-efgh-ijkl-mnopqrstuvwx
-name: My Test Agent
-description: A test agent definition
+agent:
+  ref: my-agent
+  uuid: 12345678-abcd-efgh-ijkl-mnopqrstuvwx
+  name: My Test Agent
+  description: A test agent definition
 """
 
 
 @pytest.fixture()
 def behavior_yaml_content() -> str:
     return """\
-type: behavior
-local_ref: my-behavior
-uuid: 87654321-dcba-hgfe-lkji-xwvutsrqponm
-name: My Test Behavior
-description: A test behavior definition
+behavior:
+  ref: my-behavior
+  uuid: 87654321-dcba-hgfe-lkji-xwvutsrqponm
+  name: My Test Behavior
+  description: A test behavior definition
 """
 
 
@@ -57,7 +57,7 @@ class TestScanLocationFindsAgentYaml:
         assert len(results) == 1
         item = results[0]
         assert item["type"] == "agent"
-        assert item["local_ref"] == "my-agent"
+        assert item["ref"] == "my-agent"
         assert item["path"] == str(agent_file.resolve())
         assert "raw_content" in item
 
@@ -77,7 +77,7 @@ class TestScanLocationFindsBehaviorYaml:
         assert len(results) == 1
         item = results[0]
         assert item["type"] == "behavior"
-        assert item["local_ref"] == "my-behavior"
+        assert item["ref"] == "my-behavior"
         assert item["path"] == str(behavior_file.resolve())
         assert "raw_content" in item
 
