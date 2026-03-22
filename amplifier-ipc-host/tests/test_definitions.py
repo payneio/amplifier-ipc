@@ -8,11 +8,146 @@ from amplifier_ipc_host.definitions import (
     AgentDefinition,
     BehaviorDefinition,
     ResolvedAgent,
+    _to_str_list,
     parse_agent_definition,
     parse_behavior_definition,
     resolve_agent,
 )
 from amplifier_ipc_host.definition_registry import Registry
+
+
+# ---------------------------------------------------------------------------
+# _to_str_list unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_to_str_list_none() -> None:
+    """_to_str_list(None) returns an empty list."""
+    assert _to_str_list(None) == []
+
+
+def test_to_str_list_true() -> None:
+    """_to_str_list(True) returns an empty list."""
+    assert _to_str_list(True) == []
+
+
+def test_to_str_list_false() -> None:
+    """_to_str_list(False) returns an empty list."""
+    assert _to_str_list(False) == []
+
+
+def test_to_str_list_flat_string_list() -> None:
+    """_to_str_list(['a', 'b']) returns the list unchanged."""
+    assert _to_str_list(["a", "b"]) == ["a", "b"]
+
+
+def test_to_str_list_list_of_single_key_dicts() -> None:
+    """_to_str_list([{'modes': 'url1'}, {'skills': 'url2'}]) extracts URL values."""
+    result = _to_str_list([{"modes": "url1"}, {"skills": "url2"}])
+    assert result == ["url1", "url2"]
+
+
+def test_to_str_list_plain_dict() -> None:
+    """_to_str_list({'modes': 'url1', 'skills': 'url2'}) extracts dict values."""
+    result = _to_str_list({"modes": "url1", "skills": "url2"})
+    assert set(result) == {"url1", "url2"}
+    assert len(result) == 2
+
+
+def test_to_str_list_mixed_list() -> None:
+    """_to_str_list(['local-ref', {'modes': 'url1'}]) handles mixed strings and dicts."""
+    result = _to_str_list(["local-ref", {"modes": "url1"}])
+    assert result == ["local-ref", "url1"]
+
+
+# ---------------------------------------------------------------------------
+# parse_agent_definition / parse_behavior_definition integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_parse_agent_definition_behaviors_dict_list_format() -> None:
+    """parse_agent_definition() extracts URLs from list-of-dicts behavior format."""
+    yaml_content = """\
+type: agent
+local_ref: my-agent
+uuid: 12345678-abcd-ef00-0000-000000000001
+behaviors:
+  - modes: https://example.com/modes-behavior.yaml
+  - skills: https://example.com/skills-behavior.yaml
+"""
+    result = parse_agent_definition(yaml_content)
+    assert result.behaviors == [
+        "https://example.com/modes-behavior.yaml",
+        "https://example.com/skills-behavior.yaml",
+    ]
+
+
+def test_parse_agent_definition_behaviors_plain_dict_format() -> None:
+    """parse_agent_definition() extracts URLs from plain-dict behavior format."""
+    yaml_content = """\
+type: agent
+local_ref: my-agent
+uuid: 12345678-abcd-ef00-0000-000000000002
+behaviors:
+  modes: https://example.com/modes-behavior.yaml
+"""
+    result = parse_agent_definition(yaml_content)
+    assert result.behaviors == ["https://example.com/modes-behavior.yaml"]
+
+
+def test_parse_behavior_definition_behaviors_dict_list_format() -> None:
+    """parse_behavior_definition() extracts URLs from list-of-dicts nested behavior format."""
+    yaml_content = """\
+type: behavior
+local_ref: my-behavior
+uuid: abcdefab-0000-0000-0000-000000000001
+behaviors:
+  - tools: https://example.com/tools-behavior.yaml
+  - context: https://example.com/context-behavior.yaml
+"""
+    result = parse_behavior_definition(yaml_content)
+    assert result.behaviors == [
+        "https://example.com/tools-behavior.yaml",
+        "https://example.com/context-behavior.yaml",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# resolve_agent integration test with dict-format behaviors
+# ---------------------------------------------------------------------------
+
+
+async def test_resolve_agent_dict_format_behaviors(tmp_path) -> None:
+    """resolve_agent() correctly walks behaviors specified in list-of-dicts format."""
+    registry = Registry(home=tmp_path / "amplifier_home")
+    registry.ensure_home()
+
+    # Register a behavior
+    behavior_yaml = """\
+type: behavior
+local_ref: my-behavior
+uuid: cccccccc-0000-0000-0000-000000000000
+services:
+  - name: behavior-service
+    installer: pip
+"""
+    registry.register_definition(behavior_yaml)
+
+    # Agent uses list-of-dicts syntax for behaviors
+    agent_yaml = """\
+type: agent
+local_ref: my-agent
+uuid: dddddddd-0000-0000-0000-000000000000
+behaviors:
+  - mybehav: my-behavior
+"""
+    registry.register_definition(agent_yaml)
+
+    result = await resolve_agent(registry, "my-agent")
+
+    assert isinstance(result, ResolvedAgent)
+    service_names = [s.name for s in result.services]
+    assert "behavior-service" in service_names
 
 
 def test_parse_agent_definition_basic() -> None:

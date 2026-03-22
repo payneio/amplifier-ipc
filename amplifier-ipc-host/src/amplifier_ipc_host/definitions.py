@@ -94,15 +94,25 @@ class ResolvedAgent:
 def _to_str_list(value: Any) -> list[str]:
     """Coerce a YAML value to a list of strings.
 
-    Handles boolean shorthand used in definition files:
-    - ``True``  → empty list (sentinel meaning "all items from this service")
-    - ``False`` → empty list (no items)
-    - ``None``  → empty list
-    - list      → the list as-is
+    Handles the formats used in definition files:
+
+    - ``True`` / ``False`` / ``None`` → empty list
+    - list of strings → as-is
+    - list of single-key dicts (IPC spec format for behaviors)
+      e.g. ``[{"modes": "https://..."}]`` → extract the URL values
+    - plain dict → extract its values
     """
     if isinstance(value, bool) or value is None:
         return []
-    return list(value)
+    if isinstance(value, dict):
+        return [str(v) for v in value.values()]
+    result = []
+    for item in value:
+        if isinstance(item, dict):
+            result.extend(str(v) for v in item.values())
+        else:
+            result.append(str(item))
+    return result
 
 
 def _to_dict(value: Any) -> dict[str, Any]:
