@@ -1,155 +1,221 @@
-33,200 loc to 2000 (16x reduction)
-
 ## Overview
 
-- Each agent or behavior with a "service" section gets installed and registered using it's UUID.
+Amplifier IPC is a rearchitecture of the Amplifier platform. Instead of in-process
+dynamic-import module loading, every component runs as a separate subprocess
+communicating via JSON-RPC 2.0 over stdio.
+
+The system has three layers:
+- **Protocol**: JSON-RPC 2.0 library with typed models, decorators, and server/client
+- **Host**: Central message bus — spawns services, routes requests, manages sessions
+- **CLI**: User-facing commands, REPL, settings management
+
+All three live in a single package (`amplifier-ipc`) with sub-packages at
+`src/amplifier_ipc/{protocol,host,cli}/`.
 
 Sessions:
 
 - bb782c99
+- 6b596d62: Merged packages. Wrote all def files. Migrated providers. Spawning fixes. CLI UX.
 
 ## Usage
 
-Installation.
+Installation:
 
 ```bash
-uv tool install git+https://github.com/payneio/amplifier-ipc`
+uv tool install git+https://github.com/payneio/amplifier-ipc
 ```
 
-Add agents and behaviors.
+Discover and register agents/behaviors:
 
 ```bash
-# Find all agents and behaviors at the location provided (git or fsspec).
-amplifier-ipc discover git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/foundation --register --install
+# Scan a location for agent/behavior definitions, register and install them.
+amplifier-ipc discover ./services/amplifier-foundation --register --install
 
-# The above will run this for every agent and behavior discovered.
-amplifier-ipc register <fsspec> --install
+# Register a single definition.
+amplifier-ipc register <path-or-url> --install
+
+# Install a registered service (creates venv, installs deps).
+# Also runs automatically on first use.
+amplifier-ipc install <ref>
 ```
 
-Every agent and behavior must have a GUID, a local_ref (for reference in the description tree), and may have service install instructions.
+Run a session:
 
 ```bash
-REF='yq .local_ref -f $URI'
-GUID='yq .guid -f $URI'
-ID="<agent|behavior>_$REF_$GUID"
+# Interactive REPL
+amplifier-ipc run --agent foundation
+
+# Single-shot
+amplifier-ipc run --agent foundation "What files are in this directory?"
+
+# Resume a previous session
+amplifier-ipc session resume <session-id>
 ```
 
-The `register` command will cache the definition locally to `${AMPLIFIER_HOME}/definitions/${ID}.yaml`
-and register the definition in `agents.yaml` and `behaviors.yaml` with aliases ($REF by default) pointing to the $ID.
-
-You can optionally run `amplifier-ipc install <agent>`, but it will also run the first time you try to use it.
+Other CLI commands:
 
 ```bash
-amp-ipc run --agent <agent> --add-behavior <behavior> --session <session id> “<message>” --project <project name> --working-dir <fsspec>`
+amplifier-ipc unregister <ref>     # Remove a registered definition
+amplifier-ipc uninstall <ref>      # Remove installed environment
+amplifier-ipc update <ref>         # Re-fetch remote definition
+amplifier-ipc session list         # List past sessions
+amplifier-ipc provider             # Provider selection
+amplifier-ipc routing              # Routing configuration
+amplifier-ipc reset                # Reset settings
+amplifier-ipc version              # Print version
 ```
 
-- Look up agent ID from AMPLIFIER_HOME/agents.yaml
-- Walk all agents and behaviors.
-  - If service installer is uv:
-    - Make sure venv exists. Make sure all sources have been installed in it.
-- Run the service execute tool from that environment. It will construct a list of the names of all the behavior service tools (their script names) and will call them as necessary to orchestrate a response.
+## Architecture
 
-```bash
-ENVIRONMENT=AMPLIFIER_HOME/environments/$ID
-uv venv --create $ENVIRONMENT
-$PYTHON=$ENVIRONMENT/bin/python
-uv pip install --python $PYTHON <source>
+### Message Flow
+
+```
+CLI -> Host.run(prompt) -> [async iterator of HostEvents]
+  |
+  +- Host spawns service subprocesses (or reuses shared services)
+  +- Host sends `describe` -> builds CapabilityRegistry -> sends `configure`
+  +- Host calls orchestrator.execute on the orchestrator service
+  |
+  +- Orchestrator loop reads messages from orchestrator stdout:
+      +- request.tool_execute -> Router -> service -> response back
+      +- request.hook_emit -> Router -> fan-out across services
+      +- request.provider_complete -> Router -> provider service -> response
+      +- request.context_* -> Router -> context manager service -> response
+      +- request.session_spawn -> Host -> child session lifecycle
+      +- stream.token -> yield StreamTokenEvent (to CLI)
+      +- stream.thinking -> yield StreamThinkingEvent
+      +- stream.tool_call_start -> yield StreamToolCallStartEvent
+      +- response -> yield CompleteEvent, return
 ```
 
-Creates a new process to run the service/tool: `uv run --venv $ENVIRONMENT <entrypoint>` (entrypoint defaults to `run` if not declared)
+### Service Lifecycle (Per Turn)
 
-- Host tool merges agent+behavior definitions, creates in-memory map of names->service:tool for the orchestrator and other tools to reference, and orchestrates tool requests, streaming responses over stdout, logs over stderr while managing session data.
+1. Load shared state from persistence
+2. Spawn all configured service subprocesses
+3. `describe` -> build `CapabilityRegistry` -> `configure` each service
+4. Replay existing transcript into context manager
+5. Assemble system prompt from all `context/` files (SHA-256 deduped)
+6. Run orchestrator loop (bidirectional message routing)
+7. Save state, metadata, finalize
 
-## Advanced Usage
+### Key Design: _OrchestratorLocalClient
 
-OCTHP+Content can all be overridden locally in icp-overrides.yaml.
+The orchestrator and its co-located tools/hooks/context run in the same service
+process. Having them call each other over IPC would deadlock (the server can't
+read its own requests while blocking on a response). The `_OrchestratorLocalClient`
+solves this by routing same-service calls (tools, hooks, context) directly to the
+server's handler methods in-process. Only external calls (provider, state,
+session_spawn) go through IPC to the host.
 
-You can create custom agents and behaviors locally that 
+### Sub-Session Spawning (Delegation)
+
+- `DelegateTool` calls `request.session_spawn` via the orchestrator's client
+- Host builds a child `SpawnRequest` with filtered tools/hooks, parent context
+- `spawn_child_session()` enforces max depth (3), creates child Host with
+  `shared_services` from parent (avoids re-spawning)
+- Child events wrapped in `ChildSessionEvent(depth=N, inner=event)` and
+  forwarded to parent
+
+### Session Persistence
+
+- `transcript.jsonl`: Append-only message log per turn
+- `metadata.json`: Session metadata (agent, project, timestamps)
+- `state.json`: Cross-turn shared state (loaded/saved per turn)
+
+### Settings
+
+Three-scope deep merge: global (`~/.amplifier/settings.yaml`) < project
+(`.amplifier/settings.yaml`) < local (`.amplifier/settings.local.yaml`).
 
 ## Agent and Behavior Definitions
 
-```yaml
-# amplifier-dev behavior
-behavior:
-  local_ref: amplifier-dev-behavior
-  uuid: a6a2e2b5-8dd0-40ce-b2c7-327e4e62b645
-  version: 2
-  description: Amplifier ecosystem development behavior - multi-repo workflows, testing patterns, and ecosystem expertise.
-
-  tools: True
-   - amplifier-dev-behavior:bundle_shadow
-
-  context: True
-  agents:
-    include:
-    - foundation:ecosystem-expert
-
-  behaviors:
-    - design-intelligence: https://raw.github.com/microsoft/amplifier-design-intelligence/main/behavior.yaml
-
-  service:
-    installer: uv
-    source: git+https://github.com/microsoft/amplifier-ipc@main#subdirectory=/services/amplifier-dev
-
-```
+Every agent/behavior has a `ref` (local reference name), a `uuid`, and optionally
+a `service` section with install instructions.
 
 ```yaml
-# amplifier-dev agent
+# Foundation agent (definitions/foundation-agent.yaml)
 agent:
-  local_ref: amplifier-dev
-  uuid: e6a49802-fd80-4026-b9b8-2a790a0ccb5e
-  version: 2
-  description: Amplifier ecosystem development agent - multi-repo workflows, testing patterns, and ecosystem expertise.
-  base: https://raw.github.com/microsoft/amplifier-ipc/main/agents/foundation.md
-
-  behaviors:
-    - amplifier-dev-behavior: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/amplifier-dev
-
-```
-
-```yaml
-
-# Foundation agent
-agent:
-  local_ref: foundation
+  ref: foundation
   uuid: 3898a638-71de-427a-8183-b80eba8b26be
+  description: Full-featured Amplifier agent with all foundation capabilities.
 
-  orchestrator: foundation:streaming
-  context_manager: foundation:simple
-  tools: True
-  hooks: True
-  agents: True
-  context: True
+  orchestrator: amplifier-foundation:streaming
+  context_manager: amplifier-foundation:simple
 
   behaviors:
-    - agents: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/agents.yaml
-    - amplifier-dev: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/amplifier-dev.yaml
-    - foundation-expert: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/foundation-expert.yaml
-    - logging: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/logging
-    - progress-monitor: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/progress-monitor
-    - redaction: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/redaction
-    - sessions: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/sessions
-    - shadow-amplifier: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/shadow-amplifier
-    - status-context: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/status-context
-    - streaming-ui: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/streaming-ui
-    - tasks: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/tasks
-    - todo-reminder: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/todo-reminder
-    - skills: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/skills.yaml
-    - amplifier-expert: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/amplifier-expert.yaml
-    - core-expert: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/core-expert.yaml
-    - recipes: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/recipes.yaml
-    - design-intelligence: https://raw.github.com/microsoft/amplifier-design-intelligence/main/behavior.yaml
-    - skills-tool: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/skills-tool.yaml
-    - browser-tester: https://raw.github.com/microsoft/amplifier-bundle-browser-tester/main/behavior.yaml
-    - superpowers-methodology: https://raw.github.com/microsoft/amplifier-bundle-superpowers/main/behavior.yaml
-    - apply-patch: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/apply-patch.yaml
-    - routing: https://raw.github.com/microsoft/amplifier-ipc/main/behaviors/routing.yaml
-    - modes: https://raw.github.com/microsoft/amplifier-module-tool-modes/main/behavior.yaml
+    - amplifier-foundation
+    - amplifier-providers
+    - amplifier-modes
+    - amplifier-skills
+    - amplifier-routing-matrix
+    - amplifier-core          # content-only
+    - amplifier-amplifier     # content-only
+    - amplifier-browser-tester
+    - amplifier-design-intelligence
+    - amplifier-filesystem
+    - amplifier-recipes
+    - amplifier-superpowers
 
   service:
-    installer: uv
-    source: git+https://github.com/microsoft/amplifier-ipc@main#subdirectory=/services/foundation
+    stack: uv
+    source: ./services/amplifier-foundation
+```
+
+```yaml
+# Behavior definition example
+behavior:
+  ref: amplifier-modes
+  uuid: <uuid>
+  description: Runtime mode overlays for agent behavior.
+
+  service:
+    stack: uv
+    source: ./services/amplifier-modes
+```
+
+### Definition Registration
+
+```bash
+REF=$(yq '.agent.ref // .behavior.ref' $DEFINITION_FILE)
+UUID=$(yq '.agent.uuid // .behavior.uuid' $DEFINITION_FILE)
+```
+
+`register` caches the definition to `$AMPLIFIER_HOME/definitions/` and creates
+alias files in `$AMPLIFIER_HOME/aliases/` mapping ref -> uuid.
+
+### Component Discovery
+
+Services don't declare capabilities in YAML. Instead, the host sends a `describe`
+JSON-RPC call after spawning. The service scans its own Python packages for
+`@tool`, `@hook`, `@orchestrator`, `@context_manager`, `@provider` decorated
+classes and reports them back. This is the `scan_package()` function in the
+protocol library.
+
+Content (agents/, behaviors/, context/, recipes/) is discovered via `scan_content()`
+which walks known directories for markdown/yaml files.
+
+## Services
+
+### Services with Runtime Code
+
+| Service | Components |
+|---------|-----------|
+| `amplifier-foundation` | 1 orchestrator, 1 context manager, 12+ tools, 12 hooks, content |
+| `amplifier-providers` | 8 providers (anthropic, openai, azure, gemini, ollama, vllm, github_copilot, mock) |
+| `amplifier-modes` | 1 hook, 1 tool, content |
+| `amplifier-skills` | 1 tool, content |
+| `amplifier-routing-matrix` | 1 hook, routing data, content |
+
+### Content-Only Services
+
+These provide only `agents/`, `behaviors/`, and/or `context/` directories -- no
+runtime code: `amplifier-core`, `amplifier-amplifier`, `amplifier-browser-tester`,
+`amplifier-design-intelligence`, `amplifier-filesystem`, `amplifier-recipes`,
+`amplifier-superpowers`.
 
 ## Future
 
-- Consider making CLI interact with host via IPC rather than as a lib.
+- Consider making CLI interact with host via IPC rather than as a library.
+- Provider streaming (`stream.provider.*` plumbing exists but providers may not emit yet).
+- Hot-reload, health checks, metrics.
+- Multi-language SDKs (only Python today).
