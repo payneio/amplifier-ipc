@@ -713,8 +713,10 @@ async def test_host_resume_loads_previous_transcript() -> None:
         # Create a previous session with a transcript and state
         prev_session_id = "prev-session-abc"
         prev_persistence = SessionPersistence(prev_session_id, session_dir)
-        prev_persistence.append_message({"role": "user", "content": "Hello"})
-        prev_persistence.append_message({"role": "assistant", "content": "Hi there!"})
+        prev_persistence.append_message({"message": {"role": "user", "content": "Hello"}})
+        prev_persistence.append_message(
+            {"message": {"role": "assistant", "content": "Hi there!"}}
+        )
         prev_persistence.save_state({"some_key": "some_value"})
 
         config = SessionConfig(

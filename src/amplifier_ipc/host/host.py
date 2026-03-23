@@ -482,10 +482,10 @@ class Host:
         )
         prev_transcript = prev_persistence.load_transcript()
 
-        for message_data in prev_transcript:
+        for message_params in prev_transcript:
             await self._router.route_request(
                 "request.context_add_message",
-                {"message": message_data},
+                message_params,
             )
 
         # Reuse the previous session ID and its persistence/state
