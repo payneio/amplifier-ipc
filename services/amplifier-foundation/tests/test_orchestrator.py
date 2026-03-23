@@ -522,6 +522,11 @@ async def test_orchestrator_emits_stream_todo_update_for_todo_tool() -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Test 10: stream.todo_update NOT sent for non-todo tool calls
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.asyncio
 async def test_orchestrator_does_not_emit_stream_todo_update_for_non_todo_tool() -> (
     None

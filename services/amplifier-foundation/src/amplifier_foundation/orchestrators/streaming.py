@@ -367,7 +367,7 @@ class StreamingOrchestrator:
                         await client.send_notification(
                             STREAM_TODO_UPDATE,
                             {
-                                "todos": parsed.get("todos", []),
+                                "todos": parsed["todos"],
                                 "status": parsed.get("status", "updated"),
                             },
                         )
