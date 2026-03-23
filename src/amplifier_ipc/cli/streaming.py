@@ -46,7 +46,9 @@ class StreamingDisplay:
     ) -> None:
         self._console = console
         self._show_thinking = show_thinking
-        self._show_token_usage = show_token_usage
+        self._show_token_usage = (
+            show_token_usage  # reserved for future token-usage rendering
+        )
         self._response: str | None = None
         self._in_thinking_block: bool = False
 
@@ -118,48 +120,43 @@ class StreamingDisplay:
 
     def _handle_tool_call_start(self, event: StreamToolCallStartEvent) -> None:
         """Print the tool name for a tool call start event."""
-        indent = ""
-        self._console.print(f"\n{indent}[dim]\u2699 {event.tool_name}[/dim]")
+        self._console.print(f"\n[dim]\u2699 {event.tool_name}[/dim]")
 
     def _handle_tool_call(self, event: ToolCallEvent) -> None:
         """Print tool name header and YAML-formatted arguments."""
-        indent = ""
-        self._console.print(f"\n{indent}\u2699 [bold]{event.tool_name}[/bold]")
+        self._console.print(f"\n\u2699 [bold]{event.tool_name}[/bold]")
         items = list(event.arguments.items())
         display_items = items[:10]
         remaining = len(items) - len(display_items)
         for key, value in display_items:
             truncated = str(value)[:200]
             self._console.print(
-                f"{indent}   [dim]{key}:[/dim] {truncated}",
+                f"   [dim]{key}:[/dim] {truncated}",
                 markup=True,
                 highlight=False,
             )
         if remaining > 0:
-            self._console.print(f"{indent}   [dim]... ({remaining} more)[/dim]")
+            self._console.print(f"   [dim]... ({remaining} more)[/dim]")
 
     def _handle_tool_result(self, event: ToolResultEvent) -> None:
         """Print tool result with success/failure icon and truncated output."""
-        indent = ""
         if event.success:
             icon = "\u2705"
             style = "green"
         else:
             icon = "\u274c"
             style = "red"
-        self._console.print(
-            f"{indent}{icon} {event.tool_name}", style=style, markup=False
-        )
+        self._console.print(f"{icon} {event.tool_name}", style=style, markup=False)
         lines = event.output.split("\n")
         display_lines = lines[:10]
         remaining = len(lines) - len(display_lines)
         for line in display_lines:
             self._console.print(
-                f"{indent}   {line[:200]}", style="dim", markup=False, highlight=False
+                f"   {line[:200]}", style="dim", markup=False, highlight=False
             )
         if remaining > 0:
             self._console.print(
-                f"{indent}   ... ({remaining} more lines)",
+                f"   ... ({remaining} more lines)",
                 style="dim",
                 markup=False,
                 highlight=False,
@@ -242,10 +239,7 @@ class StreamingDisplay:
 
     def _handle_error(self, event: ErrorEvent) -> None:
         """Print error message in red with cross icon."""
-        indent = ""
-        self._console.print(
-            f"{indent}\u2717 {event.message}", style="red", markup=False
-        )
+        self._console.print(f"\u2717 {event.message}", style="red", markup=False)
 
     def _handle_complete(self, event: CompleteEvent) -> None:
         """Store the final response and print a newline."""

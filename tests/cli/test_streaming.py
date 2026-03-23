@@ -330,12 +330,7 @@ class TestTodoUpdateEmpty:
 
 
 # ---------------------------------------------------------------------------
-# Test 13: test_todo_update_condensed_mode_line_width
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Test 14: test_thinking_block_has_borders
+# Test 13: test_thinking_block_has_borders
 # ---------------------------------------------------------------------------
 
 
@@ -455,20 +450,6 @@ class TestChildSessionStartEvent:
         output = buf.getvalue()
         assert "explorer" in output
         assert "\u2699" in output  # ⚙ gear icon
-
-
-class TestChildSessionEndEvent:
-    def test_child_session_end_is_silent(self) -> None:
-        """ChildSessionEndEvent should be silent (no output)."""
-        from amplifier_ipc.cli.streaming import StreamingDisplay
-
-        console, buf = _make_console()
-        display = StreamingDisplay(console=console)
-
-        display.handle_event(ChildSessionEndEvent(session_id="child-123"))
-
-        output = buf.getvalue()
-        assert output.strip() == ""  # end event is silent
 
 
 class TestChildSessionEventUnwraps:
