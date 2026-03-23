@@ -53,6 +53,7 @@ async def spawn_service(
         stderr=asyncio.subprocess.PIPE,
         cwd=working_dir,
         limit=_STREAM_LIMIT,
+        start_new_session=True,
     )
 
     assert process.stdout is not None

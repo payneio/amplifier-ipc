@@ -66,7 +66,7 @@ async def _run_agent(
         # Interactive REPL mode
         from amplifier_ipc.cli.repl import interactive_repl
 
-        await interactive_repl(host)
+        await interactive_repl(host, agent_name=agent_name)
 
 
 @click.command()

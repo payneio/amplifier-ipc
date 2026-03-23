@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import signal
 import sys
 from pathlib import Path
 from typing import Any
@@ -29,6 +31,43 @@ from amplifier_ipc.cli.approval_provider import CLIApprovalHandler
 from amplifier_ipc.cli.ui.message_renderer import render_message
 
 
+# ---------------------------------------------------------------------------
+# Cancellation state
+# ---------------------------------------------------------------------------
+
+
+class CancellationState:
+    """Cooperative cancellation state for the REPL execution loop.
+
+    All state mutations are synchronous so they are safe to call directly
+    from a SIGINT handler without race conditions on rapid double Ctrl+C.
+    """
+
+    def __init__(self) -> None:
+        self.is_cancelled: bool = False
+        self.is_immediate: bool = False
+        self.current_tool: str | None = None
+
+    def request_graceful(self) -> None:
+        """First Ctrl+C — mark as gracefully cancelled."""
+        self.is_cancelled = True
+
+    def request_immediate(self) -> None:
+        """Second Ctrl+C — mark for immediate cancellation."""
+        self.is_immediate = True
+
+    def reset(self) -> None:
+        """Reset all state for a new execution cycle."""
+        self.is_cancelled = False
+        self.is_immediate = False
+        self.current_tool = None
+
+
+# ---------------------------------------------------------------------------
+# Event helpers
+# ---------------------------------------------------------------------------
+
+
 def handle_host_event(event: HostEvent, state: dict[str, Any] | None = None) -> None:
     """Process a single host event, writing output to stdout or updating state.
 
@@ -51,6 +90,39 @@ def handle_host_event(event: HostEvent, state: dict[str, Any] | None = None) -> 
         sys.stdout.flush()
         if state is not None:
             state["response"] = event.result
+
+
+async def _consume_events(
+    host: Host,
+    prompt: str,
+    event_queue: asyncio.Queue[HostEvent | None],
+    cancellation: CancellationState,
+) -> None:
+    """Consume events from ``host.run()`` and forward them to *event_queue*.
+
+    Tracks the current tool name in *cancellation* so the SIGINT handler
+    can tell the user what is still running.  Puts ``None`` as a sentinel
+    when the generator is exhausted (or cancelled).
+    """
+    try:
+        async for event in host.run(prompt):
+            if isinstance(event, StreamToolCallStartEvent):
+                cancellation.current_tool = event.tool_name
+            event_queue.put_nowait(event)
+    except asyncio.CancelledError:
+        raise
+    except (RuntimeError, ConnectionError, OSError):
+        # Service processes may die during cancellation (e.g. EOF on pipes).
+        # Swallow these so the REPL can continue gracefully.
+        if not cancellation.is_cancelled:
+            raise
+    finally:
+        event_queue.put_nowait(None)
+
+
+# ---------------------------------------------------------------------------
+# Prompt session factory
+# ---------------------------------------------------------------------------
 
 
 def _create_prompt_session(history_path: Path | None = None) -> PromptSession:  # type: ignore[type-arg]
@@ -139,22 +211,39 @@ async def interactive_repl(
     except Exception:
         history_path = None
 
-    session = _create_prompt_session(history_path=history_path)
+    prompt_session = _create_prompt_session(history_path=history_path)
 
     while True:
+        # ---- Read user input ------------------------------------------------
         try:
-            user_input: str = await session.prompt_async(
+            user_input: str = await prompt_session.prompt_async(
                 HTML("<ansigreen>&gt; </ansigreen>"),
             )
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
             console.print("\n[dim]Goodbye![/dim]")
             break
+        except KeyboardInterrupt:
+            # Ctrl+C at prompt — confirm exit to prevent accidental exits
+            console.print()
+            try:
+                if click.confirm("Exit session?", default=False):
+                    console.print("[dim]Goodbye![/dim]")
+                    break
+            except (KeyboardInterrupt, EOFError):
+                console.print("\n[dim]Goodbye![/dim]")
+                break
+            continue
 
         user_input = user_input.strip()
         if not user_input:
             continue
 
-        # Handle slash commands
+        # Bare "exit" / "quit" (without slash) — matches amplifier-app-cli
+        if user_input.lower() in ("exit", "quit"):
+            console.print("[dim]Goodbye![/dim]")
+            break
+
+        # ---- Handle slash commands ------------------------------------------
         if user_input.startswith("/"):
             command = user_input.lower().split()[0]
             if command in ("/exit", "/quit"):
@@ -167,15 +256,67 @@ async def interactive_repl(
                 console.print(f"[yellow]Unknown command: {command}[/yellow]")
                 continue
 
-        # Execute the prompt and stream events
+        # ---- Execute prompt with two-stage Ctrl+C cancellation --------------
+        cancellation = CancellationState()
+        event_queue: asyncio.Queue[HostEvent | None] = asyncio.Queue()
         state: dict[str, Any] = {}
-        async for event in host.run(user_input):
-            if isinstance(event, ApprovalRequestEvent):
-                handler = CLIApprovalHandler(console)
-                approved = await handler.handle_approval(event)
-                host.send_approval(approved)
+
+        def _sigint_handler(signum: int, frame: Any) -> None:  # noqa: ANN401
+            if cancellation.is_cancelled:
+                cancellation.request_immediate()
+                console.print("\n[bold red]Cancelling immediately...[/bold red]")
             else:
-                handle_host_event(event, state=state)
+                cancellation.request_graceful()
+                tool = cancellation.current_tool
+                if tool:
+                    console.print(
+                        f"\n[yellow]Cancelling after [bold]{tool}[/bold] "
+                        "completes... (Ctrl+C again to force)[/yellow]"
+                    )
+                else:
+                    console.print(
+                        "\n[yellow]Cancelling after current operation "
+                        "completes... (Ctrl+C again to force)[/yellow]"
+                    )
+
+        original_handler = signal.signal(signal.SIGINT, _sigint_handler)
+
+        try:
+            task = asyncio.create_task(
+                _consume_events(host, user_input, event_queue, cancellation)
+            )
+
+            while True:
+                if cancellation.is_immediate:
+                    task.cancel()
+                    break
+
+                try:
+                    event = await asyncio.wait_for(
+                        event_queue.get(), timeout=0.05
+                    )
+                except TimeoutError:
+                    if task.done():
+                        break
+                    continue
+
+                if event is None:
+                    break
+
+                if isinstance(event, ApprovalRequestEvent):
+                    handler = CLIApprovalHandler(console)
+                    approved = await handler.handle_approval(event)
+                    host.send_approval(approved)
+                else:
+                    handle_host_event(event, state=state)
+
+            try:
+                await task
+            except asyncio.CancelledError:
+                console.print("\n[yellow]Cancelled.[/yellow]")
+
+        finally:
+            signal.signal(signal.SIGINT, original_handler)
 
         # Render the final response if available
         response = state.get("response")
@@ -184,3 +325,20 @@ async def interactive_repl(
                 {"role": "assistant", "content": response},
                 console,
             )
+
+    # ---- Exit message with session resume info ------------------------------
+    session_id = host.session_id
+    if session_id:
+        agent_flag = f" -a {agent_name}" if agent_name else ""
+        console.print(
+            "\n[yellow]Session exited - resume anytime with these commands:[/yellow]"
+        )
+        console.print(
+            "  [cyan]amplifier-ipc session list[/cyan]  "
+            "# interactive list of sessions"
+        )
+        console.print(
+            f"  [cyan]amplifier-ipc run{agent_flag} -s {session_id[:8]}[/cyan]  "
+            "# jump directly to this session"
+        )
+        console.print()
