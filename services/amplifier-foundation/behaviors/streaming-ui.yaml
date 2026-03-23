@@ -1,11 +1,12 @@
 behavior:
-  name: behavior-streaming-ui
-  version: 1.0.0
+  ref: streaming-ui
+  uuid: 2c437fc6-e069-475b-8b57-a7fe669d0779
+  version: 1
   description: Streaming UI display for thinking blocks, tool calls, and token usage
-  hooks:
-  - class: amplifier_foundation.hooks.streaming_ui.StreamingUiHook
-    config:
-      ui:
-        show_thinking_stream: true
-        show_tool_lines: 5
-        show_token_usage: true
+  hooks: true
+  behaviors: []
+  config:
+    streaming-ui-hook:
+      show_thinking_stream: true
+      show_token_usage: true
+      show_tool_calls: true

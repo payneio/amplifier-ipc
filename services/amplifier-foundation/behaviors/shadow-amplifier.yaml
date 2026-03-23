@@ -1,17 +1,7 @@
 behavior:
-  name: behavior-shadow-amplifier
-  version: 1.0.0
-  description: 'Amplifier ecosystem-specific shadow environment support.
-
-    Includes the generic shadow bundle plus Amplifier-specific:
-
-    - shadow-smoke-test agent for Amplifier validation
-
-    - Amplifier testing patterns and examples
-
-    - Pre-configured workflows for testing amplifier-core, amplifier-foundation, etc.
-
-    '
-  agents:
-    include:
-    - foundation:amplifier-smoke-test
+  ref: shadow-amplifier
+  uuid: a81aeb27-b067-41fd-bc4b-d228dfd0220c
+  version: 1
+  description: Amplifier ecosystem-specific shadow environment support
+  context: true
+  behaviors: []
