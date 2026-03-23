@@ -26,16 +26,21 @@ class MockClient:
     Use ``Sequence(r1, r2, ...)`` when a method should return different values
     on successive calls.  Plain values (including ``[]``) are returned as-is
     every time they are requested.
+
+    ``call_log`` records all requests and notifications in chronological order
+    as ``("request"|"notification", method, params)`` tuples.
     """
 
     def __init__(self, responses: dict[str, Any] | None = None) -> None:
         self.requests: list[tuple[str, Any]] = []
         self.notifications: list[tuple[str, Any]] = []
+        self.call_log: list[tuple[str, str, Any]] = []
         self._responses: dict[str, Any] = responses or {}
         self._indices: dict[str, int] = {}
 
     async def request(self, method: str, params: Any = None) -> Any:
         self.requests.append((method, params))
+        self.call_log.append(("request", method, params))
         if method not in self._responses:
             return None
         resp = self._responses[method]
@@ -49,6 +54,7 @@ class MockClient:
 
     async def send_notification(self, method: str, params: Any = None) -> None:
         self.notifications.append((method, params))
+        self.call_log.append(("notification", method, params))
 
 
 # ---------------------------------------------------------------------------
@@ -224,4 +230,122 @@ async def test_orchestrator_hook_deny_stops_execution() -> None:
         "Blocked by policy" in result
         or "denied" in result.lower()
         or "Denied" in result
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 5: stream.thinking notification for thinking blocks
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_stream_thinking_for_thinking_blocks() -> None:
+    """stream.thinking notification sent for each ThinkingBlock in content_blocks, before stream.token."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    response_with_thinking = {
+        "content": "Here's my answer.",
+        "text": "Here's my answer.",
+        "tool_calls": None,
+        "usage": None,
+        "finish_reason": None,
+        "content_blocks": [
+            {"type": "thinking", "thinking": "Let me reason about this..."},
+            {"type": "text", "text": "Here's my answer."},
+        ],
+    }
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": response_with_thinking,
+        }
+    )
+
+    result = await orch.execute("Think about X", {}, client)
+
+    assert result == "Here's my answer."
+
+    # Verify stream.thinking notification was sent
+    thinking_notifs = [
+        (m, p) for m, p in client.notifications if m == "stream.thinking"
+    ]
+    assert len(thinking_notifs) == 1, (
+        f"Expected 1 stream.thinking notification, got {len(thinking_notifs)}"
+    )
+    assert thinking_notifs[0][1]["thinking"] == "Let me reason about this..."
+
+    # Verify stream.thinking comes before stream.token in notifications list
+    notif_methods = [m for m, _ in client.notifications]
+    thinking_idx = notif_methods.index("stream.thinking")
+    token_idx = notif_methods.index("stream.token")
+    assert thinking_idx < token_idx, (
+        f"stream.thinking (idx {thinking_idx}) must come before stream.token (idx {token_idx})"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 6: stream.tool_call_start notification before tool execution
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_stream_tool_call_start_before_tool_execution() -> (
+    None
+):
+    """stream.tool_call_start notification sent before tool:pre hook for each tool call."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    tool_call_response = chat_response(
+        text="",
+        tool_calls=[{"id": "call_abc", "tool": "my_tool", "arguments": {"x": 42}}],
+    )
+    final_response = chat_response("Done!")
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": Sequence(tool_call_response, final_response),
+            "request.tool_execute": tool_result_ok("tool result"),
+        }
+    )
+
+    result = await orch.execute("Use my_tool", {}, client)
+
+    assert result == "Done!"
+
+    # Verify stream.tool_call_start notification was sent
+    tool_start_notifs = [
+        (m, p) for m, p in client.notifications if m == "stream.tool_call_start"
+    ]
+    assert len(tool_start_notifs) == 1, (
+        f"Expected 1 stream.tool_call_start notification, got {len(tool_start_notifs)}"
+    )
+    assert tool_start_notifs[0][1]["tool_name"] == "my_tool"
+
+    # Verify stream.tool_call_start comes before tool:pre hook emit in call_log
+    tool_start_idx = next(
+        i
+        for i, (kind, method, _) in enumerate(client.call_log)
+        if kind == "notification" and method == "stream.tool_call_start"
+    )
+    tool_pre_idx = next(
+        i
+        for i, (kind, method, params) in enumerate(client.call_log)
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") == "tool:pre"
+    )
+    assert tool_start_idx < tool_pre_idx, (
+        f"stream.tool_call_start (idx {tool_start_idx}) must come before "
+        f"tool:pre hook emit (idx {tool_pre_idx})"
     )

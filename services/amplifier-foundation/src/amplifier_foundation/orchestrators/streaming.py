@@ -20,6 +20,7 @@ from amplifier_ipc.protocol import (
     HookAction,
     HookResult,
     Message,
+    ThinkingBlock,
     ToolCall,
     ToolResult,
     ToolSpec,  # noqa: F401 — required by spec; unused pending future tool spec handling
@@ -43,6 +44,8 @@ ORCHESTRATOR_COMPLETE = "orchestrator:complete"
 ORCHESTRATOR_RATE_LIMIT_DELAY = "orchestrator:rate_limit_delay"
 CONTENT_BLOCK_START = "content:block_start"  # reserved for streaming block events
 CONTENT_BLOCK_END = "content:block_end"  # reserved for streaming block events
+STREAM_THINKING = "stream.thinking"
+STREAM_TOOL_CALL_START = "stream.tool_call_start"
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +186,20 @@ class StreamingOrchestrator:
             # --- extract response text ---
             response_text = self._extract_text(chat_response)
 
+            # --- stream thinking notifications (before stream.token) ---
+            if chat_response.content_blocks:
+                for block in chat_response.content_blocks:
+                    if isinstance(block, ThinkingBlock):
+                        thinking_text = block.thinking
+                    elif isinstance(block, dict) and block.get("type") == "thinking":
+                        thinking_text = block.get("thinking", "")
+                    else:
+                        continue
+                    if thinking_text:
+                        await client.send_notification(
+                            STREAM_THINKING, {"thinking": thinking_text}
+                        )
+
             # --- stream token notification ---
             if response_text:
                 await client.send_notification("stream.token", {"text": response_text})
@@ -264,6 +281,11 @@ class StreamingOrchestrator:
         Never raises — errors become error-message strings.
         """
         try:
+            # --- emit stream.tool_call_start (before tool:pre hook) ---
+            await client.send_notification(
+                STREAM_TOOL_CALL_START, {"tool_name": tool_call.name}
+            )
+
             # --- emit tool:pre, check DENY ---
             pre_result = await self._hook_emit(
                 client,
