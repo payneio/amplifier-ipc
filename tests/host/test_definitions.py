@@ -429,6 +429,62 @@ async def test_resolve_agent_unknown_raises(tmp_path) -> None:
         await resolve_agent(registry, "nonexistent-agent")
 
 
+async def test_resolve_agent_url_behavior_falls_back_to_local_alias(
+    tmp_path,
+) -> None:
+    """resolve_agent() resolves URL-referenced behaviors via local alias fallback.
+
+    In the real definition format, agent behaviors are listed as {alias: url}:
+
+        behaviors:
+          - modes: https://raw.githubusercontent.com/.../modes.yaml
+
+    When 'modes' is registered locally (by ref) but NOT under the URL, the
+    _walk_behavior logic must try the local alias (key) before giving up.
+
+    This simulates the local dev workflow where discover --register populates
+    behaviors by ref, but the agent definition references them by URL.
+    """
+    registry = Registry(home=tmp_path / "amplifier_home")
+    registry.ensure_home()
+
+    # Register the 'modes' behavior locally by its ref (as discover --register does)
+    modes_yaml = """\
+behavior:
+  ref: modes
+  uuid: bbbbbbbb-0000-0000-0000-000000000001
+  description: Mode system
+  service:
+    stack: uv
+    command: amplifier-modes-serve
+"""
+    registry.register_definition(modes_yaml)
+
+    # Agent references 'modes' via a URL (not the local ref) - this is the real format
+    agent_yaml = """\
+agent:
+  ref: url-agent
+  uuid: cccccccc-0000-0000-0000-000000000001
+  orchestrator: streaming
+  context_manager: simple
+  provider: anthropic
+  behaviors:
+    - modes: https://raw.githubusercontent.com/fake/repo/main/modes.yaml
+"""
+    registry.register_definition(agent_yaml)
+
+    # This should resolve successfully, finding 'modes' via the local alias 'modes'
+    result = await resolve_agent(registry, "url-agent")
+
+    assert isinstance(result, ResolvedAgent)
+    # The 'modes' behavior should be in services (found via local alias fallback)
+    service_refs = [ref for ref, _ in result.services]
+    assert "modes" in service_refs, (
+        f"Expected 'modes' in resolved services {service_refs}. "
+        "URL-referenced behaviors must fall back to local alias when URL is not in registry."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Dataclass structure tests
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import logging
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -275,44 +276,73 @@ async def resolve_agent(
     visited_behaviors: set[str] = set()
 
     # Step 5: Inner recursive coroutine that walks one behavior.
-    async def _walk_behavior(behavior_name: str) -> None:
+    async def _walk_behavior(
+        behavior_name: str, local_alias: str | None = None
+    ) -> None:
         """Resolve a behavior, collect its service, merge config, and recurse.
 
         When a behavior is not found locally and the name looks like a URL,
-        the behavior YAML is fetched, auto-registered (with a ``_meta`` block),
-        and the URL is cached as an alias so subsequent calls skip the fetch.
+        the resolution first tries the ``local_alias`` (the dict key used in the
+        agent's ``behaviors:`` list) before falling back to a remote fetch.
+        This allows local-dev workflows where behaviors are registered by ``ref``
+        but agents reference them via canonical URLs.
+
+        If the local alias also fails and a URL fetch succeeds, the behavior is
+        auto-registered (with a ``_meta`` block) and the URL is cached as an
+        alias so subsequent calls skip the fetch.
         """
         if behavior_name in visited_behaviors:
             return
         visited_behaviors.add(behavior_name)
 
         # Attempt to resolve the behavior from the local registry.
+        behavior_path: Path | None = None
         try:
             behavior_path = registry.resolve_behavior(behavior_name)
         except FileNotFoundError:
             if "://" in behavior_name:
-                # Fetch the remote behavior and register it locally.
-                url = behavior_name
-                try:
-                    yaml_content = await _fetch_url(url)
-                    # register_definition also writes source_url as an alias,
-                    # so the next call to resolve_behavior(url) will find it
-                    # locally without re-fetching.
-                    registry.register_definition(yaml_content, source_url=url)
-                    behavior_path = registry.resolve_behavior(url)
-                except (OSError, urllib.error.URLError, yaml.YAMLError, ValueError):
-                    logger.warning(
-                        "Failed to fetch behavior '%s' from URL; skipping.",
-                        behavior_name,
-                        exc_info=True,
+                # Local-dev fallback: the agent references behaviors by URL, but
+                # discover --register populates the registry by ref alias.  Try
+                # the local alias (dict key) before going to the network.
+                if local_alias and local_alias != behavior_name:
+                    try:
+                        behavior_path = registry.resolve_behavior(local_alias)
+                        # Resolved via local alias — treat as if we looked up by alias.
+                        behavior_name = local_alias
+                    except FileNotFoundError:
+                        pass  # fall through to remote fetch
+
+                if behavior_path is None:
+                    # Fetch the remote behavior and register it locally.
+                    url = (
+                        behavior_name
+                        if "://" in behavior_name
+                        else local_alias or behavior_name
                     )
-                    return
+                    try:
+                        yaml_content = await _fetch_url(url)
+                        # register_definition also writes source_url as an alias,
+                        # so the next call to resolve_behavior(url) will find it
+                        # locally without re-fetching.
+                        registry.register_definition(yaml_content, source_url=url)
+                        behavior_path = registry.resolve_behavior(url)
+                    except (OSError, urllib.error.URLError, yaml.YAMLError, ValueError):
+                        logger.warning(
+                            "Failed to fetch behavior '%s' from URL; skipping.",
+                            behavior_name,
+                            exc_info=True,
+                        )
+                        return
             else:
                 logger.warning(
                     "Behavior '%s' not found in local registry; skipping.",
                     behavior_name,
                 )
                 return
+
+        # Guard: all error paths return early; behavior_path is always set here.
+        if behavior_path is None:  # pragma: no cover
+            return
 
         # Parse the behavior definition.
         behavior_def = parse_behavior_definition(behavior_path.read_text())
@@ -337,9 +367,11 @@ async def resolve_agent(
                 await _walk_behavior(nested_behavior)
 
     # Walk the agent's declared behaviors (each entry is a {alias: ref} dict).
+    # Pass the alias (key) as local_alias so _walk_behavior can fall back to
+    # local registry lookup when the value is a URL not yet registered locally.
     for behavior_dict in agent_def.behaviors:
-        for behavior_name in behavior_dict.values():
-            await _walk_behavior(behavior_name)
+        for alias, behavior_ref in behavior_dict.items():
+            await _walk_behavior(behavior_ref, local_alias=alias)
 
     # Step 6: Walk extra_behaviors if provided.
     if extra_behaviors:
