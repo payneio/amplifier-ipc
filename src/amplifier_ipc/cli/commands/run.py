@@ -3,33 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 
 import click
 
 from amplifier_ipc.cli.key_manager import KeyManager
 from amplifier_ipc.cli.session_launcher import launch_session
-from amplifier_ipc.host.events import (
-    ApprovalRequestEvent,
-    CompleteEvent,
-    HostEvent,
-    StreamThinkingEvent,
-    StreamTokenEvent,
-    StreamToolCallStartEvent,
-)
-
-
-def _handle_event(event: HostEvent) -> None:
-    """Handle a single host event, writing output to stdout."""
-    if isinstance(event, StreamTokenEvent):
-        sys.stdout.write(event.token)
-        sys.stdout.flush()
-    elif isinstance(event, StreamThinkingEvent):
-        click.echo(click.style(event.thinking, fg="cyan", dim=True), nl=False)
-    elif isinstance(event, StreamToolCallStartEvent):
-        click.echo(click.style(event.tool_name, dim=True), nl=False)
-    elif isinstance(event, CompleteEvent):
-        click.echo()  # newline after completion
+from amplifier_ipc.host.events import ApprovalRequestEvent
 
 
 async def _run_agent(
@@ -57,11 +36,13 @@ async def _run_agent(
 
     if message is not None:
         # Single-shot mode: run one prompt and stream events
+        from amplifier_ipc.cli.repl import handle_host_event
+
         async for event in host.run(message):
             if isinstance(event, ApprovalRequestEvent):
                 host.send_approval(True)
             else:
-                _handle_event(event)
+                handle_host_event(event)
     else:
         # Interactive REPL mode
         from amplifier_ipc.cli.repl import interactive_repl

@@ -9,12 +9,126 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from amplifier_ipc.cli.repl import CancellationState
 from amplifier_ipc.host.events import (
+    ChildSessionEndEvent,
+    ChildSessionEvent,
+    ChildSessionStartEvent,
     CompleteEvent,
+    ErrorEvent,
     StreamThinkingEvent,
     StreamTokenEvent,
     StreamToolCallStartEvent,
-    ErrorEvent,
+    TodoUpdateEvent,
+    ToolCallEvent,
+    ToolResultEvent,
 )
+
+# ---------------------------------------------------------------------------
+# Test: ToolCallEvent handling
+# ---------------------------------------------------------------------------
+
+
+class TestHandleToolCallEvent:
+    def test_tool_call_event_no_error(self) -> None:
+        """ToolCallEvent should be handled without raising an error."""
+        from amplifier_ipc.cli.repl import handle_host_event
+
+        event = ToolCallEvent(tool_name="bash", arguments={"command": "ls -la"})
+
+        # Should not raise
+        handle_host_event(event)
+
+    def test_tool_call_event_output_contains_tool_name(self) -> None:
+        """ToolCallEvent output should contain the tool name."""
+        from amplifier_ipc.cli.repl import handle_host_event
+
+        event = ToolCallEvent(tool_name="bash", arguments={"command": "ls -la"})
+
+        captured = StringIO()
+        with patch("click.echo", side_effect=lambda msg, **kw: captured.write(str(msg) + "\n")):
+            handle_host_event(event)
+
+        assert "bash" in captured.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Test: ToolResultEvent handling
+# ---------------------------------------------------------------------------
+
+
+class TestHandleToolResultEvent:
+    def test_tool_result_event_no_error(self) -> None:
+        """ToolResultEvent should be handled without raising an error."""
+        from amplifier_ipc.cli.repl import handle_host_event
+
+        event = ToolResultEvent(tool_name="bash", success=True, output="file1\nfile2")
+
+        # Should not raise
+        handle_host_event(event)
+
+    def test_tool_result_event_failure_no_error(self) -> None:
+        """ToolResultEvent with failure should be handled without raising an error."""
+        from amplifier_ipc.cli.repl import handle_host_event
+
+        event = ToolResultEvent(tool_name="bash", success=False, output="command not found")
+
+        # Should not raise
+        handle_host_event(event)
+
+
+# ---------------------------------------------------------------------------
+# Test: ChildSessionStartEvent handling
+# ---------------------------------------------------------------------------
+
+
+class TestHandleChildSessionStart:
+    def test_child_session_start_no_error(self) -> None:
+        """ChildSessionStartEvent should be handled without raising an error."""
+        from amplifier_ipc.cli.repl import handle_host_event
+
+        event = ChildSessionStartEvent(agent_name="my-agent", session_id="abc123", depth=1)
+
+        # Should not raise
+        handle_host_event(event)
+
+    def test_child_session_end_no_error(self) -> None:
+        """ChildSessionEndEvent should be handled without raising an error (silent)."""
+        from amplifier_ipc.cli.repl import handle_host_event
+
+        event = ChildSessionEndEvent(session_id="abc123", depth=1)
+
+        # Should not raise
+        handle_host_event(event)
+
+    def test_child_session_event_no_error(self) -> None:
+        """ChildSessionEvent should be handled without raising an error."""
+        from amplifier_ipc.cli.repl import handle_host_event
+
+        inner = StreamTokenEvent(token="hello")
+        event = ChildSessionEvent(depth=1, inner=inner)
+
+        # Should not raise
+        handle_host_event(event)
+
+
+# ---------------------------------------------------------------------------
+# Test: TodoUpdateEvent handling
+# ---------------------------------------------------------------------------
+
+
+class TestHandleTodoUpdateEvent:
+    def test_todo_update_event_no_error(self) -> None:
+        """TodoUpdateEvent should be handled without raising an error."""
+        from amplifier_ipc.cli.repl import handle_host_event
+
+        event = TodoUpdateEvent(
+            todos=[
+                {"content": "Task 1", "status": "completed"},
+                {"content": "Task 2", "status": "in_progress"},
+            ]
+        )
+
+        # Should not raise
+        handle_host_event(event)
 
 
 # ---------------------------------------------------------------------------

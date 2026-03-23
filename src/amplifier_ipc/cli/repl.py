@@ -18,12 +18,18 @@ from rich.panel import Panel
 
 from amplifier_ipc.host.events import (
     ApprovalRequestEvent,
+    ChildSessionEndEvent,
+    ChildSessionEvent,
+    ChildSessionStartEvent,
     CompleteEvent,
     ErrorEvent,
     HostEvent,
     StreamThinkingEvent,
     StreamTokenEvent,
     StreamToolCallStartEvent,
+    TodoUpdateEvent,
+    ToolCallEvent,
+    ToolResultEvent,
 )
 from amplifier_ipc.host.host import Host
 
@@ -83,6 +89,67 @@ def handle_host_event(event: HostEvent, state: dict[str, Any] | None = None) -> 
         click.echo(click.style(event.thinking, fg="cyan", dim=True), nl=False)
     elif isinstance(event, StreamToolCallStartEvent):
         click.echo(click.style(f"\n⚙ {event.tool_name}", dim=True))
+    elif isinstance(event, ToolCallEvent):
+        click.echo(click.style(f"\n🔧 {event.tool_name}", bold=True))
+        items = list(event.arguments.items())
+        display_items = items[:10]
+        for key, value in display_items:
+            truncated = str(value)[:200]
+            click.echo(click.style(f"   {key}: {truncated}", dim=True))
+    elif isinstance(event, ToolResultEvent):
+        if event.success:
+            icon = "✅"
+            color: str | None = "green"
+        else:
+            icon = "❌"
+            color = "red"
+        click.echo(click.style(f"{icon} {event.tool_name}", fg=color))
+        lines = event.output.split("\n")
+        display_lines = lines[:10]
+        remaining = len(lines) - len(display_lines)
+        for line in display_lines:
+            click.echo(click.style(f"   {line[:200]}", dim=True))
+        if remaining > 0:
+            click.echo(click.style(f"   ... ({remaining} more lines)", dim=True))
+    elif isinstance(event, TodoUpdateEvent):
+        if event.todos:
+            total = len(event.todos)
+            completed = sum(1 for t in event.todos if t.get("status") == "completed")
+            click.echo(click.style(f"\n📋 todos ({completed}/{total})", dim=True))
+            symbols: dict[str, str] = {
+                "completed": "✓",
+                "in_progress": "▶",
+                "pending": "○",
+            }
+            for todo in event.todos[:7]:
+                status = todo.get("status", "pending")
+                symbol = symbols.get(status, " ")
+                content = str(todo.get("content", ""))
+                click.echo(click.style(f"   {symbol} {content}", dim=True))
+    elif isinstance(event, ChildSessionStartEvent):
+        indent = "    " * (event.depth - 1)
+        click.echo(
+            f"{indent}"
+            + click.style(f"⚙ delegate -> {event.agent_name}", fg="cyan", bold=True)
+        )
+    elif isinstance(event, ChildSessionEvent):
+        if event.inner is not None:
+            import io
+
+            buf = io.StringIO()
+            orig_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                handle_host_event(event.inner)
+            finally:
+                sys.stdout = orig_stdout
+            output = buf.getvalue()
+            indent = "    " * event.depth
+            for line in output.split("\n"):
+                if line:
+                    click.echo(indent + line)
+    elif isinstance(event, ChildSessionEndEvent):
+        pass
     elif isinstance(event, ErrorEvent):
         click.echo(click.style(f"\nError: {event.message}", fg="red"))
     elif isinstance(event, CompleteEvent):
@@ -257,9 +324,11 @@ async def interactive_repl(
                 continue
 
         # ---- Execute prompt with two-stage Ctrl+C cancellation --------------
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+
         cancellation = CancellationState()
         event_queue: asyncio.Queue[HostEvent | None] = asyncio.Queue()
-        state: dict[str, Any] = {}
+        display = StreamingDisplay(console)
 
         def _sigint_handler(signum: int, frame: Any) -> None:  # noqa: ANN401
             if cancellation.is_cancelled:
@@ -292,9 +361,7 @@ async def interactive_repl(
                     break
 
                 try:
-                    event = await asyncio.wait_for(
-                        event_queue.get(), timeout=0.05
-                    )
+                    event = await asyncio.wait_for(event_queue.get(), timeout=0.05)
                 except TimeoutError:
                     if task.done():
                         break
@@ -308,7 +375,7 @@ async def interactive_repl(
                     approved = await handler.handle_approval(event)
                     host.send_approval(approved)
                 else:
-                    handle_host_event(event, state=state)
+                    display.handle_event(event)
 
             try:
                 await task
@@ -319,10 +386,9 @@ async def interactive_repl(
             signal.signal(signal.SIGINT, original_handler)
 
         # Render the final response if available
-        response = state.get("response")
-        if response:
+        if display.response:
             render_message(
-                {"role": "assistant", "content": response},
+                {"role": "assistant", "content": display.response},
                 console,
             )
 
@@ -334,8 +400,7 @@ async def interactive_repl(
             "\n[yellow]Session exited - resume anytime with these commands:[/yellow]"
         )
         console.print(
-            "  [cyan]amplifier-ipc session list[/cyan]  "
-            "# interactive list of sessions"
+            "  [cyan]amplifier-ipc session list[/cyan]  # interactive list of sessions"
         )
         console.print(
             f"  [cyan]amplifier-ipc run{agent_flag} -s {session_id[:8]}[/cyan]  "
