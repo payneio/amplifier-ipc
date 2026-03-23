@@ -386,6 +386,7 @@ async def test_host_spawn_handler_passes_parent_config() -> None:
         transcript: list,
         request: SpawnRequest,
         current_depth: int = 0,
+        **kwargs: Any,
     ) -> dict:
         captured.append(parent_config)
         return {
@@ -479,6 +480,7 @@ async def test_host_resume_handler_wired() -> None:
             request: Any,
             settings: Any = None,
             session_dir: Any = None,
+            **kwargs: Any,
         ) -> dict:
             captured.append(
                 {
@@ -847,7 +849,9 @@ async def test_host_send_approval_is_non_blocking() -> None:
     assert host._approval_queue.get_nowait() is False
 
 
-async def test_host_build_registry_configure_method_not_found_is_logged_and_skipped() -> None:
+async def test_host_build_registry_configure_method_not_found_is_logged_and_skipped() -> (
+    None
+):
     """_build_registry logs a warning and continues if configure returns METHOD_NOT_FOUND.
 
     Services installed from an older amplifier-ipc version may not support the
@@ -896,3 +900,56 @@ async def test_host_build_registry_configure_method_not_found_is_logged_and_skip
     assert any(call[0] == "describe" for call in client.calls)
     # configure was attempted
     assert any(call[0] == "configure" for call in client.calls)
+
+
+# ---------------------------------------------------------------------------
+# Shared services — child session reuse (3 tests)
+# ---------------------------------------------------------------------------
+
+
+def test_host_shared_services_sets_owns_services_false() -> None:
+    """Host constructed with shared_services has _owns_services=False."""
+    config = SessionConfig(
+        services=["svc"], orchestrator="o", context_manager="cm", provider="p"
+    )
+    shared = {"svc": FakeService(FakeClient())}
+
+    host = Host(config=config, settings=HostSettings(), shared_services=shared)
+
+    assert host._owns_services is False
+    # The shared services dict is copied into _services
+    assert host._services == shared
+
+
+def test_host_no_shared_services_owns_services() -> None:
+    """Host constructed without shared_services owns its services (_owns_services=True)."""
+    config = SessionConfig(
+        services=["svc"], orchestrator="o", context_manager="cm", provider="p"
+    )
+
+    host = Host(config=config, settings=HostSettings())
+
+    assert host._owns_services is True
+
+
+async def test_host_shared_services_skips_spawn_and_teardown() -> None:
+    """With shared_services, _spawn_services and _teardown_services are both no-ops."""
+
+    config = SessionConfig(
+        services=["svc"], orchestrator="o", context_manager="cm", provider="p"
+    )
+    fake_service = FakeService(FakeClient())
+    shared = {"svc": fake_service}
+
+    host = Host(config=config, settings=HostSettings(), shared_services=shared)
+
+    # _spawn_services must not call spawn_service (would fail — no real binary)
+    with patch("amplifier_ipc.host.host.spawn_service") as mock_spawn:
+        await host._spawn_services()
+        mock_spawn.assert_not_called()
+
+    # _teardown_services must not call shutdown_service on shared processes
+    # Even if we inject a ServiceProcess-like fake, it should not be touched
+    with patch("amplifier_ipc.host.host.shutdown_service") as mock_shutdown:
+        await host._teardown_services()
+        mock_shutdown.assert_not_called()

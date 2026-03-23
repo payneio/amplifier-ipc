@@ -310,8 +310,17 @@ async def _run_child_session(
     request: SpawnRequest,
     settings: Any | None = None,
     session_dir: Any | None = None,
+    service_configs: dict[str, Any] | None = None,
+    shared_services: dict[str, Any] | None = None,
+    shared_registry: Any | None = None,
 ) -> dict[str, Any]:
     """Execute a child session by creating and running a child Host.
+
+    When *shared_services* and *shared_registry* are provided the child Host
+    skips spawning new service processes and reuses the parent's already-running
+    ones.  This is the normal path for delegate/spawn — the parent passes its
+    ``_services`` dict and ``_registry`` so the child can start immediately
+    without the overhead (and potential failure) of re-spawning every service.
 
     Args:
         child_session_id: The pre-generated ID for this child session.
@@ -322,6 +331,12 @@ async def _run_child_session(
         settings: Optional :class:`~amplifier_ipc.host.config.HostSettings`;
             a default instance is created when ``None``.
         session_dir: Optional session directory path forwarded to :class:`Host`.
+        service_configs: Optional per-service component config dicts.
+        shared_services: Parent's running service processes.  When supplied
+            the child Host will not spawn or tear down services.
+        shared_registry: Parent's :class:`~amplifier_ipc.host.registry.CapabilityRegistry`.
+            When supplied the child Host skips the ``describe``/``configure``
+            discovery phase.
 
     Returns:
         A dict with keys:
@@ -353,8 +368,16 @@ async def _run_child_session(
     # 2. Create HostSettings if not provided
     host_settings: HostSettings = settings if settings is not None else HostSettings()
 
-    # 3. Create Host instance
-    host = Host(session_config, host_settings, session_dir)
+    # 3. Create Host instance — pass shared services/registry when available so
+    #    the child skips spawning new processes and describe/configure discovery.
+    host = Host(
+        session_config,
+        host_settings,
+        session_dir,
+        service_configs=service_configs,
+        shared_services=shared_services,
+        shared_registry=shared_registry,
+    )
 
     # 4. Run the host, iterating async events, collecting CompleteEvent response
     response = ""
@@ -384,6 +407,10 @@ async def spawn_child_session(
     transcript: list[dict[str, Any]],
     request: SpawnRequest,
     current_depth: int = 0,
+    settings: Any | None = None,
+    service_configs: dict[str, Any] | None = None,
+    shared_services: dict[str, Any] | None = None,
+    shared_registry: Any | None = None,
 ) -> Any:
     """Orchestrate spawning of a child session.
 
@@ -404,6 +431,12 @@ async def spawn_child_session(
                            extraction.
         request:           Spawn parameters.
         current_depth:     Current self-delegation nesting depth (0-based).
+        settings:          Optional :class:`~amplifier_ipc.host.config.HostSettings`.
+        service_configs:   Optional per-service component config dicts.
+        shared_services:   Parent's running service processes.  When provided
+                           the child Host skips spawning new processes.
+        shared_registry:   Parent's capability registry.  When provided the
+                           child Host skips ``describe``/``configure`` discovery.
 
     Returns:
         Whatever :func:`_run_child_session` returns.
@@ -452,5 +485,12 @@ async def spawn_child_session(
 
     # 7. Execute child session
     return await _run_child_session(
-        child_session_id, child_config, instruction, request
+        child_session_id,
+        child_config,
+        instruction,
+        request,
+        settings=settings,
+        service_configs=service_configs,
+        shared_services=shared_services,
+        shared_registry=shared_registry,
     )

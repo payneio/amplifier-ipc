@@ -408,3 +408,100 @@ async def test_spawn_child_session_recent_depth_requires_context_turns() -> None
             request=request,
             current_depth=0,
         )
+
+
+# ---------------------------------------------------------------------------
+# shared_services / shared_registry forwarding (3 tests)
+# ---------------------------------------------------------------------------
+
+
+async def test_run_child_session_passes_shared_services_to_host() -> None:
+    """_run_child_session forwards shared_services and shared_registry to Host."""
+    from amplifier_ipc.host.events import CompleteEvent
+    from amplifier_ipc.host.registry import CapabilityRegistry
+
+    async def mock_run(prompt: str):  # type: ignore[return]
+        yield CompleteEvent(result="done")
+
+    shared_svcs = {"svc": object()}
+    shared_reg = CapabilityRegistry()
+
+    with patch("amplifier_ipc.host.host.Host") as MockHost:
+        mock_instance = MagicMock()
+        MockHost.return_value = mock_instance
+        mock_instance.run = mock_run
+
+        await _run_child_session(
+            child_session_id="child-789",
+            child_config={
+                "services": ["svc"],
+                "orchestrator": "o",
+                "context_manager": "cm",
+                "provider": "p",
+            },
+            instruction="go",
+            request=SpawnRequest(agent="self", instruction="go"),
+            shared_services=shared_svcs,
+            shared_registry=shared_reg,
+        )
+
+    # Verify Host was constructed with shared_services and shared_registry
+    _, kwargs = MockHost.call_args
+    assert kwargs.get("shared_services") is shared_svcs
+    assert kwargs.get("shared_registry") is shared_reg
+
+
+async def test_spawn_child_session_forwards_shared_services() -> None:
+    """spawn_child_session passes shared_services and shared_registry to _run_child_session."""
+    shared_svcs = {"svc": object()}
+    shared_reg = object()
+    request = SpawnRequest(agent="self", instruction="Do something")
+
+    with patch(
+        "amplifier_ipc.host.spawner._run_child_session", new_callable=AsyncMock
+    ) as mock_run:
+        mock_run.return_value = {
+            "session_id": "child-123",
+            "response": "result",
+            "turn_count": 1,
+            "metadata": {},
+        }
+        await spawn_child_session(
+            parent_session_id="parent-123",
+            parent_config={"tools": []},
+            transcript=[],
+            request=request,
+            current_depth=0,
+            shared_services=shared_svcs,
+            shared_registry=shared_reg,
+        )
+
+    assert mock_run.called
+    _, kwargs = mock_run.call_args
+    assert kwargs.get("shared_services") is shared_svcs
+    assert kwargs.get("shared_registry") is shared_reg
+
+
+async def test_run_child_session_without_shared_services_passes_none() -> None:
+    """When no shared_services given, Host receives None (will spawn its own)."""
+    from amplifier_ipc.host.events import CompleteEvent
+
+    async def mock_run(prompt: str):  # type: ignore[return]
+        yield CompleteEvent(result="done")
+
+    with patch("amplifier_ipc.host.host.Host") as MockHost:
+        mock_instance = MagicMock()
+        MockHost.return_value = mock_instance
+        mock_instance.run = mock_run
+
+        await _run_child_session(
+            child_session_id="child-no-shared",
+            child_config={},
+            instruction="go",
+            request=SpawnRequest(agent="self", instruction="go"),
+            # No shared_services or shared_registry
+        )
+
+    _, kwargs = MockHost.call_args
+    assert kwargs.get("shared_services") is None
+    assert kwargs.get("shared_registry") is None

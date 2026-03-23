@@ -69,17 +69,29 @@ class Host:
         settings: HostSettings,
         session_dir: Path | None = None,
         service_configs: dict[str, Any] | None = None,
+        shared_services: dict[str, Any] | None = None,
+        shared_registry: CapabilityRegistry | None = None,
     ) -> None:
         self._config = config
         self._settings = settings
         self._session_dir = session_dir or (Path.home() / ".amplifier" / "sessions")
 
+        # When shared_services/shared_registry are provided (child sessions), the Host
+        # reuses the parent's already-running service processes and capability registry
+        # rather than spawning new ones.  _owns_services tracks whether teardown is
+        # the responsibility of this Host instance.
+        self._owns_services: bool = shared_services is None
+
         # Internal state — populated during run()
-        self._services: dict[str, Any] = {}
+        self._services: dict[str, Any] = (
+            dict(shared_services) if shared_services else {}
+        )
         # Per-service merged component configs for the configure protocol.
         # Populated from resolved.service_configs via launch_session().
         self._service_configs: dict[str, Any] = service_configs or {}
-        self._registry: CapabilityRegistry = CapabilityRegistry()
+        self._registry: CapabilityRegistry = (
+            shared_registry if shared_registry is not None else CapabilityRegistry()
+        )
         self._router: Router | None = None
         self._persistence: SessionPersistence | None = None
         self._state: dict[str, Any] = {}
@@ -146,11 +158,13 @@ class Host:
             # 1b. Load shared state from persistence
             self._state = self._persistence.load_state()
 
-            # 2. Spawn services
-            await self._spawn_services()
+            # 2. Spawn services (skipped for child sessions that share parent's processes)
+            if self._owns_services:
+                await self._spawn_services()
 
-            # 3. Build registry
-            await self._build_registry()
+            # 3. Build registry (skipped for child sessions that share parent's registry)
+            if self._owns_services:
+                await self._build_registry()
 
             # 4. Resolve service keys
             orchestrator_key = self._registry.get_orchestrator_service(
@@ -298,6 +312,10 @@ class Host:
                 parent_config=parent_config,
                 transcript=transcript,
                 request=spawn_request,
+                settings=self._settings,
+                service_configs=self._service_configs,
+                shared_services=self._services,
+                shared_registry=self._registry,
             )
 
         return _handle_spawn
@@ -369,7 +387,11 @@ class Host:
                 child_config=child_config,
                 instruction=full_instruction,
                 request=spawn_request,
+                settings=self._settings,
                 session_dir=self._session_dir,
+                service_configs=self._service_configs,
+                shared_services=self._services,
+                shared_registry=self._registry,
             )
 
         return _handle_resume
@@ -680,14 +702,26 @@ class Host:
                         raise
 
     async def _spawn_services(self) -> None:
-        """Spawn all services declared in the session config."""
+        """Spawn all services declared in the session config.
+
+        No-op when this Host was constructed with ``shared_services`` — the
+        parent session already owns and manages those processes.
+        """
+        if not self._owns_services:
+            return
         for service_name in self._config.services:
             command, working_dir = resolve_service_command(service_name, self._settings)
             service = await spawn_service(service_name, command, working_dir)
             self._services[service_name] = service
 
     async def _teardown_services(self) -> None:
-        """Gracefully shut down all running :class:`ServiceProcess` instances."""
+        """Gracefully shut down all running :class:`ServiceProcess` instances.
+
+        Skipped when this Host was constructed with ``shared_services`` — the
+        parent session that owns those processes is responsible for teardown.
+        """
+        if not self._owns_services:
+            return
         for service in self._services.values():
             if isinstance(service, ServiceProcess):
                 try:
