@@ -46,7 +46,7 @@ from amplifier_ipc.protocol.framing import read_message, write_message
 
 logger = logging.getLogger(__name__)
 
-_DESCRIBE_TIMEOUT_S = 10.0
+_SERVICE_INIT_TIMEOUT_S = 10.0
 
 
 class Host:
@@ -621,7 +621,7 @@ class Host:
         for service_key, service in self._services.items():
             describe_result = await asyncio.wait_for(
                 service.client.request("describe"),
-                timeout=_DESCRIBE_TIMEOUT_S,
+                timeout=_SERVICE_INIT_TIMEOUT_S,
             )
             # The real protocol server nests all capability lists under a
             # "capabilities" key.  Fall back to the raw dict so unit tests
@@ -651,7 +651,7 @@ class Host:
             if service_config:
                 await asyncio.wait_for(
                     service.client.request("configure", {"config": service_config}),
-                    timeout=_DESCRIBE_TIMEOUT_S,
+                    timeout=_SERVICE_INIT_TIMEOUT_S,
                 )
 
     async def _spawn_services(self) -> None:
