@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HostEvent(BaseModel):
@@ -63,3 +63,49 @@ class CompleteEvent(HostEvent):
     """Emitted as the final event carrying the orchestrator's full response (complete)."""
 
     result: str = ""
+
+
+class ToolCallEvent(HostEvent):
+    """Emitted when a tool call is dispatched."""
+
+    tool_name: str = ""
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolResultEvent(HostEvent):
+    """Emitted when a tool call result is received."""
+
+    tool_name: str = ""
+    success: bool = True
+    output: str = ""
+
+
+class TodoUpdateEvent(HostEvent):
+    """Emitted when the todo list is updated."""
+
+    todos: list[dict[str, Any]] = Field(default_factory=list)
+    status: str = ""
+
+
+class ChildSessionStartEvent(HostEvent):
+    """Emitted when a child session is started."""
+
+    agent_name: str = ""
+    session_id: str = ""
+    depth: int = 1
+
+
+class ChildSessionEndEvent(HostEvent):
+    """Emitted when a child session ends."""
+
+    session_id: str = ""
+    depth: int = 1
+
+
+class ChildSessionEvent(HostEvent):
+    """Wraps an event emitted by a child session, carrying the nesting depth."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    depth: int = 1
+    inner: HostEvent | None = None

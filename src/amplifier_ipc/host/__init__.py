@@ -21,6 +21,9 @@ from amplifier_ipc.host.definitions import (
 )
 from amplifier_ipc.host.events import (
     ApprovalRequestEvent,
+    ChildSessionEndEvent,
+    ChildSessionEvent,
+    ChildSessionStartEvent,
     CompleteEvent,
     ErrorEvent,
     HostEvent,
@@ -29,6 +32,9 @@ from amplifier_ipc.host.events import (
     StreamThinkingEvent,
     StreamTokenEvent,
     StreamToolCallStartEvent,
+    TodoUpdateEvent,
+    ToolCallEvent,
+    ToolResultEvent,
 )
 from amplifier_ipc.host.host import Host
 from amplifier_ipc.host.lifecycle import ServiceProcess, shutdown_service, spawn_service
@@ -57,6 +63,12 @@ __all__ = [
     "ApprovalRequestEvent",
     "ErrorEvent",
     "CompleteEvent",
+    "ToolCallEvent",
+    "ToolResultEvent",
+    "TodoUpdateEvent",
+    "ChildSessionStartEvent",
+    "ChildSessionEndEvent",
+    "ChildSessionEvent",
     # Config
     "SessionConfig",
     "HostSettings",
