@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+import sys
+from pathlib import Path
+
 import pytest
 
 from amplifier_ipc.host.content import assemble_system_prompt, resolve_mention
+from amplifier_ipc.host.config import HostSettings, SessionConfig
+from amplifier_ipc.host.host import Host
+from amplifier_ipc.host.lifecycle import ServiceProcess, shutdown_service
 from amplifier_ipc.host.registry import CapabilityRegistry
+from amplifier_ipc.protocol.client import Client
+
+_IPC_SRC = Path(__file__).parent.parent.parent / "src"
 
 
 # ---------------------------------------------------------------------------
@@ -194,3 +205,165 @@ async def test_assemble_system_prompt_skips_failed_reads() -> None:
     assert "philosophy content" in result
     # Failed read is absent (gracefully skipped)
     assert "common shared content" not in result
+
+
+# ---------------------------------------------------------------------------
+# Real subprocess helpers
+# ---------------------------------------------------------------------------
+
+
+def _create_content_service_package(tmp_path: Path) -> Path:
+    """Create a Python package with context/ and agents/ content files.
+
+    Package layout::
+
+        tmp_path/
+          content_svc/
+            __init__.py
+            __main__.py           (Server("content_svc").run())
+            context/
+              philosophy.md       (# Philosophy\\nBe excellent.)
+              guidelines.md       (# Guidelines\\nFollow the rules.)
+            agents/
+              explorer.md         (# Explorer Agent\\nExplore things.)
+
+    Returns *tmp_path* (the parent of the package directory).
+    """
+    pkg = tmp_path / "content_svc"
+    pkg.mkdir()
+
+    (pkg / "__init__.py").write_text("")
+    (pkg / "__main__.py").write_text(
+        "from amplifier_ipc.protocol.server import Server\n"
+        'Server("content_svc").run()\n'
+    )
+
+    context_dir = pkg / "context"
+    context_dir.mkdir()
+    (context_dir / "philosophy.md").write_text("# Philosophy\nBe excellent.")
+    (context_dir / "guidelines.md").write_text("# Guidelines\nFollow the rules.")
+
+    agents_dir = pkg / "agents"
+    agents_dir.mkdir()
+    (agents_dir / "explorer.md").write_text("# Explorer Agent\nExplore things.")
+
+    return tmp_path
+
+
+async def _spawn_content_service(pkg_parent: Path) -> ServiceProcess:
+    """Spawn content_svc subprocess with the IPC src on PYTHONPATH."""
+    existing = os.environ.get("PYTHONPATH", "")
+    extra_paths = [str(pkg_parent), str(_IPC_SRC)]
+    if existing:
+        extra_paths.append(existing)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(extra_paths)
+
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "content_svc",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    assert process.stdout is not None
+    assert process.stdin is not None
+    client = Client(reader=process.stdout, writer=process.stdin)
+    return ServiceProcess(name="content_svc", process=process, client=client)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: end-to-end with real subprocess
+# ---------------------------------------------------------------------------
+
+
+async def test_content_injection_end_to_end(tmp_path: Path) -> None:
+    """Integration: _build_registry() + assemble_system_prompt() with a real subprocess.
+
+    Spans the full content injection pipeline:
+
+    1. A real service subprocess reports context/ and agents/ paths in its
+       ``describe`` response (nested ``{"capabilities": {"content": {"paths": [...]}}}``).
+    2. ``Host._build_registry()`` normalises the nested format and registers
+       the content paths in the capability registry.
+    3. ``assemble_system_prompt()`` fetches only ``context/`` files via
+       ``content.read`` RPC—agents/ files are filtered out.
+    4. Fetched content is wrapped in ``<context_file>`` XML blocks.
+    """
+    pkg_parent = _create_content_service_package(tmp_path)
+    service = await _spawn_content_service(pkg_parent)
+
+    config = SessionConfig(
+        services=["content_svc"],
+        orchestrator="",
+        context_manager="",
+        provider="",
+    )
+    host = Host(config=config, settings=HostSettings())
+    host._services = {"content_svc": service}
+
+    try:
+        await host._build_registry()
+
+        result = await assemble_system_prompt(host._registry, host._services)
+
+        # context/ files must be present
+        assert "Be excellent." in result
+        assert "Follow the rules." in result
+
+        # agents/ file must NOT be auto-included (context/ filter)
+        assert "Explorer Agent" not in result
+
+        # Content must be wrapped in XML context_file blocks
+        assert "<context_file" in result
+        assert "</context_file>" in result
+    finally:
+        await shutdown_service(service, timeout=5.0)
+
+
+async def test_mention_resolution_end_to_end(tmp_path: Path) -> None:
+    """Integration: resolve_mention() routes @namespace:path to the correct service.
+
+    Verifies that after ``_build_registry()`` populates the content registry,
+    ``resolve_mention()`` can:
+
+    * Fetch a non-context/ file (agents/explorer.md) that is excluded from
+      auto-assembly but accessible via explicit @mention.
+    * Fetch a context/ file by explicit @mention too.
+
+    This exercises the @namespace routing logic with a real subprocess.
+    """
+    pkg_parent = _create_content_service_package(tmp_path)
+    service = await _spawn_content_service(pkg_parent)
+
+    config = SessionConfig(
+        services=["content_svc"],
+        orchestrator="",
+        context_manager="",
+        provider="",
+    )
+    host = Host(config=config, settings=HostSettings())
+    host._services = {"content_svc": service}
+
+    try:
+        await host._build_registry()
+
+        # agents/ file: excluded from auto-assembly but reachable via @mention
+        agent_content = await resolve_mention(
+            "@content_svc:agents/explorer.md",
+            host._registry,
+            host._services,
+        )
+        assert agent_content == "# Explorer Agent\nExplore things."
+
+        # context/ file: also reachable via explicit @mention
+        ctx_content = await resolve_mention(
+            "@content_svc:context/philosophy.md",
+            host._registry,
+            host._services,
+        )
+        assert ctx_content == "# Philosophy\nBe excellent."
+    finally:
+        await shutdown_service(service, timeout=5.0)
