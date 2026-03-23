@@ -351,6 +351,7 @@ class StreamingOrchestrator:
                 STREAM_TOOL_RESULT,
                 {
                     "tool_name": tool_call.name,
+                    # ToolResult always has .success (Pydantic model); guard is spec-required
                     "success": tool_result.success
                     if hasattr(tool_result, "success")
                     else True,
