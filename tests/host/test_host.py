@@ -1075,6 +1075,8 @@ async def test_build_spawn_handler_provides_event_callback() -> None:
     host._registry = registry
     host._persistence = None
 
+    captured_callback: list[Any] = []
+
     async def mock_spawn_child_session(
         parent_session_id: str,
         parent_config: dict,
@@ -1083,12 +1085,10 @@ async def test_build_spawn_handler_provides_event_callback() -> None:
         event_callback: Any = None,
         **kwargs: Any,
     ) -> dict:
-        # Verify event_callback was provided
-        assert event_callback is not None, (
-            "event_callback must be passed to spawn_child_session"
-        )
+        captured_callback.append(event_callback)
         # Simulate child emitting an event via the callback
-        event_callback(StreamTokenEvent(token="child token"))
+        if event_callback is not None:
+            event_callback(StreamTokenEvent(token="child token"))
         return {
             "session_id": "child-123",
             "response": "done",
@@ -1102,6 +1102,9 @@ async def test_build_spawn_handler_provides_event_callback() -> None:
         result = await spawn_handler({"agent": "explorer", "instruction": "Find files"})
 
     assert result["response"] == "done"
+    assert captured_callback[0] is not None, (
+        "event_callback must be passed to spawn_child_session"
+    )
 
     # Drain the queue and check contents
     queue_items: list[Any] = []

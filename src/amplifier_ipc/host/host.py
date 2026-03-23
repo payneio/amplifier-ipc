@@ -11,7 +11,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Coroutine
 from pathlib import Path
 from typing import Any
 
@@ -107,11 +107,17 @@ class Host:
         )
         self._child_event_queue: asyncio.Queue[HostEvent] = asyncio.Queue()
         self._approval_queue: asyncio.Queue[bool] = asyncio.Queue()
+        self._session_id: str | None = None
         self._resume_session_id: str | None = None
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @property
+    def session_id(self) -> str | None:
+        """Return the session ID from the most recent ``run()`` call, or ``None``."""
+        return self._session_id
 
     def send_approval(self, approved: bool) -> None:
         """Submit an approval decision to unblock the orchestrator loop.
@@ -160,6 +166,7 @@ class Host:
                 declared in the config is not found in the registry.
         """
         session_id = uuid.uuid4().hex[:16]
+        self._session_id = session_id
         self._persistence = SessionPersistence(session_id, self._session_dir)
 
         try:
@@ -221,6 +228,7 @@ class Host:
             # 5b. Resume session: restore previous transcript if resuming
             if self._resume_session_id is not None:
                 session_id = await self._restore_from_session()
+                self._session_id = session_id
 
             # 6. Assemble system prompt
             system_prompt = await assemble_system_prompt(self._registry, self._services)
@@ -267,7 +275,9 @@ class Host:
     # Spawn handler factory
     # ------------------------------------------------------------------
 
-    def _build_spawn_handler(self, session_id: str) -> Any:
+    def _build_spawn_handler(
+        self, session_id: str
+    ) -> Callable[[Any], Coroutine[Any, Any, Any]]:
         """Build and return the async ``_handle_spawn`` closure for *session_id*.
 
         The returned coroutine function handles ``request.session_spawn`` by
