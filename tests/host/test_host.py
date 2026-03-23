@@ -1030,9 +1030,7 @@ async def test_orchestrator_loop_drains_child_event_queue() -> None:
     assert events[0].depth == 1
     assert isinstance(events[0].inner, StreamTokenEvent)
     assert events[0].inner.token == "child_token"
-    from amplifier_ipc.host.events import CompleteEvent as _CompleteEvent
-
-    assert isinstance(events[1], _CompleteEvent)
+    assert isinstance(events[1], CompleteEvent)
     assert events[1].result == "done"
 
 

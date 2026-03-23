@@ -34,9 +34,9 @@ from amplifier_ipc.host.events import (
     StreamThinkingEvent,
     StreamTokenEvent,
     StreamToolCallStartEvent,
-    TodoUpdateEvent,  # noqa: F401
-    ToolCallEvent,  # noqa: F401
-    ToolResultEvent,  # noqa: F401
+    TodoUpdateEvent,  # noqa: F401  # re-exported for downstream consumers
+    ToolCallEvent,  # noqa: F401  # re-exported for downstream consumers
+    ToolResultEvent,  # noqa: F401  # re-exported for downstream consumers
 )
 from amplifier_ipc.host.lifecycle import ServiceProcess, shutdown_service, spawn_service
 from amplifier_ipc.host.persistence import SessionPersistence
@@ -308,6 +308,11 @@ class Host:
 
             def _forward_child_event(event: HostEvent) -> None:
                 """Wrap a child event and enqueue it for the orchestrator loop."""
+                # depth is always 1 here; nested grandchild events arrive already
+                # wrapped (e.g. ChildSessionEvent(depth=2)) and will be re-wrapped
+                # as ChildSessionEvent(depth=1, inner=ChildSessionEvent(depth=2, ...))
+                # rather than being promoted.  Depth promotion is not in scope at
+                # this layer.
                 self._child_event_queue.put_nowait(
                     ChildSessionEvent(depth=1, inner=event)
                 )
