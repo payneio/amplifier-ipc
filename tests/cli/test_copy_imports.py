@@ -35,6 +35,37 @@ def test_settings_imports() -> None:
     assert hasattr(m, "get_settings")
 
 
+def test_settings_paths_is_pydantic_model() -> None:
+    """SettingsPaths is a Pydantic BaseModel, not a dataclass."""
+    from pathlib import Path
+
+    from pydantic import BaseModel
+
+    from amplifier_ipc.cli.settings import SettingsPaths
+
+    # Must inherit from Pydantic BaseModel
+    assert issubclass(SettingsPaths, BaseModel), (
+        "SettingsPaths must be a Pydantic BaseModel"
+    )
+
+    # Must NOT be a dataclass
+    import dataclasses
+
+    assert not dataclasses.is_dataclass(SettingsPaths), (
+        "SettingsPaths must not be a dataclass"
+    )
+
+    # default() classmethod must still work correctly
+    paths = SettingsPaths.default()
+    assert isinstance(paths, SettingsPaths)
+    assert isinstance(paths.global_path, Path)
+    assert isinstance(paths.project_path, Path)
+    assert isinstance(paths.local_path, Path)
+    assert paths.global_path == Path.home() / ".amplifier" / "settings.yaml"
+    assert paths.project_path == Path.cwd() / ".amplifier" / "settings.yaml"
+    assert paths.local_path == Path.cwd() / ".amplifier" / "settings.local.yaml"
+
+
 def test_ui_init_imports() -> None:
     """ui/__init__.py exports CLIDisplaySystem, format_throttle_warning, render_message."""
     import amplifier_ipc.cli.ui as m

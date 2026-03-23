@@ -9,7 +9,7 @@ Settings are loaded from three scopes and deep-merged (global < project < local)
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from pydantic import BaseModel
 from pathlib import Path
 from typing import Any, Literal
 
@@ -26,12 +26,11 @@ _SCOPES: tuple[Scope, ...] = ("global", "project", "local")
 
 
 # ---------------------------------------------------------------------------
-# SettingsPaths dataclass
+# SettingsPaths model
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class SettingsPaths:
+class SettingsPaths(BaseModel):
     """Holds file paths for all three settings scopes."""
 
     global_path: Path
