@@ -23,6 +23,9 @@ from amplifier_ipc.host.config import (
 from amplifier_ipc.host.content import assemble_system_prompt
 from amplifier_ipc.host.events import (
     ApprovalRequestEvent,
+    ChildSessionEndEvent,
+    ChildSessionEvent,
+    ChildSessionStartEvent,
     CompleteEvent,
     ErrorEvent,
     HostEvent,
@@ -39,6 +42,7 @@ from amplifier_ipc.host.router import Router
 from amplifier_ipc.host.spawner import (
     SpawnRequest,
     _run_child_session,
+    generate_child_session_id,
     spawn_child_session,
 )
 from amplifier_ipc.protocol.errors import (
@@ -98,6 +102,7 @@ class Host:
         self._provider_notification_queue: asyncio.Queue[dict[str, Any]] = (
             asyncio.Queue()
         )
+        self._child_event_queue: asyncio.Queue[HostEvent] = asyncio.Queue()
         self._approval_queue: asyncio.Queue[bool] = asyncio.Queue()
         self._resume_session_id: str | None = None
 
@@ -281,8 +286,9 @@ class Host:
         async def _handle_spawn(params: Any) -> Any:
             """Handle request.session_spawn from the orchestrator."""
             p = params if isinstance(params, dict) else {}
+            agent_name = p.get("agent", "self")
             spawn_request = SpawnRequest(
-                agent=p.get("agent", "self"),
+                agent=agent_name,
                 instruction=p.get("instruction", ""),
                 context_depth=p.get("context_depth", "none"),
                 context_scope=p.get("context_scope", "conversation"),
@@ -295,6 +301,14 @@ class Host:
                 provider_preferences=p.get("provider_preferences"),
                 model_role=p.get("model_role"),
             )
+            child_session_id = generate_child_session_id(session_id, agent_name)
+
+            def _forward_child_event(event: HostEvent) -> None:
+                """Wrap a child event and enqueue it for the orchestrator loop."""
+                self._child_event_queue.put_nowait(
+                    ChildSessionEvent(depth=1, inner=event)
+                )
+
             transcript = (
                 self._persistence.load_transcript() if self._persistence else []
             )
@@ -307,16 +321,28 @@ class Host:
                 "tools": self._registry.get_all_tool_specs(),
                 "hooks": self._registry.get_all_hook_descriptors(),
             }
-            return await spawn_child_session(
-                parent_session_id=session_id,
-                parent_config=parent_config,
-                transcript=transcript,
-                request=spawn_request,
-                settings=self._settings,
-                service_configs=self._service_configs,
-                shared_services=self._services,
-                shared_registry=self._registry,
+            self._child_event_queue.put_nowait(
+                ChildSessionStartEvent(
+                    agent_name=agent_name,
+                    session_id=child_session_id,
+                )
             )
+            try:
+                return await spawn_child_session(
+                    parent_session_id=session_id,
+                    parent_config=parent_config,
+                    transcript=transcript,
+                    request=spawn_request,
+                    settings=self._settings,
+                    service_configs=self._service_configs,
+                    shared_services=self._services,
+                    shared_registry=self._registry,
+                    event_callback=_forward_child_event,
+                )
+            finally:
+                self._child_event_queue.put_nowait(
+                    ChildSessionEndEvent(session_id=child_session_id)
+                )
 
         return _handle_spawn
 
@@ -512,6 +538,10 @@ class Host:
             while not self._provider_notification_queue.empty():
                 notification = self._provider_notification_queue.get_nowait()
                 await write_message(orchestrator_svc.process.stdin, notification)
+
+            # Drain child event queue and yield events to the caller
+            while not self._child_event_queue.empty():
+                yield self._child_event_queue.get_nowait()
 
             method: str | None = message.get("method")
 

@@ -953,3 +953,175 @@ async def test_host_shared_services_skips_spawn_and_teardown() -> None:
     with patch("amplifier_ipc.host.host.shutdown_service") as mock_shutdown:
         await host._teardown_services()
         mock_shutdown.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Child event queue — task 3 tests
+# ---------------------------------------------------------------------------
+
+
+async def test_orchestrator_loop_drains_child_event_queue() -> None:
+    """_orchestrator_loop drains _child_event_queue and yields ChildSessionEvent items.
+
+    Events placed on _child_event_queue (e.g. by a spawn handler) must be
+    yielded by _orchestrator_loop in the same turn, before the next read loop
+    message is processed.
+    """
+    from amplifier_ipc.host.events import ChildSessionEvent, StreamTokenEvent
+
+    config = SessionConfig(
+        services=["orch"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+
+    host = Host(config=config, settings=settings)
+
+    fake_process = MagicMock()
+    fake_process.stdin = MagicMock()
+    fake_process.stdout = MagicMock()
+
+    fake_service = MagicMock()
+    fake_service.process = fake_process
+    host._services = {"orch": fake_service}
+
+    captured_id: list[str] = []
+
+    async def fake_write(stream: object, message: dict) -> None:  # type: ignore[type-arg]
+        if message.get("method") == "orchestrator.execute":
+            captured_id.append(message["id"])
+
+    read_call_count = 0
+
+    async def fake_read(stream: object) -> dict | None:  # type: ignore[type-arg]
+        nonlocal read_call_count
+        read_call_count += 1
+        if read_call_count == 1:
+            # Simulate a child event being queued (e.g., from a spawn handler)
+            child_event = ChildSessionEvent(
+                depth=1, inner=StreamTokenEvent(token="child_token")
+            )
+            host._child_event_queue.put_nowait(child_event)
+            # Return the final response on the same read
+            return {
+                "jsonrpc": "2.0",
+                "id": captured_id[0],
+                "result": "done",
+            }
+        return None
+
+    with (
+        patch("amplifier_ipc.host.host.write_message", fake_write),
+        patch("amplifier_ipc.host.host.read_message", fake_read),
+    ):
+        events = []
+        async for event in host._orchestrator_loop(
+            orchestrator_key="orch",
+            prompt="hello",
+            system_prompt="be helpful",
+        ):
+            events.append(event)
+
+    # ChildSessionEvent should appear before CompleteEvent
+    assert len(events) == 2
+    assert isinstance(events[0], ChildSessionEvent)
+    assert events[0].depth == 1
+    assert isinstance(events[0].inner, StreamTokenEvent)
+    assert events[0].inner.token == "child_token"
+    from amplifier_ipc.host.events import CompleteEvent as _CompleteEvent
+
+    assert isinstance(events[1], _CompleteEvent)
+    assert events[1].result == "done"
+
+
+async def test_build_spawn_handler_provides_event_callback() -> None:
+    """_build_spawn_handler passes event_callback that wraps child events in ChildSessionEvent.
+
+    Verifies that when spawn_child_session is called the handler:
+    1. Emits ChildSessionStartEvent to _child_event_queue before spawning.
+    2. Passes event_callback that wraps events in ChildSessionEvent(depth=1).
+    3. Emits ChildSessionEndEvent to _child_event_queue after spawning (finally).
+    """
+    from amplifier_ipc.host.events import (
+        ChildSessionEndEvent,
+        ChildSessionEvent,
+        ChildSessionStartEvent,
+        StreamTokenEvent,
+    )
+    from amplifier_ipc.host.spawner import SpawnRequest
+
+    registry = CapabilityRegistry()
+    registry.register(
+        "foundation",
+        {
+            "tools": [],
+            "hooks": [],
+            "orchestrators": [{"name": "loop"}],
+            "context_managers": [{"name": "simple"}],
+            "providers": [{"name": "anthropic"}],
+            "content": [],
+        },
+    )
+
+    config = SessionConfig(
+        services=["foundation"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+
+    host = Host(config=config, settings=settings)
+    host._registry = registry
+    host._persistence = None
+
+    async def mock_spawn_child_session(
+        parent_session_id: str,
+        parent_config: dict,
+        transcript: list,
+        request: SpawnRequest,
+        event_callback: Any = None,
+        **kwargs: Any,
+    ) -> dict:
+        # Verify event_callback was provided
+        assert event_callback is not None, (
+            "event_callback must be passed to spawn_child_session"
+        )
+        # Simulate child emitting an event via the callback
+        event_callback(StreamTokenEvent(token="child token"))
+        return {
+            "session_id": "child-123",
+            "response": "done",
+            "turn_count": 1,
+            "metadata": {},
+        }
+
+    spawn_handler = host._build_spawn_handler("test-session-id")
+
+    with patch("amplifier_ipc.host.host.spawn_child_session", mock_spawn_child_session):
+        result = await spawn_handler({"agent": "explorer", "instruction": "Find files"})
+
+    assert result["response"] == "done"
+
+    # Drain the queue and check contents
+    queue_items: list[Any] = []
+    while not host._child_event_queue.empty():
+        queue_items.append(host._child_event_queue.get_nowait())
+
+    # Expected order: ChildSessionStartEvent, ChildSessionEvent(inner=StreamTokenEvent), ChildSessionEndEvent
+    assert len(queue_items) == 3, (
+        f"Expected 3 items, got {len(queue_items)}: {queue_items}"
+    )
+    assert isinstance(queue_items[0], ChildSessionStartEvent)
+    assert queue_items[0].agent_name == "explorer"
+    assert queue_items[0].depth == 1
+
+    assert isinstance(queue_items[1], ChildSessionEvent)
+    assert queue_items[1].depth == 1
+    assert isinstance(queue_items[1].inner, StreamTokenEvent)
+    assert queue_items[1].inner.token == "child token"
+
+    assert isinstance(queue_items[2], ChildSessionEndEvent)
+    assert queue_items[2].depth == 1
