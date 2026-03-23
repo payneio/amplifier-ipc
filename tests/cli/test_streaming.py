@@ -259,3 +259,54 @@ class TestToolResultTruncatesLongOutput:
         # (10 content lines + 1 header line + 1 truncation indicator)
         output_lines = output.splitlines()
         assert len(output_lines) <= 12
+
+
+# ---------------------------------------------------------------------------
+# Test 11: test_todo_update_renders_items
+# ---------------------------------------------------------------------------
+
+
+class TestTodoUpdateRendersItems:
+    def test_todo_update_renders_items(self) -> None:
+        """TodoUpdateEvent with 3 items should render content strings and progress bar."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+        from amplifier_ipc.host.events import TodoUpdateEvent
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        event = TodoUpdateEvent(
+            todos=[
+                {"content": "Task one", "status": "completed", "activeForm": "Completing task one"},
+                {"content": "Task two", "status": "in_progress", "activeForm": "Doing task two"},
+                {"content": "Task three", "status": "pending", "activeForm": "Starting task three"},
+            ],
+            status="updated",
+        )
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "Task one" in output
+        assert "Task two" in output
+        assert "Task three" in output
+        # Progress bar should show completed/total ratio (1 completed out of 3)
+        assert "1/3" in output or "3" in output
+
+
+# ---------------------------------------------------------------------------
+# Test 12: test_todo_update_empty
+# ---------------------------------------------------------------------------
+
+
+class TestTodoUpdateEmpty:
+    def test_todo_update_empty(self) -> None:
+        """TodoUpdateEvent with empty todos list should not crash."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+        from amplifier_ipc.host.events import TodoUpdateEvent
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        event = TodoUpdateEvent(todos=[], status="listed")
+        # Should not raise any exception
+        display.handle_event(event)

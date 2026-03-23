@@ -11,6 +11,7 @@ from amplifier_ipc.host.events import (
     StreamThinkingEvent,
     StreamTokenEvent,
     StreamToolCallStartEvent,
+    TodoUpdateEvent,
     ToolCallEvent,
     ToolResultEvent,
 )
@@ -59,6 +60,8 @@ class StreamingDisplay:
             self._handle_tool_call(event)
         elif isinstance(event, ToolResultEvent):
             self._handle_tool_result(event)
+        elif isinstance(event, TodoUpdateEvent):
+            self._handle_todo_update(event)
         elif isinstance(event, ErrorEvent):
             self._handle_error(event)
         elif isinstance(event, CompleteEvent):
@@ -115,6 +118,78 @@ class StreamingDisplay:
             self._console.print(
                 f"   ... ({remaining} more lines)", markup=False, highlight=False
             )
+
+    def _handle_todo_update(self, event: TodoUpdateEvent) -> None:
+        """Print a bordered todo list box with status symbols and a progress bar."""
+        if not event.todos:
+            return
+
+        # Status symbols
+        symbols: dict[str, str] = {
+            "completed": "\u2713",  # ✓ checkmark
+            "in_progress": "\u25b6",  # ▶ play
+            "pending": "\u25cb",  # ○ circle
+        }
+
+        total = len(event.todos)
+        completed_count = sum(1 for t in event.todos if t.get("status") == "completed")
+
+        # Box width (inner content width)
+        box_width = 50
+
+        top_border = "\u250c" + "\u2500" * box_width + "\u2510"
+        bottom_border = "\u2514" + "\u2500" * box_width + "\u2518"
+
+        self._console.print(top_border, markup=False)
+
+        if total <= 7:
+            # Full mode: show each todo item
+            for todo in event.todos:
+                status = todo.get("status", "pending")
+                symbol = symbols.get(status, " ")
+                content = str(todo.get("content", ""))
+                # Truncate content to fit box
+                inner_width = box_width - 4  # 2 for "│ " and 2 for symbol + space
+                if len(content) > inner_width:
+                    content = content[: inner_width - 3] + "..."
+                line = f"\u2502 {symbol} {content}"
+                # Pad to fill the box
+                padding = box_width - len(f" {symbol} {content}")
+                if padding > 0:
+                    line += " " * padding
+                line += "\u2502"
+                self._console.print(line, markup=False)
+        else:
+            # Condensed mode: show summary counts
+            in_progress_count = sum(
+                1 for t in event.todos if t.get("status") == "in_progress"
+            )
+            pending_count = sum(1 for t in event.todos if t.get("status") == "pending")
+            summary = (
+                f"\u2502 {symbols['completed']} {completed_count} completed  "
+                f"{symbols['in_progress']} {in_progress_count} in progress  "
+                f"{symbols['pending']} {pending_count} pending"
+            )
+            padding = box_width - (len(summary) - 2) + 1  # -2 for the box chars
+            if padding > 0:
+                summary += " " * padding
+            summary += "\u2502"
+            self._console.print(summary, markup=False)
+
+        # Progress bar
+        bar_width = 20
+        filled = int(bar_width * completed_count / total) if total > 0 else 0
+        empty = bar_width - filled
+        bar = "\u2588" * filled + "\u2591" * empty
+        progress_text = f"{completed_count}/{total}"
+        progress_line = f"\u2502 {bar} {progress_text}"
+        padding = box_width - len(f" {bar} {progress_text}")
+        if padding > 0:
+            progress_line += " " * padding
+        progress_line += "\u2502"
+        self._console.print(progress_line, markup=False)
+
+        self._console.print(bottom_border, markup=False)
 
     def _handle_error(self, event: ErrorEvent) -> None:
         """Print error message in red."""
