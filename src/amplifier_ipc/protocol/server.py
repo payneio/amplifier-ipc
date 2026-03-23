@@ -106,6 +106,15 @@ class Server:
         """
         config_map: dict = params.get("config", {})
 
+        # Reset instance lists first so configure is idempotent — a second call
+        # (e.g. reconnection or protocol retry) replaces instances rather than
+        # appending to them, which would double every component.
+        self._tool_instances = []
+        self._hook_instances = []
+        self._orchestrator_instances = []
+        self._context_manager_instances = []
+        self._provider_instances = []
+
         def _instantiate(classes: list[type], instances: list) -> None:
             for cls in classes:
                 comp_name = getattr(cls, "name", cls.__name__)

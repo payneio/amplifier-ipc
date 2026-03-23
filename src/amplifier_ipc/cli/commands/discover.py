@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import tempfile
 from pathlib import Path
@@ -15,6 +16,7 @@ from rich.console import Console
 from amplifier_ipc.host.definition_registry import Registry
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -32,7 +34,8 @@ def _try_parse_definition(yaml_path: Path, results: list[dict[str, Any]]) -> Non
     try:
         raw_content = yaml_path.read_text(encoding="utf-8")
         parsed = yaml.safe_load(raw_content)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Skipping %s: %s", yaml_path, exc)
         return
 
     if not isinstance(parsed, dict):

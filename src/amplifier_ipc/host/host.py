@@ -64,6 +64,7 @@ class Host:
         config: SessionConfig,
         settings: HostSettings,
         session_dir: Path | None = None,
+        service_configs: dict[str, Any] | None = None,
     ) -> None:
         self._config = config
         self._settings = settings
@@ -71,7 +72,9 @@ class Host:
 
         # Internal state — populated during run()
         self._services: dict[str, Any] = {}
-        self._service_configs: dict[str, Any] = {}
+        # Per-service merged component configs for the configure protocol.
+        # Populated from resolved.service_configs via launch_session().
+        self._service_configs: dict[str, Any] = service_configs or {}
         self._registry: CapabilityRegistry = CapabilityRegistry()
         self._router: Router | None = None
         self._persistence: SessionPersistence | None = None

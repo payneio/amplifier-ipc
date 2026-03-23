@@ -652,3 +652,44 @@ async def test_orchestrator_can_call_local_hook_and_context(
     assert "result" in responses[0], f"Expected result, got: {responses[0]}"
     # The orchestrator added 1 message before calling get_messages
     assert responses[0]["result"] == "processed 1 messages"
+
+
+async def test_configure_is_idempotent(tmp_path: Path) -> None:
+    """Calling handle_configure twice must not double the component instances.
+
+    A second configure call (e.g. on reconnection or protocol retry) must clear
+    the existing instance lists before re-populating them.  Without this guard
+    every second call doubles all components, breaking routing and priority ordering.
+    """
+    pkg_name = "mock_idem_pkg"
+    pkg_dir = _create_mock_package(tmp_path, pkg_name)
+    tools_dir = pkg_dir / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "__init__.py").write_text("")
+    (tools_dir / "mytool.py").write_text(
+        "from amplifier_ipc.protocol.decorators import tool\n\n"
+        "@tool\n"
+        "class MyTool:\n"
+        "    name = 'mytool'\n"
+        "    description = 'A test tool'\n"
+        "    input_schema = {}\n"
+        "    async def execute(self, input):\n"
+        "        return 'ok'\n"
+    )
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        server = Server(pkg_name)
+
+        # First configure call
+        await server.handle_configure({})
+        assert len(server._tool_instances) == 1, "Expected 1 tool after first configure"
+
+        # Second configure call must NOT double the instances
+        await server.handle_configure({})
+        assert len(server._tool_instances) == 1, (
+            "handle_configure must be idempotent: "
+            f"got {len(server._tool_instances)} instances after second call, expected 1"
+        )
+    finally:
+        _cleanup_package(tmp_path, pkg_name)

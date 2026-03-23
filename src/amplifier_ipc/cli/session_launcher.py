@@ -78,13 +78,13 @@ async def launch_session(
     2. Calls resolve_agent() to walk the behavior tree and collect services.
     3. Builds a SessionConfig from the resolved agent.
     4. Loads HostSettings from the standard settings files (user + project).
-    5. Builds service overrides for any service with a ``source:`` path,
-       adding them to HostSettings so the Host can spawn them via
-       ``uv run --directory`` without requiring hardcoded settings.yaml entries.
-    6. Returns a Host constructed with the config and settings.
+    5. Builds service overrides for any service with a ``command:`` field,
+       adding them to HostSettings so the Host can spawn them via a custom
+       command without requiring hardcoded settings.yaml entries.
+    6. Returns a Host constructed with the config, settings, and service_configs.
 
     Args:
-        agent_name: The local_ref alias of the agent to launch.
+        agent_name: The ref alias of the agent to launch.
         extra_behaviors: Optional additional behavior names to merge into the
                          resolved agent after its own behavior tree is walked.
         registry: Optional Registry instance. If None, a new Registry is
@@ -123,4 +123,4 @@ async def launch_session(
     )
     settings = HostSettings(service_overrides=merged_overrides)
 
-    return Host(config, settings)
+    return Host(config, settings, service_configs=resolved.service_configs)

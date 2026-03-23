@@ -159,6 +159,7 @@ def parse_agent_definition(yaml_content: str) -> AgentDefinition:
     """
     raw: dict[str, Any] = yaml.safe_load(yaml_content) or {}
     data: dict[str, Any] = raw.get("agent") or {}
+    # Note: agents use 'component_config:' key; behaviors use 'config:' key (per spec asymmetry)
     config = data.get("component_config")
     component_config: dict[str, Any] = config if isinstance(config, dict) else {}
     return AgentDefinition(
@@ -192,6 +193,7 @@ def parse_behavior_definition(yaml_content: str) -> BehaviorDefinition:
     """
     raw: dict[str, Any] = yaml.safe_load(yaml_content) or {}
     data: dict[str, Any] = raw.get("behavior") or {}
+    # Note: behaviors use 'config:' key; agents use 'component_config:' key (per spec asymmetry)
     config = data.get("config")
     component_config: dict[str, Any] = config if isinstance(config, dict) else {}
     return BehaviorDefinition(

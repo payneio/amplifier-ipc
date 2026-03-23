@@ -386,3 +386,78 @@ agent:
         # Settings override should win — not the service command auto-discovery
         override = host_settings.service_overrides["priority-agent"]
         assert override.command == ["custom-command"]
+
+
+# ---------------------------------------------------------------------------
+# Test 7: service_configs wiring — critical integration fix
+# ---------------------------------------------------------------------------
+
+
+class TestLaunchSessionPassesServiceConfigs:
+    def test_launch_session_passes_service_configs_to_host(
+        self, tmp_path: Path
+    ) -> None:
+        """launch_session must wire resolved.service_configs to the Host constructor.
+
+        service_configs is computed by resolve_agent() and contains per-service
+        merged component configuration needed by the configure protocol.
+        If not passed to Host, configure is never sent in production.
+        """
+        from amplifier_ipc.host.definition_registry import Registry
+        from amplifier_ipc.cli.session_launcher import launch_session
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+
+        # Agent with component_config — resolve_agent will produce non-empty service_configs
+        agent_yaml = """\
+agent:
+  ref: config-agent
+  uuid: aaaaaaaa-0000-0000-0000-000000000099
+  service:
+    stack: my-stack
+  component_config:
+    my-tool:
+      model: claude-3-sonnet
+"""
+        registry.register_definition(agent_yaml)
+
+        mock_host_instance = MagicMock()
+
+        with patch("amplifier_ipc.cli.session_launcher.Host") as mock_host_class:
+            mock_host_class.return_value = mock_host_instance
+            asyncio.run(launch_session("config-agent", registry=registry))
+
+        call_args = mock_host_class.call_args
+        # Host must be called with service_configs keyword argument
+        assert call_args is not None
+        host_kwargs = call_args.kwargs if call_args.kwargs else {}
+
+        # service_configs should be passed as a keyword argument
+        assert "service_configs" in host_kwargs, (
+            "launch_session must pass service_configs= to Host() "
+            "so the configure protocol fires in production"
+        )
+        # The service_configs should contain the agent's component_config
+        service_configs = host_kwargs["service_configs"]
+        assert isinstance(service_configs, dict)
+        # The agent ref "config-agent" should map to its component_config
+        assert "config-agent" in service_configs
+        assert service_configs["config-agent"].get("my-tool") == {
+            "model": "claude-3-sonnet"
+        }
+
+    def test_host_service_configs_constructor_accepts_kwarg(self) -> None:
+        """Host.__init__ must accept service_configs as a keyword argument."""
+        from amplifier_ipc.host.host import Host
+        from amplifier_ipc.host.config import HostSettings, SessionConfig
+
+        config = SessionConfig(
+            services=[], orchestrator="", context_manager="", provider=""
+        )
+        settings = HostSettings()
+        service_configs = {"my-svc": {"tool-a": {"key": "value"}}}
+
+        # This must not raise TypeError
+        host = Host(config, settings, service_configs=service_configs)
+        assert host._service_configs == service_configs

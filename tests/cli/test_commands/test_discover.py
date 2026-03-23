@@ -244,3 +244,45 @@ class TestDiscoverNoDefinitions:
             or "no" in result.output.lower()
             or "found" in result.output.lower()
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests for silent parse error logging
+# ---------------------------------------------------------------------------
+
+
+class TestTryParseDefinitionLogsOnError:
+    def test_malformed_yaml_emits_debug_log(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """_try_parse_definition must emit a debug log when YAML fails to parse.
+
+        Silent failure in production makes malformed YAML invisible.  A debug
+        log (including the file path and exception) lets developers diagnose
+        scan issues without surfacing noise to end users.
+        """
+        import logging
+
+        from amplifier_ipc.cli.commands.discover import _try_parse_definition
+
+        bad_yaml = tmp_path / "bad.yaml"
+        bad_yaml.write_bytes(b"\xff\xfe invalid utf-8 \x00 and null bytes")
+
+        results: list = []
+        with caplog.at_level(
+            logging.DEBUG, logger="amplifier_ipc.cli.commands.discover"
+        ):
+            _try_parse_definition(bad_yaml, results)
+
+        # Must not add anything to results
+        assert results == []
+
+        # Must emit at least one debug log mentioning the file
+        debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
+        assert len(debug_records) >= 1, (
+            "_try_parse_definition must log a debug message when YAML parsing fails"
+        )
+        assert (
+            str(bad_yaml) in debug_records[0].getMessage()
+            or str(bad_yaml.name) in debug_records[0].message
+        )

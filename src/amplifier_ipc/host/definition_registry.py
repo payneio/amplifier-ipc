@@ -158,7 +158,7 @@ class Registry:
         """Resolve a name to a definition file path via the alias file.
 
         Args:
-            name: The local_ref alias to look up.
+            name: The ref alias to look up.
             alias_file: Path to the YAML alias file (agents.yaml or behaviors.yaml).
             kind: Human-readable kind label used in error messages (e.g. "agent").
 
@@ -193,7 +193,7 @@ class Registry:
         """Resolve an agent alias to its definition file path.
 
         Args:
-            name: The agent local_ref alias.
+            name: The agent ref alias.
 
         Returns:
             Path to the agent definition file.
@@ -207,7 +207,7 @@ class Registry:
         """Resolve a behavior alias to its definition file path.
 
         Args:
-            name: The behavior local_ref alias.
+            name: The behavior ref alias.
 
         Returns:
             Path to the behavior definition file.
@@ -243,7 +243,7 @@ class Registry:
         """Remove a definition and all its alias entries.
 
         Args:
-            name: The local_ref alias or URL alias to look up.
+            name: The ref alias or URL alias to look up.
             kind: "agent" or "behavior"
 
         Returns:
