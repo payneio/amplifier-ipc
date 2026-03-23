@@ -19,7 +19,7 @@ UUID_RE = re.compile(
     re.IGNORECASE,
 )
 
-IPC_BASE = "git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/"
+IPC_BASE = "git+https://github.com/payneio/amplifier-ipc@main#subdirectory=services/"
 
 FILES = {
     "amplifier-expert": PROJECT_ROOT
