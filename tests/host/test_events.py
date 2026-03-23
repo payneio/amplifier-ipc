@@ -161,12 +161,29 @@ def test_child_session_start_event_defaults() -> None:
     assert event.depth == 1
 
 
+def test_child_session_start_event_construction() -> None:
+    """ChildSessionStartEvent stores agent_name, session_id, and depth."""
+    event = ChildSessionStartEvent(agent_name="planner", session_id="abc123", depth=3)
+    assert isinstance(event, HostEvent)
+    assert event.agent_name == "planner"
+    assert event.session_id == "abc123"
+    assert event.depth == 3
+
+
 def test_child_session_end_event_defaults() -> None:
     """ChildSessionEndEvent has expected defaults."""
     event = ChildSessionEndEvent()
     assert isinstance(event, HostEvent)
     assert event.session_id == ""
     assert event.depth == 1
+
+
+def test_child_session_end_event_construction() -> None:
+    """ChildSessionEndEvent stores session_id and depth."""
+    event = ChildSessionEndEvent(session_id="abc123", depth=3)
+    assert isinstance(event, HostEvent)
+    assert event.session_id == "abc123"
+    assert event.depth == 3
 
 
 def test_child_session_event_defaults() -> None:
