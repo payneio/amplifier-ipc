@@ -5,8 +5,24 @@ from __future__ import annotations
 import sys
 
 import pytest
+from pydantic import BaseModel
 
 from amplifier_ipc.host.lifecycle import ServiceProcess, shutdown_service, spawn_service
+
+
+class TestServiceProcessModel:
+    def test_service_process_is_pydantic_base_model(self) -> None:
+        """ServiceProcess must be a Pydantic BaseModel, not a dataclass."""
+        assert issubclass(ServiceProcess, BaseModel), (
+            "ServiceProcess should inherit from pydantic.BaseModel"
+        )
+
+    def test_service_process_has_arbitrary_types_allowed(self) -> None:
+        """model_config must set arbitrary_types_allowed=True for asyncio/Client fields."""
+        config = ServiceProcess.model_config
+        assert config.get("arbitrary_types_allowed") is True, (
+            "ServiceProcess.model_config must have arbitrary_types_allowed=True"
+        )
 
 
 class TestSpawnService:

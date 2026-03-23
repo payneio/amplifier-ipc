@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+
+from pydantic import BaseModel, ConfigDict
 
 from amplifier_ipc.protocol.client import Client
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ServiceProcess:
+class ServiceProcess(BaseModel):
     """A running service subprocess with an attached JSON-RPC client."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str
     process: asyncio.subprocess.Process
