@@ -1,12 +1,12 @@
 behavior:
-  name: behavior-redaction
-  version: 1.0.0
+  ref: redaction
+  uuid: 70c62ae3-cdce-4267-acda-6322f447d454
+  version: 1
   description: Redact secrets and PII from logs
-  hooks:
-  - class: amplifier_foundation.hooks.redaction.RedactionHook
-    config:
+  hooks: true
+  behaviors: []
+  config:
+    redaction-hook:
       allowlist:
-      - session_id
-      - turn_id
-      - span_id
-      - parent_span_id
+        - session_id
+        - turn_id

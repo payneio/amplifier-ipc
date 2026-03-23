@@ -1,11 +1,7 @@
 behavior:
-  name: foundation-expert-behavior
-  version: 1.0.0
-  description: Expert consultant for bundle composition, patterns, and building AI
-    applications
-  context:
-    include:
-    - context/bundle-awareness.md
-  agents:
-    include:
-    - foundation:foundation-expert
+  ref: foundation-expert
+  uuid: b7c5ddb9-d54f-4316-9224-2427b2be2165
+  version: 1
+  description: Expert consultant for bundle composition, patterns, and building AI applications
+  context: true
+  behaviors: []

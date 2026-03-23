@@ -1,11 +1,11 @@
 behavior:
-  name: behavior-progress-monitor
-  version: 1.0.0
+  ref: progress-monitor
+  uuid: 9ee2a38f-9f2c-44cf-ad72-26eb7a9236d8
+  version: 1
   description: Detects analysis paralysis patterns and injects corrective prompts
-  hooks:
-  - class: amplifier_foundation.hooks.progress_monitor.ProgressMonitorHook
-    config:
-      enabled: true
+  hooks: true
+  behaviors: []
+  config:
+    progress-monitor-hook:
       read_threshold: 30
-      same_file_threshold: 3
-      warning_interval: 15
+      max_turns: 10
