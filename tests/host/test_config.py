@@ -38,12 +38,12 @@ def test_host_settings_is_pydantic_base_settings() -> None:
 
 def test_host_settings_env_prefix() -> None:
     """HostSettings model_config must have env_prefix='AMPLIFIER_IPC_'."""
-    assert HostSettings.model_config["env_prefix"] == "AMPLIFIER_IPC_"
+    assert HostSettings.model_config.get("env_prefix") == "AMPLIFIER_IPC_"
 
 
 def test_host_settings_env_nested_delimiter() -> None:
     """HostSettings model_config must have env_nested_delimiter='__'."""
-    assert HostSettings.model_config["env_nested_delimiter"] == "__"
+    assert HostSettings.model_config.get("env_nested_delimiter") == "__"
 
 
 def test_session_config_is_pydantic_base_model() -> None:
