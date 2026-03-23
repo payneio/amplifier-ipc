@@ -456,3 +456,96 @@ async def test_orchestrator_emits_stream_tool_result_notification() -> None:
     assert "hi" in notif_params["output"], (
         f"Expected 'hi' in output, got {notif_params['output']!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 9: stream.todo_update notification for todo tool calls
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_stream_todo_update_for_todo_tool() -> None:
+    """stream.todo_update notification sent for 'todo' tool calls returning JSON with 'todos' key."""
+    import json
+
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    todos_payload = [
+        {"content": "Buy milk", "status": "pending", "activeForm": "Buying milk"},
+        {"content": "Write tests", "status": "completed", "activeForm": "Writing tests"},
+    ]
+    todo_output = json.dumps({"todos": todos_payload, "status": "updated"})
+
+    tool_call_response = chat_response(
+        text="",
+        tool_calls=[{"id": "call_todo", "tool": "todo", "arguments": {"action": "list"}}],
+    )
+    final_response = chat_response("Here are your todos!")
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": Sequence(tool_call_response, final_response),
+            "request.tool_execute": tool_result_ok(todo_output),
+        }
+    )
+
+    result = await orch.execute("Show todos", {}, client)
+
+    assert result == "Here are your todos!"
+
+    # Verify exactly 1 stream.todo_update notification was sent
+    todo_update_notifs = [
+        (m, p) for m, p in client.notifications if m == "stream.todo_update"
+    ]
+    assert len(todo_update_notifs) == 1, (
+        f"Expected exactly 1 stream.todo_update notification, got {len(todo_update_notifs)}"
+    )
+
+    # Verify the notification contains 'todos' key
+    notif_params = todo_update_notifs[0][1]
+    assert "todos" in notif_params, (
+        f"Expected 'todos' key in stream.todo_update params, got keys: {list(notif_params.keys())}"
+    )
+    assert notif_params["todos"] == todos_payload, (
+        f"Expected todos={todos_payload!r}, got {notif_params['todos']!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_does_not_emit_stream_todo_update_for_non_todo_tool() -> None:
+    """stream.todo_update notification is NOT sent for non-todo tool calls."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    tool_call_response = chat_response(
+        text="",
+        tool_calls=[{"id": "call_bash", "tool": "bash", "arguments": {"command": "ls"}}],
+    )
+    final_response = chat_response("Done!")
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": Sequence(tool_call_response, final_response),
+            "request.tool_execute": tool_result_ok("file listing"),
+        }
+    )
+
+    await orch.execute("List files", {}, client)
+
+    # Verify NO stream.todo_update notification was sent
+    todo_update_notifs = [
+        (m, p) for m, p in client.notifications if m == "stream.todo_update"
+    ]
+    assert len(todo_update_notifs) == 0, (
+        f"Expected 0 stream.todo_update notifications for non-todo tool, "
+        f"got {len(todo_update_notifs)}"
+    )

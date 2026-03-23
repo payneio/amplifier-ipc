@@ -48,6 +48,7 @@ STREAM_THINKING = "stream.thinking"
 STREAM_TOOL_CALL_START = "stream.tool_call_start"
 STREAM_TOOL_CALL = "stream.tool_call"
 STREAM_TOOL_RESULT = "stream.tool_result"
+STREAM_TODO_UPDATE = "stream.todo_update"
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +356,23 @@ class StreamingOrchestrator:
                     "output": content[:2000],
                 },
             )
+
+            # --- emit stream.todo_update for todo tool calls ---
+            if tool_call.name == "todo":
+                try:
+                    parsed = (
+                        json.loads(content) if isinstance(content, str) else content
+                    )
+                    if isinstance(parsed, dict) and "todos" in parsed:
+                        await client.send_notification(
+                            STREAM_TODO_UPDATE,
+                            {
+                                "todos": parsed.get("todos", []),
+                                "status": parsed.get("status", "updated"),
+                            },
+                        )
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
             return (tool_call.id, tool_call.name, content)
 
