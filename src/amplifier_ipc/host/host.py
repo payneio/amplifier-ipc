@@ -34,6 +34,9 @@ from amplifier_ipc.host.events import (
     StreamThinkingEvent,
     StreamTokenEvent,
     StreamToolCallStartEvent,
+    TodoUpdateEvent,  # noqa: F401
+    ToolCallEvent,  # noqa: F401
+    ToolResultEvent,  # noqa: F401
 )
 from amplifier_ipc.host.lifecycle import ServiceProcess, shutdown_service, spawn_service
 from amplifier_ipc.host.persistence import SessionPersistence
