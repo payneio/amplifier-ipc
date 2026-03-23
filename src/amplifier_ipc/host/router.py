@@ -103,7 +103,13 @@ class Router:
                 dict(params) if isinstance(params, dict) else {}
             )
             if self._provider_name and "provider" not in provider_params:
-                provider_params["provider"] = self._provider_name
+                # Strip the service qualifier if present (e.g.
+                # "providers:anthropic" → "anthropic") since the service
+                # only knows bare component names.
+                name = self._provider_name
+                if ":" in name:
+                    name = name.partition(":")[2]
+                provider_params["provider"] = name
             try:
                 provider_client.on_notification = self._on_provider_notification
                 return await provider_client.request(

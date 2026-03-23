@@ -45,6 +45,10 @@ class CapabilityRegistry:
                     f"Tool descriptor from service '{service_key}' is missing 'name' key: {tool_spec!r}"
                 ) from exc
             self._tool_to_service[name] = service_key
+            # Replace any existing spec with the same name (last-wins dedup).
+            self._all_tool_specs = [
+                s for s in self._all_tool_specs if s.get("name") != name
+            ]
             self._all_tool_specs.append(tool_spec)
 
         # Hooks — one entry per (service, hook_name, event, priority) tuple
@@ -85,6 +89,9 @@ class CapabilityRegistry:
 
         # Orchestrators
         # Policy: last registration wins on name collision.
+        # Components are registered under both the bare name ("streaming") and
+        # the qualified name ("foundation:streaming") per the spec's
+        # <service>:<name> convention.
         for orch in describe_result.get("orchestrators", []):
             try:
                 name = orch["name"]
@@ -93,6 +100,7 @@ class CapabilityRegistry:
                     f"Orchestrator descriptor from service '{service_key}' is missing 'name' key: {orch!r}"
                 ) from exc
             self._orchestrator_to_service[name] = service_key
+            self._orchestrator_to_service[f"{service_key}:{name}"] = service_key
 
         # Context managers
         # Policy: last registration wins on name collision.
@@ -104,6 +112,7 @@ class CapabilityRegistry:
                     f"Context manager descriptor from service '{service_key}' is missing 'name' key: {ctx_mgr!r}"
                 ) from exc
             self._context_manager_to_service[name] = service_key
+            self._context_manager_to_service[f"{service_key}:{name}"] = service_key
 
         # Providers
         # Policy: last registration wins on name collision.
@@ -115,6 +124,7 @@ class CapabilityRegistry:
                     f"Provider descriptor from service '{service_key}' is missing 'name' key: {provider!r}"
                 ) from exc
             self._provider_to_service[name] = service_key
+            self._provider_to_service[f"{service_key}:{name}"] = service_key
 
         # Content paths
         content_paths = describe_result.get("content", [])

@@ -29,11 +29,11 @@ EXPECTED_CONTEXT_MANAGER = "simple"
 EXPECTED_PROVIDER = "providers:anthropic"
 EXPECTED_SERVICE_COMMAND = "amplifier-foundation-serve"
 EXPECTED_SERVICE_STACK = "uv"
-EXPECTED_BEHAVIOR_COUNT = 24
+EXPECTED_BEHAVIOR_COUNT = 25
 
 RAW_BASE = "https://raw.githubusercontent.com/payneio/amplifier-ipc/main/services/"
 
-# All 24 expected behaviors: alias -> URL suffix
+# All 25 expected behaviors: alias -> URL suffix
 EXPECTED_BEHAVIORS = {
     "agents": "amplifier-foundation/behaviors/agents.yaml",
     "amplifier-dev-behavior": "amplifier-foundation/behaviors/amplifier-dev.yaml",
@@ -47,6 +47,7 @@ EXPECTED_BEHAVIORS = {
     "streaming-ui": "amplifier-foundation/behaviors/streaming-ui.yaml",
     "tasks": "amplifier-foundation/behaviors/tasks.yaml",
     "todo-reminder": "amplifier-foundation/behaviors/todo-reminder.yaml",
+    "providers": "amplifier-providers/behaviors/providers.yaml",
     "modes": "amplifier-modes/behaviors/modes.yaml",
     "skills": "amplifier-skills/behaviors/skills.yaml",
     "skills-tool": "amplifier-skills/behaviors/skills-tool.yaml",

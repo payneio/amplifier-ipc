@@ -205,9 +205,11 @@ class StreamingOrchestrator:
                 await client.send_notification("stream.token", {"text": response_text})
 
             # --- add assistant message to context ---
+            # Always store extracted text in content (not chat_response.content which
+            # may include ToolCallBlock objects that duplicate the tool_calls field).
             assistant_msg = Message(
                 role="assistant",
-                content=response_text if response_text else chat_response.content,
+                content=response_text,
                 tool_calls=chat_response.tool_calls,
             )
             await client.request(

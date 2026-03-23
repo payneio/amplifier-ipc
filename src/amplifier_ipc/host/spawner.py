@@ -418,10 +418,10 @@ async def spawn_child_session(
     child_session_id = generate_child_session_id(parent_session_id, request.agent)
 
     # 3. Build child config
-    if request.agent == "self":
-        child_config: dict[str, Any] = dict(parent_config)
-    else:
-        child_config = {"agent": request.agent}
+    # Always clone the parent config so the child inherits orchestrator,
+    # context_manager, provider, and services.  Non-self agents may
+    # override specific fields in the future via agent definitions.
+    child_config: dict[str, Any] = dict(parent_config)
 
     # 4. Filter tools and hooks
     tools: list[dict[str, Any]] = child_config.get("tools", [])

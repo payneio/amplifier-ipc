@@ -578,7 +578,7 @@ class AnthropicProvider:
             {
                 "name": tool.name,
                 "description": tool.description or "",
-                "input_schema": tool.parameters if tool.parameters is not None else {},
+                "input_schema": tool.parameters if tool.parameters else {"type": "object", "properties": {}},
             }
             for tool in tools
         ]

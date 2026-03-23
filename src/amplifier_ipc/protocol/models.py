@@ -36,7 +36,10 @@ class ToolSpec(BaseModel):
 
     name: str
     description: str
-    parameters: dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("parameters", "input_schema"),
+    )
 
 
 class ToolResult(BaseModel):

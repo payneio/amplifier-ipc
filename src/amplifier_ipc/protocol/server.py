@@ -421,7 +421,7 @@ class Server:
             # the class rather than an instance — fall back to empty dict
             # so describe still succeeds (the real schema is used at runtime).
             if isinstance(schema, property):
-                schema = {}
+                schema = {"type": "object", "properties": {}}
             tools.append(
                 {
                     "name": getattr(cls, "name", ""),

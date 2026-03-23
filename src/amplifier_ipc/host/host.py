@@ -472,6 +472,10 @@ class Host:
             "params": {
                 "prompt": prompt,
                 "system_prompt": system_prompt,
+                "config": {
+                    "tools": self._registry.get_all_tool_specs(),
+                    "hooks": self._registry.get_all_hook_descriptors(),
+                },
             },
         }
         await write_message(orchestrator_svc.process.stdin, request)
