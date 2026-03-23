@@ -1,14 +1,14 @@
-"""Dataclasses and parsing functions for agent/behavior definitions."""
+"""Pydantic models and parsing functions for agent/behavior definitions."""
 
 import asyncio
 import logging
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,7 @@ async def _fetch_url(url: str) -> str:
     return await loop.run_in_executor(None, _blocking_fetch)
 
 
-@dataclass
-class ServiceEntry:
+class ServiceEntry(BaseModel):
     """Represents the service block from a definition file."""
 
     stack: str | None = None
@@ -43,8 +42,7 @@ class ServiceEntry:
     command: str | None = None
 
 
-@dataclass
-class AgentDefinition:
+class AgentDefinition(BaseModel):
     """Parsed representation of an agent definition YAML file."""
 
     ref: str | None = None
@@ -58,13 +56,12 @@ class AgentDefinition:
     hooks: bool = False
     agents: bool = False
     context: bool = False
-    behaviors: list[dict[str, str]] = field(default_factory=list)
+    behaviors: list[dict[str, str]] = Field(default_factory=list)
     service: ServiceEntry | None = None
-    component_config: dict[str, Any] = field(default_factory=dict)
+    component_config: dict[str, Any] = Field(default_factory=dict)
 
 
-@dataclass
-class BehaviorDefinition:
+class BehaviorDefinition(BaseModel):
     """Parsed representation of a behavior definition YAML file."""
 
     ref: str | None = None
@@ -74,22 +71,21 @@ class BehaviorDefinition:
     tools: bool = False
     hooks: bool = False
     context: bool = False
-    behaviors: list[dict[str, str]] = field(default_factory=list)
+    behaviors: list[dict[str, str]] = Field(default_factory=list)
     service: ServiceEntry | None = None
-    component_config: dict[str, Any] = field(default_factory=dict)
+    component_config: dict[str, Any] = Field(default_factory=dict)
 
 
-@dataclass
-class ResolvedAgent:
+class ResolvedAgent(BaseModel):
     """Resolved agent configuration after merging behaviors into an agent definition."""
 
-    services: list[tuple[str, ServiceEntry]] = field(default_factory=list)
-    service_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    definition_ids: dict[str, str] = field(default_factory=dict)
+    services: list[tuple[str, ServiceEntry]] = Field(default_factory=list)
+    service_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    definition_ids: dict[str, str] = Field(default_factory=dict)
     orchestrator: str | None = None
     context_manager: str | None = None
     provider: str | None = None
-    component_config: dict[str, Any] = field(default_factory=dict)
+    component_config: dict[str, Any] = Field(default_factory=dict)
 
 
 def _to_bool(value: Any) -> bool:
