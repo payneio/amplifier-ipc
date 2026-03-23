@@ -47,6 +47,7 @@ CONTENT_BLOCK_END = "content:block_end"  # reserved for streaming block events
 STREAM_THINKING = "stream.thinking"
 STREAM_TOOL_CALL_START = "stream.tool_call_start"
 STREAM_TOOL_CALL = "stream.tool_call"
+STREAM_TOOL_RESULT = "stream.tool_result"
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +346,18 @@ class StreamingOrchestrator:
                     else:
                         content = str(returned)
 
+            # --- emit stream.tool_result ---
+            await client.send_notification(
+                STREAM_TOOL_RESULT,
+                {
+                    "tool_name": tool_call.name,
+                    "success": tool_result.success
+                    if hasattr(tool_result, "success")
+                    else True,
+                    "output": content[:2000],
+                },
+            )
+
             return (tool_call.id, tool_call.name, content)
 
         except Exception as exc:
@@ -356,6 +369,15 @@ class StreamingOrchestrator:
                     "tool_name": tool_call.name,
                     "tool_call_id": tool_call.id,
                     "error": {"type": type(exc).__name__, "msg": str(exc)},
+                },
+            )
+            # --- emit stream.tool_result for error path ---
+            await client.send_notification(
+                STREAM_TOOL_RESULT,
+                {
+                    "tool_name": tool_call.name,
+                    "success": False,
+                    "output": f"Error: {exc}",
                 },
             )
             return (

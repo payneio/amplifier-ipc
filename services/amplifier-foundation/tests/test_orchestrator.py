@@ -401,3 +401,58 @@ async def test_orchestrator_emits_stream_tool_call_notification() -> None:
     assert notif_params["arguments"] == {"command": "ls -la"}, (
         f"Expected arguments={{'command': 'ls -la'}}, got {notif_params['arguments']!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 8: stream.tool_result notification after tool execution
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_stream_tool_result_notification() -> None:
+    """stream.tool_result notification sent after tool execution with correct fields."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    tool_call_response = chat_response(
+        text="",
+        tool_calls=[
+            {"id": "call_hi", "tool": "bash", "arguments": {"command": "echo hi"}}
+        ],
+    )
+    final_response = chat_response("Done!")
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": Sequence(tool_call_response, final_response),
+            "request.tool_execute": tool_result_ok("hi"),
+        }
+    )
+
+    result = await orch.execute("Run bash", {}, client)
+
+    assert result == "Done!"
+
+    # Verify exactly 1 stream.tool_result notification
+    tool_result_notifs = [
+        (m, p) for m, p in client.notifications if m == "stream.tool_result"
+    ]
+    assert len(tool_result_notifs) == 1, (
+        f"Expected exactly 1 stream.tool_result notification, got {len(tool_result_notifs)}"
+    )
+
+    # Verify notification contains correct fields
+    notif_params = tool_result_notifs[0][1]
+    assert notif_params["tool_name"] == "bash", (
+        f"Expected tool_name='bash', got {notif_params['tool_name']!r}"
+    )
+    assert notif_params["success"] is True, (
+        f"Expected success=True, got {notif_params['success']!r}"
+    )
+    assert "hi" in notif_params["output"], (
+        f"Expected 'hi' in output, got {notif_params['output']!r}"
+    )
