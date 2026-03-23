@@ -49,7 +49,6 @@ class StreamingDisplay:
         self._show_token_usage = show_token_usage
         self._response: str | None = None
         self._in_thinking_block: bool = False
-        self._nesting_depth: int = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -119,12 +118,12 @@ class StreamingDisplay:
 
     def _handle_tool_call_start(self, event: StreamToolCallStartEvent) -> None:
         """Print the tool name for a tool call start event."""
-        indent = _NESTING_INDENT * self._nesting_depth
+        indent = ""
         self._console.print(f"\n{indent}[dim]\u2699 {event.tool_name}[/dim]")
 
     def _handle_tool_call(self, event: ToolCallEvent) -> None:
         """Print tool name header and YAML-formatted arguments."""
-        indent = _NESTING_INDENT * self._nesting_depth
+        indent = ""
         self._console.print(f"\n{indent}\u2699 [bold]{event.tool_name}[/bold]")
         items = list(event.arguments.items())
         display_items = items[:10]
@@ -141,7 +140,7 @@ class StreamingDisplay:
 
     def _handle_tool_result(self, event: ToolResultEvent) -> None:
         """Print tool result with success/failure icon and truncated output."""
-        indent = _NESTING_INDENT * self._nesting_depth
+        indent = ""
         if event.success:
             icon = "\u2705"
             style = "green"
@@ -243,7 +242,7 @@ class StreamingDisplay:
 
     def _handle_error(self, event: ErrorEvent) -> None:
         """Print error message in red with cross icon."""
-        indent = _NESTING_INDENT * self._nesting_depth
+        indent = ""
         self._console.print(
             f"{indent}\u2717 {event.message}", style="red", markup=False
         )

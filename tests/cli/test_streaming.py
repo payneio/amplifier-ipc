@@ -458,7 +458,7 @@ class TestChildSessionStartEvent:
 
 
 class TestChildSessionEndEvent:
-    def test_child_session_end_renders_complete(self) -> None:
+    def test_child_session_end_is_silent(self) -> None:
         """ChildSessionEndEvent should be silent (no output)."""
         from amplifier_ipc.cli.streaming import StreamingDisplay
 
@@ -552,7 +552,7 @@ class TestChildSessionStartRendersDelegateHeader:
 
         output = buf.getvalue()
         assert "explorer" in output
-        assert "delegate" in output or "\u2699" in output  # ⚙ gear icon
+        assert "delegate" in output and "\u2699" in output  # ⚙ gear icon
 
 
 class TestChildSessionEventIndentsInner:
