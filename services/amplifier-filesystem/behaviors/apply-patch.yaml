@@ -1,14 +1,16 @@
 behavior:
-  name: behavior-apply-patch
-  version: 1.0.0
+  ref: apply-patch
+  uuid: 3c5cfd6c-8551-4f35-b7d4-98a5667e5706
+  version: 1
   description: V4A diff-based file editing via apply_patch tool
-  tools:
-  - class: amplifier_foundation.tools.apply_patch.ApplyPatchTool
-    config:
+  tools: true
+  context: true
+  behaviors: []
+  config:
+    apply-patch-tool:
       engine: native
-      allowed_write_paths:
-      - .
-      denied_write_paths: []
-  context:
-    include:
-    - context/editing-guidance.md
+      allowed_paths: []
+  service:
+    stack: uv
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-filesystem
+    command: amplifier-filesystem-serve

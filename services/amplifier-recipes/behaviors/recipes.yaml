@@ -1,16 +1,16 @@
 behavior:
-  name: recipes-behavior
-  version: 1.0.0
+  ref: recipes
+  uuid: d7723fff-253f-49a0-b6d6-1741ed1c99d8
+  version: 1
   description: Multi-step AI agent orchestration via declarative YAML recipes
-  tools:
-  - class: amplifier_foundation.tools.recipes.RecipesTool
-    config:
-      session_dir: ~/.amplifier/projects/{project}/recipe-sessions
-      auto_cleanup_days: 7
-  context:
-    include:
-    - context/recipe-awareness.md
-  agents:
-    include:
-    - recipes:recipe-author
-    - recipes:result-validator
+  tools: true
+  context: true
+  behaviors: []
+  config:
+    recipes-tool:
+      session_dir: ~/.amplifier/recipe-sessions
+      cleanup: true
+  service:
+    stack: uv
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-recipes
+    command: amplifier-recipes-serve
