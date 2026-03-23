@@ -11,6 +11,7 @@ from amplifier_ipc.host.events import (
     StreamThinkingEvent,
     StreamTokenEvent,
     StreamToolCallStartEvent,
+    ToolCallEvent,
 )
 
 __all__ = ["StreamingDisplay"]
@@ -53,6 +54,8 @@ class StreamingDisplay:
             self._handle_thinking(event)
         elif isinstance(event, StreamToolCallStartEvent):
             self._handle_tool_call_start(event)
+        elif isinstance(event, ToolCallEvent):
+            self._handle_tool_call(event)
         elif isinstance(event, ErrorEvent):
             self._handle_error(event)
         elif isinstance(event, CompleteEvent):
@@ -74,6 +77,20 @@ class StreamingDisplay:
     def _handle_tool_call_start(self, event: StreamToolCallStartEvent) -> None:
         """Print the tool name for a tool call start event."""
         self._console.print(f"\n[tool] {event.tool_name}", markup=False)
+
+    def _handle_tool_call(self, event: ToolCallEvent) -> None:
+        """Print tool name header and YAML-formatted arguments."""
+        self._console.print(f"\n🔧 [bold]{event.tool_name}[/bold]")
+        items = list(event.arguments.items())
+        display_items = items[:10]
+        remaining = len(items) - len(display_items)
+        for key, value in display_items:
+            truncated = str(value)[:200]
+            self._console.print(f"   {key}: {truncated}", markup=False, highlight=False)
+        if remaining > 0:
+            self._console.print(
+                f"   ... ({remaining} more)", markup=False, highlight=False
+            )
 
     def _handle_error(self, event: ErrorEvent) -> None:
         """Print error message in red."""

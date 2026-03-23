@@ -126,3 +126,54 @@ class TestStreamingDisplayComplete:
         # A newline should have been written
         output = buf.getvalue()
         assert "\n" in output
+
+
+# ---------------------------------------------------------------------------
+# Test 6: test_tool_call_renders_name_and_args
+# ---------------------------------------------------------------------------
+
+
+class TestToolCallRendersNameAndArgs:
+    def test_tool_call_renders_name_and_args(self) -> None:
+        """ToolCallEvent should print tool name and key-value argument pairs."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+        from amplifier_ipc.host.events import ToolCallEvent
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        event = ToolCallEvent(
+            tool_name="bash",
+            arguments={"command": "pytest tests/ -v", "timeout": 30},
+        )
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "bash" in output
+        assert "command" in output
+        assert "pytest tests/ -v" in output
+        assert "timeout" in output
+
+
+# ---------------------------------------------------------------------------
+# Test 7: test_tool_call_truncates_long_args
+# ---------------------------------------------------------------------------
+
+
+class TestToolCallTruncatesLongArgs:
+    def test_tool_call_truncates_long_args(self) -> None:
+        """ToolCallEvent with 15 args should show first 10 and a truncation indicator."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+        from amplifier_ipc.host.events import ToolCallEvent
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        arguments = {f"arg_{i}": f"value_{i}" for i in range(15)}
+        event = ToolCallEvent(tool_name="complex_tool", arguments=arguments)
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "complex_tool" in output
+        # Should have a truncation indicator showing more args exist
+        assert "more" in output
