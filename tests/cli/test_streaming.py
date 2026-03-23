@@ -177,3 +177,85 @@ class TestToolCallTruncatesLongArgs:
         assert "complex_tool" in output
         # Should have a truncation indicator showing more args exist
         assert "more" in output
+
+
+# ---------------------------------------------------------------------------
+# Test 8: test_tool_result_success
+# ---------------------------------------------------------------------------
+
+
+class TestToolResultSuccess:
+    def test_tool_result_success(self) -> None:
+        """ToolResultEvent with success=True should show green styling with tool name and output."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+        from amplifier_ipc.host.events import ToolResultEvent
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        event = ToolResultEvent(
+            tool_name="bash",
+            success=True,
+            output="6 passed in 1.2s",
+        )
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "bash" in output
+        assert "6 passed in 1.2s" in output
+
+
+# ---------------------------------------------------------------------------
+# Test 9: test_tool_result_failure
+# ---------------------------------------------------------------------------
+
+
+class TestToolResultFailure:
+    def test_tool_result_failure(self) -> None:
+        """ToolResultEvent with success=False should show red styling with tool name and output."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+        from amplifier_ipc.host.events import ToolResultEvent
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        event = ToolResultEvent(
+            tool_name="bash",
+            success=False,
+            output="command not found: pytest",
+        )
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "bash" in output
+        assert "command not found" in output
+
+
+# ---------------------------------------------------------------------------
+# Test 10: test_tool_result_truncates_long_output
+# ---------------------------------------------------------------------------
+
+
+class TestToolResultTruncatesLongOutput:
+    def test_tool_result_truncates_long_output(self) -> None:
+        """ToolResultEvent with 50 lines of output should truncate to max 10 lines plus indicator."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+        from amplifier_ipc.host.events import ToolResultEvent
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        lines = [f"line_{i}" for i in range(50)]
+        event = ToolResultEvent(
+            tool_name="read_file",
+            success=True,
+            output="\n".join(lines),
+        )
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "read_file" in output
+        # Output lines (prefixed with '   ') should be at most 12
+        # (10 content lines + 1 header line + 1 truncation indicator)
+        output_lines = output.splitlines()
+        assert len(output_lines) <= 12

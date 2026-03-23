@@ -12,6 +12,7 @@ from amplifier_ipc.host.events import (
     StreamTokenEvent,
     StreamToolCallStartEvent,
     ToolCallEvent,
+    ToolResultEvent,
 )
 
 __all__ = ["StreamingDisplay"]
@@ -56,6 +57,8 @@ class StreamingDisplay:
             self._handle_tool_call_start(event)
         elif isinstance(event, ToolCallEvent):
             self._handle_tool_call(event)
+        elif isinstance(event, ToolResultEvent):
+            self._handle_tool_result(event)
         elif isinstance(event, ErrorEvent):
             self._handle_error(event)
         elif isinstance(event, CompleteEvent):
@@ -90,6 +93,27 @@ class StreamingDisplay:
         if remaining > 0:
             self._console.print(
                 f"   ... ({remaining} more)", markup=False, highlight=False
+            )
+
+    def _handle_tool_result(self, event: ToolResultEvent) -> None:
+        """Print tool result with success/failure icon and truncated output."""
+        if event.success:
+            icon = "\u2705"
+            style = "green"
+        else:
+            icon = "\u274c"
+            style = "red"
+        self._console.print(
+            f"{icon} Tool result: {event.tool_name}", style=style, markup=False
+        )
+        lines = event.output.split("\n")
+        display_lines = lines[:10]
+        remaining = len(lines) - len(display_lines)
+        for line in display_lines:
+            self._console.print(f"   {line[:200]}", markup=False, highlight=False)
+        if remaining > 0:
+            self._console.print(
+                f"   ... ({remaining} more lines)", markup=False, highlight=False
             )
 
     def _handle_error(self, event: ErrorEvent) -> None:
