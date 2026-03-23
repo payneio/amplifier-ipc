@@ -1,0 +1,28 @@
+# Local development overrides for amplifier-ipc services.
+# These use `uv run --directory` to run directly from source,
+# so code changes are immediately reflected without reinstalling.
+
+amplifier_ipc:
+  service_overrides:
+    amplifier-dev:
+      foundation:
+        command: ["uv", "run", "--directory", "./services/amplifier-foundation", "amplifier-foundation-serve"]
+        working_dir: ./services/amplifier-foundation
+      modes:
+        command: ["uv", "run", "--directory", "./services/amplifier-modes", "amplifier-modes-serve"]
+        working_dir: ./services/amplifier-modes
+      skills:
+        command: ["uv", "run", "--directory", "./services/amplifier-skills", "amplifier-skills-serve"]
+        working_dir: ./services/amplifier-skills
+      routing:
+        command: ["uv", "run", "--directory", "./services/amplifier-routing-matrix", "amplifier-routing-matrix-serve"]
+        working_dir: ./services/amplifier-routing-matrix
+      superpowers-methodology:
+        command: ["uv", "run", "--directory", "./services/amplifier-superpowers", "amplifier-superpowers-serve"]
+        working_dir: ./services/amplifier-superpowers
+      recipes:
+        command: ["uv", "run", "--directory", "./services/amplifier-recipes", "amplifier-recipes-serve"]
+        working_dir: ./services/amplifier-recipes
+      apply-patch:
+        command: ["uv", "run", "--directory", "./services/amplifier-filesystem", "amplifier-filesystem-serve"]
+        working_dir: ./services/amplifier-filesystem

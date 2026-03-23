@@ -1,3 +1,5 @@
 __pycache__
 .amplifier
 related-projects
+.amplifier/
+!.amplifier/settings.yaml
