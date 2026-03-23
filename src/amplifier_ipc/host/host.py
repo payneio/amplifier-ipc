@@ -165,9 +165,15 @@ class Host:
             RuntimeError: If the orchestrator, context manager, or provider
                 declared in the config is not found in the registry.
         """
-        session_id = uuid.uuid4().hex[:16]
-        self._session_id = session_id
-        self._persistence = SessionPersistence(session_id, self._session_dir)
+        # Generate session ID and persistence on the first call only so that
+        # the transcript accumulates across turns and can be replayed into the
+        # (freshly spawned) context manager at the start of each subsequent turn.
+        if self._session_id is None:
+            self._session_id = uuid.uuid4().hex[:16]
+            self._persistence = SessionPersistence(self._session_id, self._session_dir)
+
+        session_id = self._session_id
+        assert self._persistence is not None
 
         try:
             # 1b. Load shared state from persistence
@@ -229,6 +235,16 @@ class Host:
             if self._resume_session_id is not None:
                 session_id = await self._restore_from_session()
                 self._session_id = session_id
+                self._resume_session_id = None  # consumed — don't replay again
+            else:
+                # Replay existing transcript into the freshly-spawned context
+                # manager so that conversation history survives across turns.
+                existing_transcript = self._persistence.load_transcript()
+                for message_params in existing_transcript:
+                    await self._router.route_request(
+                        "request.context_add_message",
+                        message_params,
+                    )
 
             # 6. Assemble system prompt
             system_prompt = await assemble_system_prompt(self._registry, self._services)
@@ -572,14 +588,6 @@ class Host:
                         "result": result,
                     }
 
-                    # Persist context messages
-                    if (
-                        method == "request.context_add_message"
-                        and self._persistence is not None
-                        and isinstance(params, dict)
-                    ):
-                        self._persistence.append_message(params)
-
                 except JsonRpcError as exc:
                     response = exc.to_response(msg_id)
                 except Exception as exc:  # noqa: BLE001
@@ -637,6 +645,15 @@ class Host:
                     success=params.get("success", True),
                     output=params.get("output", ""),
                 )
+
+            # Context message persistence — the _OrchestratorLocalClient
+            # handles context_add_message locally (same-process) and then
+            # sends this notification so the host can persist the message
+            # to the session transcript for cross-turn replay.
+            elif method == "stream.context_message_added":
+                params = message.get("params") or {}
+                if self._persistence is not None and isinstance(params, dict):
+                    self._persistence.append_message(params)
 
             # Todo update notification
             elif method == "stream.todo_update":

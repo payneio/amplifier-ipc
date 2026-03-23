@@ -752,7 +752,13 @@ class _OrchestratorLocalClient:
             return await self._server._handle_hook_emit(p)
 
         if method == "request.context_add_message":
-            return await self._server._handle_context_add_message(p)
+            result = await self._server._handle_context_add_message(p)
+            # Notify the host so it can persist the message to the session
+            # transcript.  The local handler already added the message to the
+            # in-memory context manager; this notification lets the host write
+            # it to disk for cross-turn replay.
+            await self.send_notification("stream.context_message_added", p)
+            return result
 
         if method == "request.context_get_messages":
             return await self._server._handle_context_get_messages(p)

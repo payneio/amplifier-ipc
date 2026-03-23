@@ -1235,3 +1235,178 @@ async def test_build_spawn_handler_provides_event_callback() -> None:
 
     assert isinstance(queue_items[2], ChildSessionEndEvent)
     assert queue_items[2].depth == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests for transcript persistence via stream.context_message_added
+# ---------------------------------------------------------------------------
+
+
+async def test_orchestrator_loop_persists_context_messages_from_notification(
+    tmp_path: Any,
+) -> None:
+    """_orchestrator_loop persists messages when it receives
+    stream.context_message_added notifications from the service.
+
+    The _OrchestratorLocalClient handles context_add_message locally and
+    sends a stream.context_message_added notification so the host can
+    write the message to the session transcript.
+    """
+    from amplifier_ipc.host.persistence import SessionPersistence
+
+    config = SessionConfig(
+        services=["orch"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings(), session_dir=tmp_path)
+
+    # Set up persistence
+    host._session_id = "test-session"
+    host._persistence = SessionPersistence("test-session", tmp_path)
+
+    # Set up fake router
+    mock_router = MagicMock()
+
+    async def mock_route(method: str, params: Any) -> Any:
+        return {"ok": True}
+
+    mock_router.route_request = mock_route
+    host._router = mock_router
+
+    # Set up fake orchestrator process
+    fake_process = MagicMock()
+    fake_process.stdin = MagicMock()
+    fake_process.stdout = MagicMock()
+    host._services = {"orch": MagicMock(process=fake_process)}
+
+    captured_id: list[str] = []
+
+    async def fake_write(stream: object, message: dict) -> None:  # type: ignore[type-arg]
+        if message.get("method") == "orchestrator.execute":
+            captured_id.append(message["id"])
+
+    messages = [
+        # Service notifies host about user message added to context
+        {
+            "jsonrpc": "2.0",
+            "method": "stream.context_message_added",
+            "params": {"message": {"role": "user", "content": "Hello!"}},
+        },
+        # Service notifies host about assistant message added to context
+        {
+            "jsonrpc": "2.0",
+            "method": "stream.context_message_added",
+            "params": {"message": {"role": "assistant", "content": "Hi there!"}},
+        },
+    ]
+    read_idx = 0
+
+    async def fake_read(stream: object) -> dict[str, Any] | None:
+        nonlocal read_idx
+        idx = read_idx
+        read_idx += 1
+        if idx < len(messages):
+            return messages[idx]
+        return {"jsonrpc": "2.0", "id": captured_id[0], "result": "Hi there!"}
+
+    with (
+        patch("amplifier_ipc.host.host.write_message", fake_write),
+        patch("amplifier_ipc.host.host.read_message", fake_read),
+    ):
+        async for _ in host._orchestrator_loop("orch", "Hello!", "be helpful"):
+            pass
+
+    # Verify transcript was written to disk
+    transcript = host._persistence.load_transcript()
+    assert len(transcript) == 2
+    assert transcript[0] == {"message": {"role": "user", "content": "Hello!"}}
+    assert transcript[1] == {"message": {"role": "assistant", "content": "Hi there!"}}
+
+
+async def test_run_replays_transcript_on_second_turn(tmp_path: Any) -> None:
+    """The second call to run() replays the persisted transcript into the
+    freshly-spawned context manager so conversation history is preserved.
+    """
+    from amplifier_ipc.host.persistence import SessionPersistence
+
+    config = SessionConfig(
+        services=["foundation"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings(), session_dir=tmp_path)
+
+    # Simulate that a first turn already happened: set session_id and
+    # write two messages to the transcript.
+    host._session_id = "test-session"
+    host._persistence = SessionPersistence("test-session", tmp_path)
+    host._persistence.append_message({"message": {"role": "user", "content": "Hello!"}})
+    host._persistence.append_message(
+        {"message": {"role": "assistant", "content": "Hi there!"}}
+    )
+
+    # Set up fake context manager client that records calls
+    ctx_client = FakeClient(
+        responses={"context.add_message": {"ok": True}, "context.get_messages": []}
+    )
+    ctx_service = FakeService(ctx_client)
+
+    # Pre-populate registry so service key resolution succeeds
+    host._registry.register(
+        "foundation",
+        {
+            "tools": [],
+            "hooks": [],
+            "orchestrators": [{"name": "loop"}],
+            "context_managers": [{"name": "simple"}],
+            "providers": [{"name": "anthropic"}],
+            "content": [],
+        },
+    )
+    host._services = {"foundation": ctx_service}
+
+    captured_id: list[str] = []
+
+    async def fake_write(stream: object, message: dict) -> None:  # type: ignore[type-arg]
+        if message.get("method") == "orchestrator.execute":
+            captured_id.append(message["id"])
+
+    async def fake_read(stream: object) -> dict[str, Any] | None:
+        return {"jsonrpc": "2.0", "id": captured_id[0], "result": "response"}
+
+    async def noop() -> None:
+        pass
+
+    async def noop_system_prompt(*args: Any) -> str:
+        return "be helpful"
+
+    # Give the fake service a process with stdin/stdout for the orchestrator loop
+    fake_process = MagicMock()
+    fake_process.stdin = MagicMock()
+    fake_process.stdout = MagicMock()
+    ctx_service.process = fake_process  # type: ignore[attr-defined]
+    # Avoid read-task cancellation on the FakeClient
+    ctx_client._read_task = None  # type: ignore[attr-defined]
+
+    with (
+        patch.object(host, "_spawn_services", noop),
+        patch.object(host, "_build_registry", noop),
+        patch.object(host, "_teardown_services", noop),
+        patch("amplifier_ipc.host.host.assemble_system_prompt", noop_system_prompt),
+        patch("amplifier_ipc.host.host.write_message", fake_write),
+        patch("amplifier_ipc.host.host.read_message", fake_read),
+    ):
+        events = []
+        async for event in host.run("What was my last message?"):
+            events.append(event)
+
+    # Verify that the context manager received the replayed messages
+    add_calls = [
+        (m, p) for m, p in ctx_client.calls if m == "context.add_message"
+    ]
+    assert len(add_calls) == 2, f"Expected 2 replay calls, got {len(add_calls)}: {add_calls}"
+    assert add_calls[0][1] == {"message": {"role": "user", "content": "Hello!"}}
+    assert add_calls[1][1] == {"message": {"role": "assistant", "content": "Hi there!"}}

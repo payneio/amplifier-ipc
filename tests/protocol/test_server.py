@@ -648,10 +648,20 @@ async def test_orchestrator_can_call_local_hook_and_context(
     finally:
         _cleanup_package(tmp_path, pkg_name)
 
-    assert len(responses) == 1
-    assert "result" in responses[0], f"Expected result, got: {responses[0]}"
+    # The server emits a stream.context_message_added notification (no "id")
+    # when the orchestrator calls request.context_add_message, so the writer
+    # will see that notification *plus* the orchestrator.execute response.
+    notifications = [r for r in responses if "id" not in r]
+    rpc_responses = [r for r in responses if "id" in r]
+
+    assert len(notifications) == 1, f"Expected 1 notification, got: {notifications}"
+    assert notifications[0]["method"] == "stream.context_message_added"
+    assert notifications[0]["params"]["message"] == {"role": "user", "content": "hello"}
+
+    assert len(rpc_responses) == 1, f"Expected 1 RPC response, got: {rpc_responses}"
+    assert "result" in rpc_responses[0], f"Expected result, got: {rpc_responses[0]}"
     # The orchestrator added 1 message before calling get_messages
-    assert responses[0]["result"] == "processed 1 messages"
+    assert rpc_responses[0]["result"] == "processed 1 messages"
 
 
 async def test_configure_is_idempotent(tmp_path: Path) -> None:
