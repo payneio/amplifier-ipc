@@ -105,6 +105,9 @@ async def launch_session(
     config = build_session_config(resolved)
 
     # Load settings from the standard locations (silently skips missing files).
+    # Pass agent_name so load_settings can extract nested agent-scoped overrides
+    # from the new settings.yaml format:
+    #   amplifier_ipc.service_overrides.<agent_name>.<service_ref>: {command, ...}
     effective_user_path = user_settings_path or (
         Path.home() / ".amplifier" / "settings.yaml"
     )
@@ -114,6 +117,7 @@ async def launch_session(
     settings = load_settings(
         user_settings_path=effective_user_path,
         project_settings_path=effective_project_path,
+        agent_name=agent_name,
     )
 
     # Build service overrides for source-based services.

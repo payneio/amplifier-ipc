@@ -225,14 +225,23 @@ class TestLaunchSessionLoadsSettings:
     ) -> None:
         """launch_session passes HostSettings loaded from the project settings file.
 
-        When a project-level settings file contains service_overrides, those
-        overrides must be present in the HostSettings passed to the Host so that
-        resolve_service_command() can find custom commands.
+        When a project-level settings file contains service_overrides in the new
+        nested agent→service format, those overrides must be present in the
+        HostSettings passed to the Host so that resolve_service_command() can
+        find custom commands.
+
+        New settings format (nested by agent name):
+            amplifier_ipc:
+              service_overrides:
+                <agent_name>:
+                  <service_ref>:
+                    command: [...]
+                    working_dir: ...
         """
         from amplifier_ipc.host.definition_registry import Registry
         from amplifier_ipc.cli.session_launcher import launch_session
 
-        # Set up a real registry with a minimal agent definition
+        # Set up a real registry with a minimal agent definition (new format)
         registry = Registry(home=tmp_path / "amplifier_home")
         registry.ensure_home()
 
@@ -243,21 +252,25 @@ agent:
   orchestrator: streaming
   context_manager: simple
   provider: anthropic
-  services:
-    - name: my-service
+  service:
+    stack: uv
+    command: my-service-cmd
 """
         registry.register_definition(agent_yaml)
 
-        # Create a project settings file with a service override
+        # Create a project settings file with a service override in nested format.
+        # The service ref here matches the agent ref ("test-agent") since the agent's
+        # own service is keyed by the agent ref in resolved services.
         project_settings_dir = tmp_path / ".amplifier"
         project_settings_dir.mkdir()
         project_settings_path = project_settings_dir / "settings.yaml"
         project_settings_path.write_text(
             "amplifier_ipc:\n"
             "  service_overrides:\n"
-            "    my-service:\n"
-            "      command: [python, -m, my_service]\n"
-            "      working_dir: /tmp/my-service\n"
+            "    test-agent:\n"  # agent name
+            "      test-agent:\n"  # service ref (= agent ref for agent's own service)
+            "        command: [python, -m, my_service]\n"
+            "        working_dir: /tmp/my-service\n"
         )
 
         mock_host_instance = MagicMock()
@@ -277,9 +290,9 @@ agent:
         call_args = mock_host_class.call_args
         host_settings = call_args[0][1]  # second positional arg
 
-        # The override should have been loaded
-        assert "my-service" in host_settings.service_overrides
-        override = host_settings.service_overrides["my-service"]
+        # The override should have been loaded (service ref = agent ref = "test-agent")
+        assert "test-agent" in host_settings.service_overrides
+        override = host_settings.service_overrides["test-agent"]
         assert override.command == ["python", "-m", "my_service"]
         assert override.working_dir == "/tmp/my-service"
 
@@ -337,7 +350,10 @@ agent:
     def test_launch_session_settings_override_takes_priority_over_command(
         self, tmp_path: Path
     ) -> None:
-        """Settings file overrides take priority over service command auto-discovery."""
+        """Settings file overrides take priority over service command auto-discovery.
+
+        Uses the new nested agent→service settings format.
+        """
         from amplifier_ipc.host.definition_registry import Registry
         from amplifier_ipc.cli.session_launcher import launch_session
 
@@ -356,15 +372,17 @@ agent:
 """
         registry.register_definition(agent_yaml)
 
-        # Settings file overrides this service ref with a custom command
+        # Settings file overrides this service ref with a custom command.
+        # Uses new nested format: service_overrides.<agent_name>.<service_ref>
         project_settings_dir = tmp_path / ".amplifier"
         project_settings_dir.mkdir()
         project_settings_path = project_settings_dir / "settings.yaml"
         project_settings_path.write_text(
             "amplifier_ipc:\n"
             "  service_overrides:\n"
-            "    priority-agent:\n"
-            "      command: [custom-command]\n"
+            "    priority-agent:\n"  # agent name
+            "      priority-agent:\n"  # service ref (= agent ref for agent's own service)
+            "        command: [custom-command]\n"
         )
 
         mock_host_instance = MagicMock()
@@ -446,6 +464,92 @@ agent:
         assert service_configs["config-agent"].get("my-tool") == {
             "model": "claude-3-sonnet"
         }
+
+
+# ---------------------------------------------------------------------------
+# Test 8: launch_session passes agent_name to load_settings for nested format
+# ---------------------------------------------------------------------------
+
+
+class TestLaunchSessionNestedSettingsFormat:
+    def test_launch_session_reads_nested_agent_scoped_settings(
+        self, tmp_path: Path
+    ) -> None:
+        """launch_session uses agent_name when loading nested settings.yaml format.
+
+        The .amplifier/settings.yaml uses a nested structure where service overrides
+        are scoped under the agent name:
+
+            amplifier_ipc:
+              service_overrides:
+                my-agent:
+                  my-service:
+                    command: [uv, run, my-service]
+
+        launch_session must pass agent_name= to load_settings so that the per-service
+        overrides under 'my-agent' are extracted, not treated as flat service names.
+        """
+        from amplifier_ipc.host.definition_registry import Registry
+        from amplifier_ipc.cli.session_launcher import launch_session
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+
+        # Agent with a service that has a command
+        agent_yaml = """\
+agent:
+  ref: nested-agent
+  uuid: aaaaaaaa-0000-0000-0000-000000000020
+  orchestrator: streaming
+  context_manager: simple
+  provider: anthropic
+  service:
+    stack: uv
+    command: default-command
+"""
+        registry.register_definition(agent_yaml)
+
+        # Settings file using NESTED format: agent -> service -> override
+        project_settings_dir = tmp_path / ".amplifier"
+        project_settings_dir.mkdir()
+        project_settings_path = project_settings_dir / "settings.yaml"
+        project_settings_path.write_text(
+            "amplifier_ipc:\n"
+            "  service_overrides:\n"
+            "    nested-agent:\n"
+            "      nested-agent:\n"  # service ref matches agent ref
+            "        command: [uv, run, --directory, ./services/nested, nested-serve]\n"
+            "        working_dir: ./services/nested\n"
+        )
+
+        mock_host_instance = MagicMock()
+
+        with patch("amplifier_ipc.cli.session_launcher.Host") as mock_host_class:
+            mock_host_class.return_value = mock_host_instance
+
+            asyncio.run(
+                launch_session(
+                    "nested-agent",
+                    registry=registry,
+                    project_settings_path=project_settings_path,
+                )
+            )
+
+        call_args = mock_host_class.call_args
+        host_settings = call_args[0][1]
+
+        # The settings-file override for the service (keyed by service ref = agent ref)
+        # should have been extracted from the nested format
+        assert "nested-agent" in host_settings.service_overrides
+        override = host_settings.service_overrides["nested-agent"]
+        assert override.command == [
+            "uv",
+            "run",
+            "--directory",
+            "./services/nested",
+            "nested-serve",
+        ]
+        assert override.working_dir == "./services/nested"
 
     def test_host_service_configs_constructor_accepts_kwarg(self) -> None:
         """Host.__init__ must accept service_configs as a keyword argument."""

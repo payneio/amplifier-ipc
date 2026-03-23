@@ -77,6 +77,7 @@ def load_settings(
     *,
     user_settings_path: Path,
     project_settings_path: Path,
+    agent_name: str | None = None,
 ) -> HostSettings:
     """Load and merge service override settings from user and project YAML files.
 
@@ -85,6 +86,36 @@ def load_settings(
     it is silently skipped.
 
     Settings are read from the ``amplifier_ipc.service_overrides`` namespace.
+
+    Two formats are supported:
+
+    *Flat format* (legacy, used when ``agent_name`` is ``None``):
+
+    .. code-block:: yaml
+
+        amplifier_ipc:
+          service_overrides:
+            my-service:
+              command: [uv, run, my-service]
+              working_dir: ./services/my-service
+
+    *Nested format* (new, used when ``agent_name`` is provided):
+
+    .. code-block:: yaml
+
+        amplifier_ipc:
+          service_overrides:
+            my-agent:
+              my-service:
+                command: [uv, run, my-service]
+                working_dir: ./services/my-service
+
+    Args:
+        user_settings_path: Path to the user-level settings YAML file.
+        project_settings_path: Path to the project-level settings YAML file.
+        agent_name: When provided, extract service overrides from the nested
+                    ``service_overrides.<agent_name>`` sub-section instead of
+                    reading the top-level flat mapping.
     """
     merged: dict[str, ServiceOverride] = {}
 
@@ -96,9 +127,19 @@ def load_settings(
         if not raw:
             continue
 
-        overrides = raw.get("amplifier_ipc", {}).get("service_overrides", {}) or {}
+        service_overrides_section = (
+            raw.get("amplifier_ipc", {}).get("service_overrides", {}) or {}
+        )
+
+        if agent_name is not None:
+            # Nested format: descend into the agent-specific sub-section.
+            overrides = service_overrides_section.get(agent_name, {}) or {}
+        else:
+            overrides = service_overrides_section
 
         for service_name, override_data in overrides.items():
+            if not isinstance(override_data, dict):
+                continue
             merged[service_name] = ServiceOverride(
                 command=override_data.get("command", []),
                 working_dir=override_data.get("working_dir"),

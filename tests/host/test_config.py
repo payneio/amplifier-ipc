@@ -230,6 +230,66 @@ def test_resolve_service_command_override_no_working_dir() -> None:
     assert cwd is None
 
 
+def test_load_settings_nested_agent_format(tmp_path: Path) -> None:
+    """load_settings with agent_name extracts nested agent->service overrides.
+
+    The .amplifier/settings.yaml now uses a nested structure:
+      amplifier_ipc.service_overrides.<agent_name>.<service_ref>: {command, working_dir}
+
+    When agent_name is given, load_settings must descend into that agent's section
+    and return per-service overrides, not treat the agent name itself as a service.
+    """
+    settings_file = tmp_path / "settings.yaml"
+    settings_file.write_text(
+        "amplifier_ipc:\n"
+        "  service_overrides:\n"
+        "    my-agent:\n"
+        "      foundation:\n"
+        "        command: [uv, run, amplifier-foundation-serve]\n"
+        "        working_dir: ./services/amplifier-foundation\n"
+        "      modes:\n"
+        "        command: [uv, run, amplifier-modes-serve]\n"
+    )
+
+    settings = load_settings(
+        user_settings_path=tmp_path / "no-user.yaml",
+        project_settings_path=settings_file,
+        agent_name="my-agent",
+    )
+
+    assert "foundation" in settings.service_overrides
+    assert "modes" in settings.service_overrides
+    # The agent name itself must NOT appear as a service
+    assert "my-agent" not in settings.service_overrides
+
+    foundation = settings.service_overrides["foundation"]
+    assert foundation.command == ["uv", "run", "amplifier-foundation-serve"]
+    assert foundation.working_dir == "./services/amplifier-foundation"
+
+    modes = settings.service_overrides["modes"]
+    assert modes.command == ["uv", "run", "amplifier-modes-serve"]
+
+
+def test_load_settings_nested_unknown_agent_returns_empty(tmp_path: Path) -> None:
+    """load_settings with an unknown agent_name returns empty overrides (no crash)."""
+    settings_file = tmp_path / "settings.yaml"
+    settings_file.write_text(
+        "amplifier_ipc:\n"
+        "  service_overrides:\n"
+        "    other-agent:\n"
+        "      some-service:\n"
+        "        command: [cmd]\n"
+    )
+
+    settings = load_settings(
+        user_settings_path=tmp_path / "no-user.yaml",
+        project_settings_path=settings_file,
+        agent_name="unknown-agent",
+    )
+
+    assert settings.service_overrides == {}
+
+
 def test_resolve_service_command_empty_override_falls_through() -> None:
     """ServiceOverride with empty command must not be returned.
 
