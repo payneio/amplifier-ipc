@@ -313,6 +313,7 @@ async def _run_child_session(
     service_configs: dict[str, Any] | None = None,
     shared_services: dict[str, Any] | None = None,
     shared_registry: Any | None = None,
+    event_callback: Any | None = None,
 ) -> dict[str, Any]:
     """Execute a child session by creating and running a child Host.
 
@@ -383,6 +384,8 @@ async def _run_child_session(
     response = ""
     turn_count = 0
     async for event in host.run(instruction):
+        if event_callback is not None:
+            event_callback(event)
         if isinstance(event, CompleteEvent):
             response = event.result
             turn_count += 1
@@ -411,6 +414,7 @@ async def spawn_child_session(
     service_configs: dict[str, Any] | None = None,
     shared_services: dict[str, Any] | None = None,
     shared_registry: Any | None = None,
+    event_callback: Any | None = None,
 ) -> Any:
     """Orchestrate spawning of a child session.
 
@@ -493,4 +497,5 @@ async def spawn_child_session(
         service_configs=service_configs,
         shared_services=shared_services,
         shared_registry=shared_registry,
+        event_callback=event_callback,
     )

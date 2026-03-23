@@ -505,3 +505,90 @@ async def test_run_child_session_without_shared_services_passes_none() -> None:
     _, kwargs = MockHost.call_args
     assert kwargs.get("shared_services") is None
     assert kwargs.get("shared_registry") is None
+
+
+# ---------------------------------------------------------------------------
+# event_callback forwarding (3 tests)
+# ---------------------------------------------------------------------------
+
+
+async def test_run_child_session_calls_event_callback() -> None:
+    """event_callback receives all events yielded by Host.run()."""
+    from amplifier_ipc.host.events import CompleteEvent, StreamTokenEvent
+
+    async def mock_run(prompt: str):  # type: ignore[return]
+        yield StreamTokenEvent(token="token1")
+        yield StreamTokenEvent(token="token2")
+        yield CompleteEvent(result="done")
+
+    received_events: list = []
+
+    with patch("amplifier_ipc.host.host.Host") as MockHost:
+        mock_host_instance = MagicMock()
+        MockHost.return_value = mock_host_instance
+        mock_host_instance.run = mock_run
+
+        await _run_child_session(
+            child_session_id="child-callback-test",
+            child_config={},
+            instruction="Do something",
+            request=SpawnRequest(agent="self", instruction="Do something"),
+            event_callback=received_events.append,
+        )
+
+    assert len(received_events) == 3
+    assert isinstance(received_events[0], StreamTokenEvent)
+    assert isinstance(received_events[1], StreamTokenEvent)
+    assert isinstance(received_events[2], CompleteEvent)
+
+
+async def test_run_child_session_no_callback_still_works() -> None:
+    """_run_child_session works correctly without event_callback (backward compat)."""
+    from amplifier_ipc.host.events import CompleteEvent
+
+    async def mock_run(prompt: str):  # type: ignore[return]
+        yield CompleteEvent(result="backward compat result")
+
+    with patch("amplifier_ipc.host.host.Host") as MockHost:
+        mock_host_instance = MagicMock()
+        MockHost.return_value = mock_host_instance
+        mock_host_instance.run = mock_run
+
+        result = await _run_child_session(
+            child_session_id="child-no-callback",
+            child_config={},
+            instruction="Do something",
+            request=SpawnRequest(agent="self", instruction="Do something"),
+            # No event_callback - should default to None
+        )
+
+    assert result["response"] == "backward compat result"
+    assert result["turn_count"] == 1
+
+
+async def test_spawn_child_session_forwards_event_callback() -> None:
+    """spawn_child_session passes event_callback through to _run_child_session."""
+    request = SpawnRequest(agent="self", instruction="Do something")
+    callback = MagicMock()
+
+    with patch(
+        "amplifier_ipc.host.spawner._run_child_session", new_callable=AsyncMock
+    ) as mock_run:
+        mock_run.return_value = {
+            "session_id": "child-123",
+            "response": "result",
+            "turn_count": 1,
+            "metadata": {},
+        }
+        await spawn_child_session(
+            parent_session_id="parent-123",
+            parent_config={"tools": []},
+            transcript=[],
+            request=request,
+            current_depth=0,
+            event_callback=callback,
+        )
+
+    assert mock_run.called
+    _, kwargs = mock_run.call_args
+    assert kwargs.get("event_callback") is callback
