@@ -6,6 +6,8 @@ import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from pydantic import BaseModel
+
 from amplifier_ipc.host.config import SessionConfig
 
 
@@ -201,3 +203,31 @@ agent:
 
         # Response is the text from the CompleteEvent
         assert response == expected_response
+
+
+# ---------------------------------------------------------------------------
+# Test 7: test_spawn_request_is_pydantic_base_model
+# ---------------------------------------------------------------------------
+
+
+class TestSpawnRequestIsPydanticBaseModel:
+    def test_spawn_request_is_pydantic_base_model(self) -> None:
+        """SpawnRequest must be a Pydantic BaseModel (not a dataclass)."""
+        from amplifier_ipc.cli.session_spawner import SpawnRequest
+
+        req = SpawnRequest(
+            agent_name="test-agent",
+            instruction="hello",
+            parent_session_id="parent-abc",
+        )
+
+        # Must be an instance of pydantic BaseModel
+        assert isinstance(req, BaseModel)
+
+        # context_settings defaults to empty dict
+        assert req.context_settings == {}
+
+        # Must NOT be a dataclass
+        import dataclasses
+
+        assert not dataclasses.is_dataclass(SpawnRequest)

@@ -8,7 +8,7 @@ module.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from pydantic import BaseModel, Field
 from typing import Any
 
 from amplifier_ipc.host.config import HostSettings, SessionConfig
@@ -16,12 +16,11 @@ from amplifier_ipc.host.host import Host
 
 
 # ---------------------------------------------------------------------------
-# Dataclasses
+# Models
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class SpawnRequest:
+class SpawnRequest(BaseModel):
     """Request to spawn a child agent sub-session.
 
     Attributes:
@@ -34,7 +33,7 @@ class SpawnRequest:
     agent_name: str
     instruction: str
     parent_session_id: str
-    context_settings: dict[str, Any] = field(default_factory=dict)
+    context_settings: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
