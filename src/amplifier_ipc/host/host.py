@@ -329,13 +329,13 @@ class Host:
                 "tools": self._registry.get_all_tool_specs(),
                 "hooks": self._registry.get_all_hook_descriptors(),
             }
-            self._child_event_queue.put_nowait(
-                ChildSessionStartEvent(
-                    agent_name=agent_name,
-                    session_id=child_session_id,
-                )
-            )
             try:
+                self._child_event_queue.put_nowait(
+                    ChildSessionStartEvent(
+                        agent_name=agent_name,
+                        session_id=child_session_id,
+                    )
+                )
                 return await spawn_child_session(
                     parent_session_id=session_id,
                     parent_config=parent_config,
