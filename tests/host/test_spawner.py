@@ -6,6 +6,7 @@ import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import BaseModel
 
 from amplifier_ipc.host.spawner import (
     SpawnRequest,
@@ -18,6 +19,18 @@ from amplifier_ipc.host.spawner import (
     merge_configs,
     spawn_child_session,
 )
+
+
+# ---------------------------------------------------------------------------
+# SpawnRequest is a Pydantic BaseModel (1 test)
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_request_is_pydantic_base_model() -> None:
+    """SpawnRequest must be a Pydantic BaseModel (not a dataclass)."""
+    assert issubclass(SpawnRequest, BaseModel), (
+        "SpawnRequest must inherit from pydantic.BaseModel"
+    )
 
 
 # ---------------------------------------------------------------------------

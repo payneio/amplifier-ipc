@@ -7,8 +7,9 @@ and formatting parent conversation context for child instructions.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
+
+from pydantic import BaseModel
 from uuid import uuid4
 
 
@@ -254,12 +255,11 @@ def format_parent_context(
 
 
 # ---------------------------------------------------------------------------
-# SpawnRequest dataclass
+# SpawnRequest
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class SpawnRequest:
+class SpawnRequest(BaseModel):
     """Parameters for spawning a child session.
 
     Attributes:
