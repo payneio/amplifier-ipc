@@ -95,8 +95,8 @@ def _make_settings() -> HostSettings:
 
 
 @pytest.mark.skipif(
-    not ANTHROPIC_API_KEY,
-    reason="ANTHROPIC_API_KEY not set — skipping real API test",
+    not ANTHROPIC_API_KEY or not FOUNDATION_SERVICE_DIR.exists(),
+    reason="ANTHROPIC_API_KEY not set or service binary not installed",
 )
 @pytest.mark.slow
 async def test_e2e_anthropic_real_api() -> None:
