@@ -15,7 +15,7 @@ from click.testing import CliRunner
 
 from amplifier_ipc.cli.main import cli
 
-SERVICES_DIR = Path(__file__).parent.parent.parent / "services"
+SERVICES_DIR = Path(__file__).parent.parent.parent / "services"  # -> repo_root/services
 
 
 def test_discover_finds_definitions() -> None:
