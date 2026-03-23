@@ -41,7 +41,11 @@ from amplifier_ipc.host.spawner import (
     _run_child_session,
     spawn_child_session,
 )
-from amplifier_ipc.protocol.errors import JsonRpcError, make_error_response
+from amplifier_ipc.protocol.errors import (
+    METHOD_NOT_FOUND,
+    JsonRpcError,
+    make_error_response,
+)
 from amplifier_ipc.protocol.framing import read_message, write_message
 
 logger = logging.getLogger(__name__)
@@ -649,13 +653,27 @@ class Host:
             }
             self._registry.register(service_key, flat)
 
-            # Send configure with merged config for this service (if any)
+            # Send configure with merged config for this service (if any).
+            # If the service does not support configure (METHOD_NOT_FOUND), log
+            # a warning and continue — this preserves compatibility with older
+            # service installations that pre-date the configure protocol.
             service_config = self._service_configs.get(service_key, {})
             if service_config:
-                await asyncio.wait_for(
-                    service.client.request("configure", {"config": service_config}),
-                    timeout=_SERVICE_INIT_TIMEOUT_S,
-                )
+                try:
+                    await asyncio.wait_for(
+                        service.client.request("configure", {"config": service_config}),
+                        timeout=_SERVICE_INIT_TIMEOUT_S,
+                    )
+                except JsonRpcError as exc:
+                    if exc.code == METHOD_NOT_FOUND:
+                        logger.warning(
+                            "Service '%s' does not support configure; "
+                            "skipping (update amplifier-ipc in the service venv "
+                            "to enable per-service configuration).",
+                            service_key,
+                        )
+                    else:
+                        raise
 
     async def _spawn_services(self) -> None:
         """Spawn all services declared in the session config."""

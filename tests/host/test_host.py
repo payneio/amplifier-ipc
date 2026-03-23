@@ -845,3 +845,54 @@ async def test_host_send_approval_is_non_blocking() -> None:
     # Queue should have both values
     assert host._approval_queue.get_nowait() is True
     assert host._approval_queue.get_nowait() is False
+
+
+async def test_host_build_registry_configure_method_not_found_is_logged_and_skipped() -> None:
+    """_build_registry logs a warning and continues if configure returns METHOD_NOT_FOUND.
+
+    Services installed from an older amplifier-ipc version may not support the
+    configure protocol.  When configure raises JsonRpcError(METHOD_NOT_FOUND),
+    _build_registry must log a warning and continue without raising so that the
+    rest of the startup sequence can proceed.
+    """
+    from amplifier_ipc.protocol.errors import METHOD_NOT_FOUND, JsonRpcError
+
+    describe_result = {
+        "capabilities": {
+            "tools": [],
+            "hooks": [],
+            "orchestrators": [],
+            "context_managers": [],
+            "providers": [],
+            "content": [],
+        },
+    }
+
+    def _raise_method_not_found(_params: object) -> None:
+        raise JsonRpcError(METHOD_NOT_FOUND, "Method not found: 'configure'")
+
+    client = FakeClient(
+        responses={
+            "describe": describe_result,
+            "configure": _raise_method_not_found,
+        }
+    )
+    service = FakeService(client)
+
+    config = SessionConfig(
+        services=["old-svc"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings())
+    host._services = {"old-svc": service}
+    host._service_configs = {"old-svc": {"key": "value"}}
+
+    # Must not raise even though configure is not supported
+    await host._build_registry()
+
+    # describe was called
+    assert any(call[0] == "describe" for call in client.calls)
+    # configure was attempted
+    assert any(call[0] == "configure" for call in client.calls)
