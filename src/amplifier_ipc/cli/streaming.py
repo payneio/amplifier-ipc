@@ -172,10 +172,9 @@ class StreamingDisplay:
                 f"{symbols['in_progress']} {in_progress_count} in progress  "
                 f"{symbols['pending']} {pending_count} pending"
             )
-            # len(summary) includes the leading "│ " (2 visible chars) plus 3 bytes for
-            # the multi-byte │ character, so subtract 2 and add 1 to correct for the
-            # extra byte in the UTF-8 encoded │.
-            padding = box_width - (len(summary) - 2) + 1
+            # summary starts with "│" (1 char border) then inner content;
+            # subtract 1 to get inner content length, then pad to box_width.
+            padding = box_width - (len(summary) - 1)
             if padding > 0:
                 summary += " " * padding
             summary += "\u2502"

@@ -322,3 +322,42 @@ class TestTodoUpdateEmpty:
         event = TodoUpdateEvent(todos=[], status="listed")
         # Should not raise any exception
         display.handle_event(event)
+
+
+# ---------------------------------------------------------------------------
+# Test 13: test_todo_update_condensed_mode_line_width
+# ---------------------------------------------------------------------------
+
+
+class TestTodoUpdateCondensedModeLineWidth:
+    def test_todo_update_condensed_mode_line_width(self) -> None:
+        """Condensed-mode summary line must have the same char width as the border lines."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+        from amplifier_ipc.host.events import TodoUpdateEvent
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        # 8 todos triggers condensed mode (threshold is 7)
+        todos = [
+            {"content": f"Task {i}", "status": "pending", "activeForm": f"Doing {i}"}
+            for i in range(8)
+        ]
+        todos[0]["status"] = "completed"
+
+        event = TodoUpdateEvent(todos=todos, status="updated")
+        display.handle_event(event)
+
+        lines = buf.getvalue().splitlines()
+        # Find border lines (start with ┌ or └)
+        border_lines = [ln for ln in lines if ln.startswith("┌") or ln.startswith("└")]
+        assert border_lines, "Expected box border lines in output"
+        border_width = len(border_lines[0])
+
+        # Find the condensed summary line (starts with │ and contains "completed")
+        summary_lines = [ln for ln in lines if ln.startswith("│") and "completed" in ln]
+        assert summary_lines, "Expected a condensed summary line"
+        assert len(summary_lines[0]) == border_width, (
+            f"Condensed summary line width {len(summary_lines[0])} "
+            f"!= border width {border_width}"
+        )
