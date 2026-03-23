@@ -8,6 +8,8 @@ from rich.console import Console
 
 from amplifier_ipc.host.events import (
     CompleteEvent,
+    StreamContentBlockEndEvent,
+    StreamContentBlockStartEvent,
     StreamThinkingEvent,
     StreamTokenEvent,
     StreamToolCallStartEvent,
@@ -326,6 +328,74 @@ class TestTodoUpdateEmpty:
 
 # ---------------------------------------------------------------------------
 # Test 13: test_todo_update_condensed_mode_line_width
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Test 14: test_thinking_block_has_borders
+# ---------------------------------------------------------------------------
+
+
+class TestThinkingBlockHasBorders:
+    def test_thinking_block_has_borders(self) -> None:
+        """StreamContentBlockStart(thinking) -> StreamThinkingEvent -> StreamContentBlockEnd(thinking)
+        should render the thinking text between double-line borders with a header."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console, show_thinking=True)
+
+        display.handle_event(StreamContentBlockStartEvent(block_type="thinking"))
+        display.handle_event(
+            StreamThinkingEvent(thinking="Let me think about this carefully.")
+        )
+        display.handle_event(StreamContentBlockEndEvent(block_type="thinking"))
+
+        output = buf.getvalue()
+        # Thinking text must appear
+        assert "Let me think about this carefully." in output
+        # Header or double-line border characters must be present
+        assert (
+            "Thinking" in output or "\u2550" in output
+        )  # ═ (U+2550 double horizontal)
+
+
+class TestThinkingBlockHiddenWhenDisabled:
+    def test_thinking_block_hidden_when_disabled(self) -> None:
+        """When show_thinking=False, borders and thinking text should NOT be rendered."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console, show_thinking=False)
+
+        display.handle_event(StreamContentBlockStartEvent(block_type="thinking"))
+        display.handle_event(StreamThinkingEvent(thinking="Secret thoughts"))
+        display.handle_event(StreamContentBlockEndEvent(block_type="thinking"))
+
+        output = buf.getvalue()
+        assert "Secret thoughts" not in output
+        # No border characters either
+        assert "\u2550" not in output  # ═
+
+
+class TestNonThinkingBlockIgnored:
+    def test_non_thinking_block_ignored(self) -> None:
+        """StreamContentBlockStartEvent with a non-thinking block_type should not set thinking state."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console, show_thinking=True)
+
+        display.handle_event(StreamContentBlockStartEvent(block_type="text"))
+        display.handle_event(StreamContentBlockEndEvent(block_type="text"))
+
+        output = buf.getvalue()
+        # No border characters should be printed for a non-thinking block
+        assert "\u2550" not in output  # ═
+
+
+# ---------------------------------------------------------------------------
+# Test 15 (original 13 renamed): test_todo_update_condensed_mode_line_width
 # ---------------------------------------------------------------------------
 
 

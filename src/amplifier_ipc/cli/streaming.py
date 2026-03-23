@@ -8,6 +8,8 @@ from amplifier_ipc.host.events import (
     CompleteEvent,
     ErrorEvent,
     HostEvent,
+    StreamContentBlockEndEvent,
+    StreamContentBlockStartEvent,
     StreamThinkingEvent,
     StreamTokenEvent,
     StreamToolCallStartEvent,
@@ -38,6 +40,7 @@ class StreamingDisplay:
         self._show_thinking = show_thinking
         self._show_token_usage = show_token_usage
         self._response: str | None = None
+        self._in_thinking_block: bool = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -54,6 +57,10 @@ class StreamingDisplay:
             self._handle_token(event)
         elif isinstance(event, StreamThinkingEvent):
             self._handle_thinking(event)
+        elif isinstance(event, StreamContentBlockStartEvent):
+            self._handle_content_block_start(event)
+        elif isinstance(event, StreamContentBlockEndEvent):
+            self._handle_content_block_end(event)
         elif isinstance(event, StreamToolCallStartEvent):
             self._handle_tool_call_start(event)
         elif isinstance(event, ToolCallEvent):
@@ -74,6 +81,21 @@ class StreamingDisplay:
     def _handle_token(self, event: StreamTokenEvent) -> None:
         """Print token text without markup processing."""
         self._console.print(event.token, end="", markup=False, highlight=False)
+
+    def _handle_content_block_start(self, event: StreamContentBlockStartEvent) -> None:
+        """Print brain emoji + 'Thinking...' header and double-line border for thinking blocks."""
+        if event.block_type == "thinking" and self._show_thinking:
+            self._in_thinking_block = True
+            border = "\u2554" + "\u2550" * 50 + "\u2557"  # ╔══...══╗
+            self._console.print("\U0001f9e0 Thinking...", style="dim", markup=False)
+            self._console.print(border, style="dim", markup=False)
+
+    def _handle_content_block_end(self, event: StreamContentBlockEndEvent) -> None:
+        """Print closing double-line border for thinking blocks."""
+        if event.block_type == "thinking" and self._in_thinking_block:
+            self._in_thinking_block = False
+            border = "\u255a" + "\u2550" * 50 + "\u255d"  # ╚══...══╝
+            self._console.print("\n" + border, style="dim", markup=False)
 
     def _handle_thinking(self, event: StreamThinkingEvent) -> None:
         """Print thinking text in cyan dim style when show_thinking is enabled."""
