@@ -251,6 +251,116 @@ class TestDiscoverNoDefinitions:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Tests for discover --install
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverInstallWithoutRegisterFails:
+    def test_discover_install_without_register_fails(self, tmp_path: Path) -> None:
+        """--install without --register must show a clear error and exit non-zero."""
+        from amplifier_ipc.cli.commands.discover import discover
+
+        runner = CliRunner()
+        result = runner.invoke(discover, [str(tmp_path), "--install"])
+
+        assert result.exit_code != 0, f"Expected non-zero exit. Output: {result.output}"
+        assert (
+            "register" in result.output.lower() or "error" in result.output.lower()
+        ), f"Expected error mentioning --register. Output: {result.output}"
+
+
+class TestDiscoverInstallCreatesEnvironments:
+    def test_discover_install_creates_environments(self, tmp_path: Path) -> None:
+        """--register --install calls install_service for definitions with a service: block."""
+        from amplifier_ipc.cli.commands.discover import discover
+
+        agent_with_service = """\
+agent:
+  ref: my-service-agent
+  uuid: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+  service:
+    source: my-package>=1.0
+    command: my-command
+"""
+        (tmp_path / "agent.yaml").write_text(agent_with_service)
+        home_dir = tmp_path / "amplifier_home"
+
+        mock_registry = MagicMock()
+        mock_registry.register_definition.return_value = (
+            "agent_my-service-agent_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        )
+
+        with (
+            patch(
+                "amplifier_ipc.cli.commands.discover.Registry",
+                return_value=mock_registry,
+            ),
+            patch(
+                "amplifier_ipc.cli.commands.discover.install_service"
+            ) as mock_install_service,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                discover,
+                [str(tmp_path), "--register", "--install", "--home", str(home_dir)],
+            )
+
+        assert result.exit_code == 0, (
+            f"Exit code: {result.exit_code}\nOutput: {result.output}\n"
+            f"Exception: {result.exception}"
+        )
+        mock_install_service.assert_called_once_with(
+            mock_registry,
+            "agent_my-service-agent_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "my-package>=1.0",
+        )
+        assert "install" in result.output.lower(), (
+            f"Expected install feedback in output. Output: {result.output}"
+        )
+
+
+class TestDiscoverInstallSkipsContentOnly:
+    def test_discover_install_skips_content_only(self, tmp_path: Path) -> None:
+        """--register --install skips definitions that have no service: block."""
+        from amplifier_ipc.cli.commands.discover import discover
+
+        content_only = """\
+agent:
+  ref: content-agent
+  uuid: 11111111-2222-3333-4444-555555555555
+  description: Just a content agent, no service
+"""
+        (tmp_path / "agent.yaml").write_text(content_only)
+        home_dir = tmp_path / "amplifier_home"
+
+        mock_registry = MagicMock()
+        mock_registry.register_definition.return_value = (
+            "agent_content-agent_11111111-2222-3333-4444-555555555555"
+        )
+
+        with (
+            patch(
+                "amplifier_ipc.cli.commands.discover.Registry",
+                return_value=mock_registry,
+            ),
+            patch(
+                "amplifier_ipc.cli.commands.discover.install_service"
+            ) as mock_install_service,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                discover,
+                [str(tmp_path), "--register", "--install", "--home", str(home_dir)],
+            )
+
+        assert result.exit_code == 0, (
+            f"Exit code: {result.exit_code}\nOutput: {result.output}\n"
+            f"Exception: {result.exception}"
+        )
+        mock_install_service.assert_not_called()
+
+
 class TestTryParseDefinitionLogsOnError:
     def test_malformed_yaml_emits_debug_log(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture

@@ -13,6 +13,7 @@ import click
 import yaml
 from rich.console import Console
 
+from amplifier_ipc.cli.commands.install import install_service
 from amplifier_ipc.host.definition_registry import Registry
 
 console = Console()
@@ -150,7 +151,7 @@ def scan_location(location: str) -> list[dict[str, Any]]:
     "--install",
     is_flag=True,
     default=False,
-    help="(Placeholder) Install found definitions.",
+    help="Install services for registered definitions (requires --register).",
 )
 @click.option(
     "--home",
@@ -163,6 +164,10 @@ def discover(location: str, register: bool, install: bool, home: str | None) -> 
     LOCATION may be a local filesystem path or a git URL
     (prefixed with ``git+`` or an https://github.com… URL).
     """
+    # Validate flag combination
+    if install and not register:
+        raise click.UsageError("--install requires --register")
+
     # Resolve location: handle git URLs
     is_git = location.startswith("git+") or (
         location.startswith("https://") and "github" in location
@@ -199,5 +204,19 @@ def discover(location: str, register: bool, install: bool, home: str | None) -> 
         for item in definitions:
             if not item["ref"]:
                 continue
-            registry.register_definition(item["raw_content"])
+            definition_id = registry.register_definition(item["raw_content"])
             console.print(f"[blue]Registered[/blue] {item['type']} '{item['ref']}'")
+
+            if install:
+                parsed = yaml.safe_load(item["raw_content"])
+                inner = parsed.get(item["type"], {}) if isinstance(parsed, dict) else {}
+                if not isinstance(inner, dict):
+                    inner = {}
+                service = inner.get("service")
+                if service and isinstance(service, dict):
+                    source = service.get("source")
+                    if source:
+                        console.print(
+                            f"[blue]Installing[/blue] {item['type']} '{item['ref']}' …"
+                        )
+                        install_service(registry, definition_id, source)
