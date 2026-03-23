@@ -414,14 +414,21 @@ class Server:
         class itself, so they are accessible whether or not an instance has
         been created.
         """
-        tools = [
-            {
-                "name": getattr(cls, "name", ""),
-                "description": getattr(cls, "description", ""),
-                "input_schema": getattr(cls, "input_schema", {}),
-            }
-            for cls in self._tool_classes
-        ]
+        tools = []
+        for cls in self._tool_classes:
+            schema = getattr(cls, "input_schema", {})
+            # input_schema may be a @property descriptor when accessed on
+            # the class rather than an instance — fall back to empty dict
+            # so describe still succeeds (the real schema is used at runtime).
+            if isinstance(schema, property):
+                schema = {}
+            tools.append(
+                {
+                    "name": getattr(cls, "name", ""),
+                    "description": getattr(cls, "description", ""),
+                    "input_schema": schema,
+                }
+            )
 
         hooks = [
             {

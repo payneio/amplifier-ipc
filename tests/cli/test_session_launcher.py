@@ -101,13 +101,21 @@ class TestBuildSessionConfigPreservesComponentConfig:
 # ---------------------------------------------------------------------------
 
 
+def _mock_registry(installed: bool = False) -> MagicMock:
+    """Create a mock Registry that reports no environments installed by default."""
+    reg = MagicMock()
+    reg.is_installed.return_value = installed
+    reg.get_environment_path.return_value = Path("/fake/env")
+    return reg
+
+
 class TestBuildServiceOverridesNewAPI:
     def test_creates_override_keyed_by_ref(self) -> None:
         """_build_service_overrides creates ServiceOverride keyed by ref when svc.command set."""
         from amplifier_ipc.cli.session_launcher import _build_service_overrides
 
         services = [("my-svc-ref", ServiceEntry(command="my-command"))]
-        result = _build_service_overrides(services, {})
+        result = _build_service_overrides(services, {}, _mock_registry(), {})
 
         assert "my-svc-ref" in result
         assert result["my-svc-ref"].command == ["my-command"]
@@ -118,7 +126,7 @@ class TestBuildServiceOverridesNewAPI:
         from amplifier_ipc.cli.session_launcher import _build_service_overrides
 
         services = [("my-svc-ref", ServiceEntry(source="/some/path"))]
-        result = _build_service_overrides(services, {})
+        result = _build_service_overrides(services, {}, _mock_registry(), {})
 
         assert "my-svc-ref" not in result
 
@@ -128,7 +136,7 @@ class TestBuildServiceOverridesNewAPI:
 
         existing = {"my-svc-ref": ServiceOverride(command=["existing-cmd"])}
         services = [("my-svc-ref", ServiceEntry(command="new-command"))]
-        result = _build_service_overrides(services, existing)
+        result = _build_service_overrides(services, existing, _mock_registry(), {})
 
         assert result["my-svc-ref"].command == ["existing-cmd"]
 
@@ -138,7 +146,7 @@ class TestBuildServiceOverridesNewAPI:
 
         existing = {"already-there": ServiceOverride(command=["old-cmd"])}
         services = [("new-svc", ServiceEntry(command="new-cmd"))]
-        result = _build_service_overrides(services, existing)
+        result = _build_service_overrides(services, existing, _mock_registry(), {})
 
         assert "already-there" in result
         assert result["already-there"].command == ["old-cmd"]
@@ -153,11 +161,31 @@ class TestBuildServiceOverridesNewAPI:
             ("svc-with-cmd", ServiceEntry(command="run-me")),
             ("svc-no-cmd", ServiceEntry(stack="some-stack")),
         ]
-        result = _build_service_overrides(services, {})
+        result = _build_service_overrides(services, {}, _mock_registry(), {})
 
         assert "svc-with-cmd" in result
         assert result["svc-with-cmd"].command == ["run-me"]
         assert "svc-no-cmd" not in result
+
+    def test_resolves_command_to_env_bin_when_installed(self, tmp_path: Path) -> None:
+        """_build_service_overrides resolves command to full env bin path when installed."""
+        from amplifier_ipc.cli.session_launcher import _build_service_overrides
+
+        # Create a fake environment with the binary
+        env_path = tmp_path / "env"
+        bin_dir = env_path / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "my-command").touch()
+
+        registry = MagicMock()
+        registry.is_installed.return_value = True
+        registry.get_environment_path.return_value = env_path
+
+        services = [("my-svc", ServiceEntry(command="my-command"))]
+        definition_ids = {"my-svc": "agent_my-svc_abc123"}
+        result = _build_service_overrides(services, {}, registry, definition_ids)
+
+        assert result["my-svc"].command == [str(bin_dir / "my-command")]
 
 
 # ---------------------------------------------------------------------------

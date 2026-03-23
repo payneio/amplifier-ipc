@@ -42,6 +42,8 @@ def build_session_config(resolved: ResolvedAgent) -> SessionConfig:
 def _build_service_overrides(
     services: list[tuple[str, ServiceEntry]],
     existing_overrides: dict[str, ServiceOverride],
+    registry: Registry,
+    definition_ids: dict[str, str],
 ) -> dict[str, ServiceOverride]:
     """Build ServiceOverride entries for services that have a command.
 
@@ -49,9 +51,16 @@ def _build_service_overrides(
     ``ServiceOverride`` keyed by the service ref.  Services already covered by
     *existing_overrides* are left unchanged (settings file takes priority).
 
+    When a service has an installed environment (via ``registry`` and
+    ``definition_ids``), the command is resolved to the full path inside
+    the environment's ``bin/`` directory so it can be found without being
+    on the system PATH.
+
     Args:
         services: Resolved service entries as ``(ref, ServiceEntry)`` tuples.
         existing_overrides: Overrides already loaded from settings files.
+        registry: Registry instance used to locate installed environments.
+        definition_ids: Mapping of service ref to definition_id.
 
     Returns:
         A merged dict of service overrides: existing_overrides plus any new
@@ -61,7 +70,15 @@ def _build_service_overrides(
 
     for ref, svc in services:
         if ref not in merged and svc.command:
-            merged[ref] = ServiceOverride(command=[svc.command], working_dir=None)
+            command = svc.command
+            # Resolve to the full path inside the installed environment
+            # so the binary can be found without being on PATH.
+            definition_id = definition_ids.get(ref)
+            if definition_id and registry.is_installed(definition_id):
+                env_bin = registry.get_environment_path(definition_id) / "bin" / command
+                if env_bin.exists():
+                    command = str(env_bin)
+            merged[ref] = ServiceOverride(command=[command], working_dir=None)
 
     return merged
 
@@ -133,7 +150,7 @@ async def launch_session(
     # Build service overrides for source-based services.
     # Settings file overrides take priority (they are passed as existing_overrides).
     merged_overrides = _build_service_overrides(
-        resolved.services, settings.service_overrides
+        resolved.services, settings.service_overrides, registry, resolved.definition_ids
     )
     settings = HostSettings(service_overrides=merged_overrides)
 
