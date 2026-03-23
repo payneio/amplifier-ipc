@@ -24,6 +24,8 @@ agent:
     - streaming-ui: https://raw.githubusercontent.com/payneio/amplifier-ipc/main/services/amplifier-foundation/behaviors/streaming-ui.yaml
     - tasks: https://raw.githubusercontent.com/payneio/amplifier-ipc/main/services/amplifier-foundation/behaviors/tasks.yaml
     - todo-reminder: https://raw.githubusercontent.com/payneio/amplifier-ipc/main/services/amplifier-foundation/behaviors/todo-reminder.yaml
+    # Provider
+    - providers: https://raw.githubusercontent.com/payneio/amplifier-ipc/main/services/amplifier-providers/behaviors/providers.yaml
     # External service behaviors
     - modes: https://raw.githubusercontent.com/payneio/amplifier-ipc/main/services/amplifier-modes/behaviors/modes.yaml
     - skills: https://raw.githubusercontent.com/payneio/amplifier-ipc/main/services/amplifier-skills/behaviors/skills.yaml
