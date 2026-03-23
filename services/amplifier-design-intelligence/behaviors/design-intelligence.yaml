@@ -1,14 +1,11 @@
 behavior:
-  name: design-intelligence-behavior
-  version: 1.0.0
-  description: Comprehensive design intelligence with specialized agents and knowledge
-    base
-  agents:
-    include:
-    - design-intelligence:design-system-architect
-    - design-intelligence:component-designer
-    - design-intelligence:animation-choreographer
-    - design-intelligence:layout-architect
-    - design-intelligence:art-director
-    - design-intelligence:responsive-strategist
-    - design-intelligence:voice-strategist
+  ref: design-intelligence
+  uuid: 9fb34f2e-ceee-43b8-8808-77c2f1dd9d2b
+  version: 1
+  description: Comprehensive design intelligence with specialized agents and knowledge base
+  context: true
+  behaviors: []
+  service:
+    stack: uv
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-design-intelligence
+    command: amplifier-design-intelligence-serve

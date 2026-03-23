@@ -1,10 +1,11 @@
 behavior:
-  name: core-expert-behavior
-  version: 1.0.0
+  ref: core-expert
+  uuid: 5106907f-6b39-4dcc-bddb-9ad0539d14cc
+  version: 1
   description: Expert consultant for Amplifier kernel internals
-  context:
-    include:
-    - context/release-mandate.md
-  agents:
-    include:
-    - core:core-expert
+  context: true
+  behaviors: []
+  service:
+    stack: uv
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-core
+    command: amplifier-core-serve
