@@ -2,42 +2,49 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 # ---------------------------------------------------------------------------
-# Dataclasses
+# Models
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class ServiceOverride:
+class ServiceOverride(BaseModel):
     """Command and working directory override for a named service."""
 
-    command: list[str] = field(default_factory=list)
+    command: list[str] = Field(default_factory=list)
     working_dir: str | None = None
 
 
-@dataclass
-class HostSettings:
-    """Host-level settings loaded from user/project YAML settings files."""
+class HostSettings(BaseSettings):
+    """Host-level settings loaded from user/project YAML settings files.
 
-    service_overrides: dict[str, ServiceOverride] = field(default_factory=dict)
+    Supports environment variable configuration via the ``AMPLIFIER_IPC_``
+    prefix (e.g. ``AMPLIFIER_IPC_SERVICE_OVERRIDES__my_service__command``).
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="AMPLIFIER_IPC_",
+        env_nested_delimiter="__",
+    )
+
+    service_overrides: dict[str, ServiceOverride] = Field(default_factory=dict)
 
 
-@dataclass
-class SessionConfig:
+class SessionConfig(BaseModel):
     """Parsed representation of a session YAML configuration file."""
 
     services: list[str]
     orchestrator: str
     context_manager: str
     provider: str
-    component_config: dict[str, dict[str, Any]] = field(default_factory=dict)
+    component_config: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

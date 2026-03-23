@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import BaseModel
+from pydantic_settings import BaseSettings
 
 from amplifier_ipc.host.config import (
     HostSettings,
@@ -15,6 +17,44 @@ from amplifier_ipc.host.config import (
     parse_session_config,
     resolve_service_command,
 )
+
+
+# ---------------------------------------------------------------------------
+# Pydantic model type tests (RED until config.py is converted)
+# ---------------------------------------------------------------------------
+
+
+def test_service_override_is_pydantic_base_model() -> None:
+    """ServiceOverride must inherit from pydantic BaseModel."""
+    override = ServiceOverride()
+    assert isinstance(override, BaseModel)
+
+
+def test_host_settings_is_pydantic_base_settings() -> None:
+    """HostSettings must inherit from pydantic_settings BaseSettings."""
+    settings = HostSettings()
+    assert isinstance(settings, BaseSettings)
+
+
+def test_host_settings_env_prefix() -> None:
+    """HostSettings model_config must have env_prefix='AMPLIFIER_IPC_'."""
+    assert HostSettings.model_config["env_prefix"] == "AMPLIFIER_IPC_"
+
+
+def test_host_settings_env_nested_delimiter() -> None:
+    """HostSettings model_config must have env_nested_delimiter='__'."""
+    assert HostSettings.model_config["env_nested_delimiter"] == "__"
+
+
+def test_session_config_is_pydantic_base_model() -> None:
+    """SessionConfig must inherit from pydantic BaseModel."""
+    cfg = SessionConfig(
+        services=["svc"],
+        orchestrator="orch",
+        context_manager="ctx",
+        provider="anthropic",
+    )
+    assert isinstance(cfg, BaseModel)
 
 
 # ---------------------------------------------------------------------------
