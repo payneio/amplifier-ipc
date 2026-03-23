@@ -87,6 +87,9 @@ def _collect_definitions() -> list[dict[str, Any]]:
 DEFINITIONS = _collect_definitions()
 AGENT_DEFS = [d for d in DEFINITIONS if d["type"] == "agent"]
 BEHAVIOR_DEFS = [d for d in DEFINITIONS if d["type"] == "behavior"]
+BEHAVIOR_DEFS_WITH_CONFIG = [
+    d for d in BEHAVIOR_DEFS if d["ref"] in BEHAVIORS_WITH_CONFIG
+]
 
 
 # ---------------------------------------------------------------------------
@@ -220,11 +223,7 @@ def test_behavior_definition_parseable(defn: dict[str, Any]) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "defn",
-    [d for d in BEHAVIOR_DEFS if d["ref"] in BEHAVIORS_WITH_CONFIG],
-    ids=_def_id,
-)
+@pytest.mark.parametrize("defn", BEHAVIOR_DEFS_WITH_CONFIG, ids=_def_id)
 def test_behavior_with_config_has_config_block(defn: dict[str, Any]) -> None:
     """Behaviors that require config must have a non-empty config: block."""
     inner = _inner(defn)
@@ -237,11 +236,7 @@ def test_behavior_with_config_has_config_block(defn: dict[str, Any]) -> None:
     assert inner["config"], f"config: block in {defn['path']} must not be empty"
 
 
-@pytest.mark.parametrize(
-    "defn",
-    [d for d in BEHAVIOR_DEFS if d["ref"] in BEHAVIORS_WITH_CONFIG],
-    ids=_def_id,
-)
+@pytest.mark.parametrize("defn", BEHAVIOR_DEFS_WITH_CONFIG, ids=_def_id)
 def test_config_keys_are_component_names(defn: dict[str, Any]) -> None:
     """Config block keys must be bare component names (no ref: prefix or colon)."""
     inner = _inner(defn)
