@@ -7,6 +7,9 @@ from io import StringIO
 from rich.console import Console
 
 from amplifier_ipc.host.events import (
+    ChildSessionEndEvent,
+    ChildSessionEvent,
+    ChildSessionStartEvent,
     CompleteEvent,
     StreamContentBlockEndEvent,
     StreamContentBlockStartEvent,
@@ -431,3 +434,176 @@ class TestTodoUpdateCondensedModeLineWidth:
             f"Condensed summary line width {len(summary_lines[0])} "
             f"!= border width {border_width}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Child session event tests
+# ---------------------------------------------------------------------------
+
+
+class TestChildSessionStartEvent:
+    def test_child_session_start_renders_agent_name(self) -> None:
+        """ChildSessionStartEvent should print the agent name with gear icon and delegate header."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        event = ChildSessionStartEvent(agent_name="explorer", session_id="child-123")
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "explorer" in output
+        assert "\u2699" in output  # ⚙ gear icon
+
+
+class TestChildSessionEndEvent:
+    def test_child_session_end_renders_complete(self) -> None:
+        """ChildSessionEndEvent should be silent (no output)."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        display.handle_event(ChildSessionEndEvent(session_id="child-123"))
+
+        output = buf.getvalue()
+        assert output.strip() == ""  # end event is silent
+
+
+class TestChildSessionEventUnwraps:
+    def test_child_session_event_unwraps_inner(self) -> None:
+        """ChildSessionEvent should unwrap and render the inner event."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        inner = StreamTokenEvent(token="Hello from child")
+        event = ChildSessionEvent(depth=1, inner=inner)
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "Hello from child" in output
+
+
+class TestChildSessionEventNoneInner:
+    def test_child_session_event_none_inner(self) -> None:
+        """ChildSessionEvent with None inner should not crash."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        event = ChildSessionEvent(depth=1, inner=None)
+        display.handle_event(event)  # Should not raise
+
+
+class TestErrorEventShowsCrossIcon:
+    def test_error_event_shows_cross(self) -> None:
+        """ErrorEvent should show the cross icon."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+        from amplifier_ipc.host.events import ErrorEvent
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        event = ErrorEvent(message="Something went wrong")
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "Something went wrong" in output
+        assert "\u2717" in output  # ✗ cross icon
+
+
+class TestToolCallStartShowsGearIcon:
+    def test_tool_call_start_shows_gear(self) -> None:
+        """StreamToolCallStartEvent should show the gear icon."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        event = StreamToolCallStartEvent(tool_name="bash")
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "bash" in output
+        assert "\u2699" in output  # ⚙ gear icon
+
+
+# ---------------------------------------------------------------------------
+# New child session rendering tests (task-12)
+# ---------------------------------------------------------------------------
+
+
+class TestChildSessionStartRendersDelegateHeader:
+    def test_child_session_start_renders_delegate_header(self) -> None:
+        """ChildSessionStartEvent should render gear icon and 'delegate' header with agent name."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        event = ChildSessionStartEvent(
+            agent_name="explorer", session_id="child-123", depth=1
+        )
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "explorer" in output
+        assert "delegate" in output or "\u2699" in output  # ⚙ gear icon
+
+
+class TestChildSessionEventIndentsInner:
+    def test_child_session_event_indents_inner(self) -> None:
+        """ChildSessionEvent at depth=1 wrapping ToolCallEvent should indent output with 4 spaces."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+        from amplifier_ipc.host.events import ToolCallEvent
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        inner = ToolCallEvent(tool_name="read_file", arguments={"path": "/some/file"})
+        event = ChildSessionEvent(depth=1, inner=inner)
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "read_file" in output
+        # At least one non-empty line should be indented with 4 spaces
+        non_empty_lines = [ln for ln in output.splitlines() if ln.strip()]
+        assert any(ln.startswith("    ") for ln in non_empty_lines)
+
+
+class TestChildSessionEventDepth2:
+    def test_child_session_event_depth_2(self) -> None:
+        """ChildSessionEvent at depth=2 should indent output with 8 spaces."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        inner = StreamTokenEvent(token="nested content")
+        event = ChildSessionEvent(depth=2, inner=inner)
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert "nested content" in output
+        # At least one non-empty line should be indented with 8 spaces (depth=2)
+        non_empty_lines = [ln for ln in output.splitlines() if ln.strip()]
+        assert any(ln.startswith("        ") for ln in non_empty_lines)
+
+
+class TestChildSessionEndIsSilent:
+    def test_child_session_end_is_silent(self) -> None:
+        """ChildSessionEndEvent should produce no visible output."""
+        from amplifier_ipc.cli.streaming import StreamingDisplay
+
+        console, buf = _make_console()
+        display = StreamingDisplay(console=console)
+
+        event = ChildSessionEndEvent(session_id="child-123")
+        display.handle_event(event)
+
+        output = buf.getvalue()
+        assert output.strip() == ""

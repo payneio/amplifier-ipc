@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from io import StringIO
+
 from rich.console import Console
 
 from amplifier_ipc.host.events import (
@@ -60,12 +62,12 @@ class StreamingDisplay:
 
     def handle_event(self, event: HostEvent) -> None:
         """Dispatch a host event to the appropriate handler."""
-        if isinstance(event, ChildSessionEvent):
-            self._handle_child_session_event(event)
-        elif isinstance(event, ChildSessionStartEvent):
+        if isinstance(event, ChildSessionStartEvent):
             self._handle_child_session_start(event)
         elif isinstance(event, ChildSessionEndEvent):
-            self._handle_child_session_end(event)
+            pass  # silent
+        elif isinstance(event, ChildSessionEvent):
+            self._handle_child_session_event(event)
         elif isinstance(event, StreamTokenEvent):
             self._handle_token(event)
         elif isinstance(event, StreamThinkingEvent):
@@ -256,21 +258,29 @@ class StreamingDisplay:
     # ------------------------------------------------------------------
 
     def _handle_child_session_start(self, event: ChildSessionStartEvent) -> None:
-        """Print delegation start indicator with agent name."""
-        indent = _NESTING_INDENT * self._nesting_depth
+        """Print gear icon and delegate header with agent name in bold cyan."""
+        indent = _NESTING_INDENT * (event.depth - 1)
         self._console.print(
-            f"\n{indent}[dim]\u250c Delegating to [bold]{event.agent_name}[/bold]...[/dim]"
+            f"{indent}\u2699 [bold cyan]delegate -> {event.agent_name}[/bold cyan]"
         )
-        self._nesting_depth += 1
-
-    def _handle_child_session_end(self, event: ChildSessionEndEvent) -> None:
-        """Print delegation end indicator."""
-        if self._nesting_depth > 0:
-            self._nesting_depth -= 1
-        indent = _NESTING_INDENT * self._nesting_depth
-        self._console.print(f"{indent}[dim]\u2514 Delegation complete[/dim]")
 
     def _handle_child_session_event(self, event: ChildSessionEvent) -> None:
-        """Unwrap a child session event and render the inner event."""
-        if event.inner is not None:
-            self.handle_event(event.inner)
+        """Render inner event with nesting indentation using an isolated buffer."""
+        if event.inner is None:
+            return
+
+        inner_buf = StringIO()
+        inner_width = max(40, self._console.width - 4 * event.depth)
+        inner_console = Console(file=inner_buf, no_color=True, width=inner_width)
+        inner_display = StreamingDisplay(
+            console=inner_console,
+            show_thinking=self._show_thinking,
+            show_token_usage=self._show_token_usage,
+        )
+        inner_display.handle_event(event.inner)
+
+        inner_output = inner_buf.getvalue()
+        indent = _NESTING_INDENT * event.depth
+        for line in inner_output.split("\n"):
+            if line.strip():
+                self._console.print(indent + line, markup=False, highlight=False)
