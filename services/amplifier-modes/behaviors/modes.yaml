@@ -1,20 +1,13 @@
 behavior:
-  name: behavior-modes
-  version: 1.0.0
+  ref: modes
+  uuid: 6d239fcc-e53b-4a6d-a81c-3b3a5a8fc139
+  version: 1
   description: Generic mode system for runtime behavior modification
-  tools:
-  - class: amplifier_modes.tools.mode.ModeTool
-    config:
-      gate_policy: warn
-  hooks:
-  - class: amplifier_modes.hooks.mode.ModeHooks
-    config:
-      search_paths: []
-  - class: amplifier_foundation.hooks.approval.ApprovalHook
-    config:
-      rules: []
-      default_action: continue
-      policy_driven_only: true
-  context:
-    include:
-    - context/modes-instructions.md
+  tools: true
+  hooks: true
+  context: true
+  behaviors: []
+  service:
+    stack: uv
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-modes
+    command: amplifier-modes-serve

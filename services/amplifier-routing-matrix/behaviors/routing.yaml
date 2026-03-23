@@ -1,9 +1,15 @@
 behavior:
-  hooks:
-  - class: amplifier_routing_matrix.hooks.routing.RoutingHook
-    config:
+  ref: routing
+  uuid: 754ff88c-34ea-4e5b-8da6-d7bbbc80682e
+  version: 1
+  description: Model routing via routing matrix hooks and content
+  hooks: true
+  context: true
+  behaviors: []
+  config:
+    routing-hook:
       default_matrix: balanced
-  context:
-    include:
-    - context/routing-instructions.md
-    - context/role-definitions.md
+  service:
+    stack: uv
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-routing-matrix
+    command: amplifier-routing-matrix-serve
