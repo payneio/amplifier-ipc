@@ -5,6 +5,9 @@ from __future__ import annotations
 from rich.console import Console
 
 from amplifier_ipc.host.events import (
+    ChildSessionEndEvent,
+    ChildSessionEvent,
+    ChildSessionStartEvent,
     CompleteEvent,
     ErrorEvent,
     HostEvent,
@@ -19,6 +22,9 @@ from amplifier_ipc.host.events import (
 )
 
 __all__ = ["StreamingDisplay"]
+
+# Indentation applied per child-session nesting level.
+_NESTING_INDENT = "    "  # 4 spaces
 
 
 class StreamingDisplay:
@@ -41,6 +47,7 @@ class StreamingDisplay:
         self._show_token_usage = show_token_usage
         self._response: str | None = None
         self._in_thinking_block: bool = False
+        self._nesting_depth: int = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -53,7 +60,13 @@ class StreamingDisplay:
 
     def handle_event(self, event: HostEvent) -> None:
         """Dispatch a host event to the appropriate handler."""
-        if isinstance(event, StreamTokenEvent):
+        if isinstance(event, ChildSessionEvent):
+            self._handle_child_session_event(event)
+        elif isinstance(event, ChildSessionStartEvent):
+            self._handle_child_session_start(event)
+        elif isinstance(event, ChildSessionEndEvent):
+            self._handle_child_session_end(event)
+        elif isinstance(event, StreamTokenEvent):
             self._handle_token(event)
         elif isinstance(event, StreamThinkingEvent):
             self._handle_thinking(event)
@@ -104,24 +117,29 @@ class StreamingDisplay:
 
     def _handle_tool_call_start(self, event: StreamToolCallStartEvent) -> None:
         """Print the tool name for a tool call start event."""
-        self._console.print(f"\n[tool] {event.tool_name}", markup=False)
+        indent = _NESTING_INDENT * self._nesting_depth
+        self._console.print(f"\n{indent}[dim]\u2699 {event.tool_name}[/dim]")
 
     def _handle_tool_call(self, event: ToolCallEvent) -> None:
         """Print tool name header and YAML-formatted arguments."""
-        self._console.print(f"\n🔧 [bold]{event.tool_name}[/bold]")
+        indent = _NESTING_INDENT * self._nesting_depth
+        self._console.print(f"\n{indent}\u2699 [bold]{event.tool_name}[/bold]")
         items = list(event.arguments.items())
         display_items = items[:10]
         remaining = len(items) - len(display_items)
         for key, value in display_items:
             truncated = str(value)[:200]
-            self._console.print(f"   {key}: {truncated}", markup=False, highlight=False)
-        if remaining > 0:
             self._console.print(
-                f"   ... ({remaining} more)", markup=False, highlight=False
+                f"{indent}   [dim]{key}:[/dim] {truncated}",
+                markup=True,
+                highlight=False,
             )
+        if remaining > 0:
+            self._console.print(f"{indent}   [dim]... ({remaining} more)[/dim]")
 
     def _handle_tool_result(self, event: ToolResultEvent) -> None:
         """Print tool result with success/failure icon and truncated output."""
+        indent = _NESTING_INDENT * self._nesting_depth
         if event.success:
             icon = "\u2705"
             style = "green"
@@ -129,16 +147,21 @@ class StreamingDisplay:
             icon = "\u274c"
             style = "red"
         self._console.print(
-            f"{icon} Tool result: {event.tool_name}", style=style, markup=False
+            f"{indent}{icon} {event.tool_name}", style=style, markup=False
         )
         lines = event.output.split("\n")
         display_lines = lines[:10]
         remaining = len(lines) - len(display_lines)
         for line in display_lines:
-            self._console.print(f"   {line[:200]}", markup=False, highlight=False)
+            self._console.print(
+                f"{indent}   {line[:200]}", style="dim", markup=False, highlight=False
+            )
         if remaining > 0:
             self._console.print(
-                f"   ... ({remaining} more lines)", markup=False, highlight=False
+                f"{indent}   ... ({remaining} more lines)",
+                style="dim",
+                markup=False,
+                highlight=False,
             )
 
     def _handle_todo_update(self, event: TodoUpdateEvent) -> None:
@@ -217,10 +240,37 @@ class StreamingDisplay:
         self._console.print(bottom_border, markup=False)
 
     def _handle_error(self, event: ErrorEvent) -> None:
-        """Print error message in red."""
-        self._console.print(event.message, style="red", markup=False)
+        """Print error message in red with cross icon."""
+        indent = _NESTING_INDENT * self._nesting_depth
+        self._console.print(
+            f"{indent}\u2717 {event.message}", style="red", markup=False
+        )
 
     def _handle_complete(self, event: CompleteEvent) -> None:
         """Store the final response and print a newline."""
         self._response = event.result
         self._console.print()
+
+    # ------------------------------------------------------------------
+    # Child session handlers
+    # ------------------------------------------------------------------
+
+    def _handle_child_session_start(self, event: ChildSessionStartEvent) -> None:
+        """Print delegation start indicator with agent name."""
+        indent = _NESTING_INDENT * self._nesting_depth
+        self._console.print(
+            f"\n{indent}[dim]\u250c Delegating to [bold]{event.agent_name}[/bold]...[/dim]"
+        )
+        self._nesting_depth += 1
+
+    def _handle_child_session_end(self, event: ChildSessionEndEvent) -> None:
+        """Print delegation end indicator."""
+        if self._nesting_depth > 0:
+            self._nesting_depth -= 1
+        indent = _NESTING_INDENT * self._nesting_depth
+        self._console.print(f"{indent}[dim]\u2514 Delegation complete[/dim]")
+
+    def _handle_child_session_event(self, event: ChildSessionEvent) -> None:
+        """Unwrap a child session event and render the inner event."""
+        if event.inner is not None:
+            self.handle_event(event.inner)
