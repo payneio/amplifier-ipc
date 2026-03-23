@@ -612,7 +612,11 @@ class Host:
         This method normalises the nested format into the flat dict expected by
         :meth:`~amplifier_ipc.host.registry.CapabilityRegistry.register`.
 
-        Uses a 10-second timeout per service.
+        If the service has a merged config in ``_service_configs``, a
+        ``configure`` call is sent after registration.
+
+        Uses a 10-second timeout per service for both ``describe`` and
+        ``configure`` calls.
         """
         for service_key, service in self._services.items():
             describe_result = await asyncio.wait_for(
@@ -645,7 +649,10 @@ class Host:
             # Send configure with merged config for this service (if any)
             service_config = self._service_configs.get(service_key, {})
             if service_config:
-                await service.client.request("configure", {"config": service_config})
+                await asyncio.wait_for(
+                    service.client.request("configure", {"config": service_config}),
+                    timeout=_DESCRIBE_TIMEOUT_S,
+                )
 
     async def _spawn_services(self) -> None:
         """Spawn all services declared in the session config."""
