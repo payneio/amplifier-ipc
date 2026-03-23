@@ -474,13 +474,19 @@ async def test_orchestrator_emits_stream_todo_update_for_todo_tool() -> None:
 
     todos_payload = [
         {"content": "Buy milk", "status": "pending", "activeForm": "Buying milk"},
-        {"content": "Write tests", "status": "completed", "activeForm": "Writing tests"},
+        {
+            "content": "Write tests",
+            "status": "completed",
+            "activeForm": "Writing tests",
+        },
     ]
     todo_output = json.dumps({"todos": todos_payload, "status": "updated"})
 
     tool_call_response = chat_response(
         text="",
-        tool_calls=[{"id": "call_todo", "tool": "todo", "arguments": {"action": "list"}}],
+        tool_calls=[
+            {"id": "call_todo", "tool": "todo", "arguments": {"action": "list"}}
+        ],
     )
     final_response = chat_response("Here are your todos!")
 
@@ -517,7 +523,9 @@ async def test_orchestrator_emits_stream_todo_update_for_todo_tool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_does_not_emit_stream_todo_update_for_non_todo_tool() -> None:
+async def test_orchestrator_does_not_emit_stream_todo_update_for_non_todo_tool() -> (
+    None
+):
     """stream.todo_update notification is NOT sent for non-todo tool calls."""
     from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
 
@@ -525,7 +533,9 @@ async def test_orchestrator_does_not_emit_stream_todo_update_for_non_todo_tool()
 
     tool_call_response = chat_response(
         text="",
-        tool_calls=[{"id": "call_bash", "tool": "bash", "arguments": {"command": "ls"}}],
+        tool_calls=[
+            {"id": "call_bash", "tool": "bash", "arguments": {"command": "ls"}}
+        ],
     )
     final_response = chat_response("Done!")
 
@@ -547,5 +557,101 @@ async def test_orchestrator_does_not_emit_stream_todo_update_for_non_todo_tool()
     ]
     assert len(todo_update_notifs) == 0, (
         f"Expected 0 stream.todo_update notifications for non-todo tool, "
+        f"got {len(todo_update_notifs)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 11: stream.todo_update NOT sent when todo tool returns JSON without 'todos' key
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_does_not_emit_stream_todo_update_when_todos_key_missing() -> (
+    None
+):
+    """stream.todo_update notification is NOT sent when todo tool returns JSON without 'todos' key."""
+    import json
+
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    # Valid JSON but no 'todos' key
+    todo_output = json.dumps({"status": "updated", "count": 0})
+
+    tool_call_response = chat_response(
+        text="",
+        tool_calls=[
+            {"id": "call_todo", "tool": "todo", "arguments": {"action": "list"}}
+        ],
+    )
+    final_response = chat_response("Done!")
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": Sequence(tool_call_response, final_response),
+            "request.tool_execute": tool_result_ok(todo_output),
+        }
+    )
+
+    await orch.execute("List todos", {}, client)
+
+    # Verify NO stream.todo_update notification was sent (no 'todos' key in JSON)
+    todo_update_notifs = [
+        (m, p) for m, p in client.notifications if m == "stream.todo_update"
+    ]
+    assert len(todo_update_notifs) == 0, (
+        f"Expected 0 stream.todo_update notifications when JSON has no 'todos' key, "
+        f"got {len(todo_update_notifs)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 12: stream.todo_update NOT sent when todo tool returns non-JSON output
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_does_not_emit_stream_todo_update_for_non_json_output() -> (
+    None
+):
+    """stream.todo_update notification is NOT sent when todo tool returns non-JSON output."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    # Non-JSON output (exercises the except path)
+    non_json_output = "Todo list updated successfully."
+
+    tool_call_response = chat_response(
+        text="",
+        tool_calls=[
+            {"id": "call_todo", "tool": "todo", "arguments": {"action": "update"}}
+        ],
+    )
+    final_response = chat_response("Done!")
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": Sequence(tool_call_response, final_response),
+            "request.tool_execute": tool_result_ok(non_json_output),
+        }
+    )
+
+    await orch.execute("Update todos", {}, client)
+
+    # Verify NO stream.todo_update notification was sent (non-JSON output triggers except path)
+    todo_update_notifs = [
+        (m, p) for m, p in client.notifications if m == "stream.todo_update"
+    ]
+    assert len(todo_update_notifs) == 0, (
+        f"Expected 0 stream.todo_update notifications for non-JSON todo output, "
         f"got {len(todo_update_notifs)}"
     )

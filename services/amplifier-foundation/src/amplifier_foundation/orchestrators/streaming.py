@@ -372,7 +372,9 @@ class StreamingOrchestrator:
                             },
                         )
                 except (json.JSONDecodeError, TypeError):
-                    pass
+                    logger.debug(
+                        "stream.todo_update skipped: could not parse todo tool output"
+                    )
 
             return (tool_call.id, tool_call.name, content)
 
