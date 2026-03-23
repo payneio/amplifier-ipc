@@ -353,8 +353,6 @@ class Host:
                     request=spawn_request,
                     settings=self._settings,
                     service_configs=self._service_configs,
-                    shared_services=self._services,
-                    shared_registry=self._registry,
                     event_callback=_forward_child_event,
                 )
             finally:
@@ -434,8 +432,6 @@ class Host:
                 settings=self._settings,
                 session_dir=self._session_dir,
                 service_configs=self._service_configs,
-                shared_services=self._services,
-                shared_registry=self._registry,
             )
 
         return _handle_resume
