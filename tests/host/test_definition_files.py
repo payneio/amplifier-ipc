@@ -70,8 +70,9 @@ def _collect_definitions() -> list[dict[str, Any]]:
         # Skip entries from .venv directories (installed/vendored packages)
         if ".venv" in Path(path).parts:
             continue
-        # Skip entries from src/ directories (duplicates of top-level definitions)
-        if "src" in Path(path).parts:
+        # Skip entries from src/ directories (duplicates of top-level definitions);
+        # check parts[:-1] (directories only) so a file literally named "src" isn't excluded
+        if "src" in Path(path).parts[:-1]:
             continue
         # Augment with parsed YAML data
         try:
@@ -125,11 +126,15 @@ def test_definition_has_valid_uuid(defn: dict[str, Any]) -> None:
     inner = _inner(defn)
     uuid_str = inner.get("uuid")
     assert uuid_str, f"Missing uuid in {defn['path']}"
+    parsed_uuid = None
     try:
-        u = uuid.UUID(str(uuid_str))
+        parsed_uuid = uuid.UUID(str(uuid_str))
     except ValueError:
-        pytest.fail(f"Invalid UUID format '{uuid_str}' in {defn['path']}")
-    assert u.version == 4, f"UUID is not v4 in {defn['path']}: {uuid_str}"
+        pass
+    assert parsed_uuid is not None, (
+        f"Invalid UUID format '{uuid_str}' in {defn['path']}"
+    )
+    assert parsed_uuid.version == 4, f"UUID is not v4 in {defn['path']}: {uuid_str}"
 
 
 @pytest.mark.parametrize("defn", DEFINITIONS, ids=_def_id)
