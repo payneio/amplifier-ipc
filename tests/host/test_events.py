@@ -1,6 +1,8 @@
-"""Tests for HostEvent dataclass hierarchy."""
+"""Tests for HostEvent model hierarchy."""
 
 from __future__ import annotations
+
+from pydantic import BaseModel
 
 from amplifier_ipc.host.events import (
     ApprovalRequestEvent,
@@ -15,8 +17,16 @@ from amplifier_ipc.host.events import (
 )
 
 
+def test_host_event_is_pydantic_base_model() -> None:
+    """HostEvent and all subclasses are Pydantic BaseModel instances."""
+    event = HostEvent()
+    assert isinstance(event, BaseModel)
+    assert isinstance(StreamTokenEvent(token="x"), BaseModel)
+    assert isinstance(ApprovalRequestEvent(), BaseModel)
+
+
 def test_host_event_is_base() -> None:
-    """HostEvent is the base dataclass and can be instantiated."""
+    """HostEvent is the base class and can be instantiated."""
     event = HostEvent()
     assert isinstance(event, HostEvent)
 

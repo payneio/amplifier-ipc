@@ -1,4 +1,4 @@
-"""Host event dataclass hierarchy.
+"""Host event model hierarchy.
 
 Events are yielded by :meth:`Host.run` and :meth:`Host._orchestrator_loop`
 as an async stream, replacing the previous batch-result return value.
@@ -6,36 +6,33 @@ as an async stream, replacing the previous batch-result return value.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
-@dataclass
-class HostEvent:
+class HostEvent(BaseModel):
     """Base class for all host events."""
 
 
-@dataclass
 class StreamTokenEvent(HostEvent):
     """Emitted when the orchestrator streams a text token (stream.token)."""
 
     token: str = ""
 
 
-@dataclass
 class StreamThinkingEvent(HostEvent):
     """Emitted when the orchestrator streams a thinking fragment (stream.thinking)."""
 
     thinking: str = ""
 
 
-@dataclass
 class StreamToolCallStartEvent(HostEvent):
     """Emitted when the orchestrator starts a tool call (stream.tool_call_start)."""
 
     tool_name: str = ""
 
 
-@dataclass
 class StreamContentBlockStartEvent(HostEvent):
     """Emitted when the provider starts a new content block (stream.content_block_start)."""
 
@@ -43,7 +40,6 @@ class StreamContentBlockStartEvent(HostEvent):
     index: int = 0
 
 
-@dataclass
 class StreamContentBlockEndEvent(HostEvent):
     """Emitted when the provider ends a content block (stream.content_block_end)."""
 
@@ -51,21 +47,18 @@ class StreamContentBlockEndEvent(HostEvent):
     index: int = 0
 
 
-@dataclass
 class ApprovalRequestEvent(HostEvent):
     """Emitted when the orchestrator requests user approval (approval_request)."""
 
-    params: dict = field(default_factory=dict)  # type: ignore[type-arg]
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
-@dataclass
 class ErrorEvent(HostEvent):
     """Emitted when the orchestrator sends a non-fatal error notification (error)."""
 
     message: str = ""
 
 
-@dataclass
 class CompleteEvent(HostEvent):
     """Emitted as the final event carrying the orchestrator's full response (complete)."""
 
