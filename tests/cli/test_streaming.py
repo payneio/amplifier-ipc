@@ -277,9 +277,21 @@ class TestTodoUpdateRendersItems:
 
         event = TodoUpdateEvent(
             todos=[
-                {"content": "Task one", "status": "completed", "activeForm": "Completing task one"},
-                {"content": "Task two", "status": "in_progress", "activeForm": "Doing task two"},
-                {"content": "Task three", "status": "pending", "activeForm": "Starting task three"},
+                {
+                    "content": "Task one",
+                    "status": "completed",
+                    "activeForm": "Completing task one",
+                },
+                {
+                    "content": "Task two",
+                    "status": "in_progress",
+                    "activeForm": "Doing task two",
+                },
+                {
+                    "content": "Task three",
+                    "status": "pending",
+                    "activeForm": "Starting task three",
+                },
             ],
             status="updated",
         )
@@ -290,7 +302,7 @@ class TestTodoUpdateRendersItems:
         assert "Task two" in output
         assert "Task three" in output
         # Progress bar should show completed/total ratio (1 completed out of 3)
-        assert "1/3" in output or "3" in output
+        assert "1/3" in output
 
 
 # ---------------------------------------------------------------------------

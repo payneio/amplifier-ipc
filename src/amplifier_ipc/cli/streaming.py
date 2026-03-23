@@ -134,15 +134,17 @@ class StreamingDisplay:
         total = len(event.todos)
         completed_count = sum(1 for t in event.todos if t.get("status") == "completed")
 
-        # Box width (inner content width)
-        box_width = 50
+        # Layout constants
+        box_width = 50  # Inner content width (chars between the │ borders)
+        bar_width = 20  # Width of the progress bar in block chars
+        full_mode_threshold = 7  # Show individual items up to this count
 
         top_border = "\u250c" + "\u2500" * box_width + "\u2510"
         bottom_border = "\u2514" + "\u2500" * box_width + "\u2518"
 
         self._console.print(top_border, markup=False)
 
-        if total <= 7:
+        if total <= full_mode_threshold:
             # Full mode: show each todo item
             for todo in event.todos:
                 status = todo.get("status", "pending")
@@ -170,14 +172,16 @@ class StreamingDisplay:
                 f"{symbols['in_progress']} {in_progress_count} in progress  "
                 f"{symbols['pending']} {pending_count} pending"
             )
-            padding = box_width - (len(summary) - 2) + 1  # -2 for the box chars
+            # len(summary) includes the leading "│ " (2 visible chars) plus 3 bytes for
+            # the multi-byte │ character, so subtract 2 and add 1 to correct for the
+            # extra byte in the UTF-8 encoded │.
+            padding = box_width - (len(summary) - 2) + 1
             if padding > 0:
                 summary += " " * padding
             summary += "\u2502"
             self._console.print(summary, markup=False)
 
         # Progress bar
-        bar_width = 20
         filled = int(bar_width * completed_count / total) if total > 0 else 0
         empty = bar_width - filled
         bar = "\u2588" * filled + "\u2591" * empty
