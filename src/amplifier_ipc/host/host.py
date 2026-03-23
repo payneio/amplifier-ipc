@@ -625,6 +625,31 @@ class Host:
                 index = params.get("index", 0)
                 yield StreamContentBlockEndEvent(block_type=block_type, index=index)
 
+            # Tool call notification
+            elif method == "stream.tool_call":
+                params = message.get("params") or {}
+                yield ToolCallEvent(
+                    tool_name=params.get("tool_name", ""),
+                    arguments=params.get("arguments", {}),
+                )
+
+            # Tool result notification
+            elif method == "stream.tool_result":
+                params = message.get("params") or {}
+                yield ToolResultEvent(
+                    tool_name=params.get("tool_name", ""),
+                    success=params.get("success", True),
+                    output=params.get("output", ""),
+                )
+
+            # Todo update notification
+            elif method == "stream.todo_update":
+                params = message.get("params") or {}
+                yield TodoUpdateEvent(
+                    todos=params.get("todos", []),
+                    status=params.get("status", ""),
+                )
+
             # Approval request notification — yield event, then wait for the
             # CLI to call send_approval() before continuing the loop.
             elif method == "approval_request":

@@ -1034,6 +1034,115 @@ async def test_orchestrator_loop_drains_child_event_queue() -> None:
     assert events[1].result == "done"
 
 
+async def test_orchestrator_loop_yields_tool_call_event() -> None:
+    """_orchestrator_loop yields ToolCallEvent, ToolResultEvent, TodoUpdateEvent,
+    then a CompleteEvent when the orchestrator sends stream.tool_call,
+    stream.tool_result, and stream.todo_update notifications in sequence."""
+    from amplifier_ipc.host.events import (
+        TodoUpdateEvent,
+        ToolCallEvent,
+        ToolResultEvent,
+    )
+
+    config = SessionConfig(
+        services=["orch"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+
+    host = Host(config=config, settings=settings)
+
+    fake_process = MagicMock()
+    fake_process.stdin = MagicMock()
+    fake_process.stdout = MagicMock()
+
+    fake_service = MagicMock()
+    fake_service.process = fake_process
+    host._services = {"orch": fake_service}
+
+    captured_id: list[str] = []
+
+    async def fake_write(stream: object, message: dict) -> None:  # type: ignore[type-arg]
+        if message.get("method") == "orchestrator.execute":
+            captured_id.append(message["id"])
+
+    read_call_count = 0
+
+    async def fake_read(stream: object) -> dict | None:  # type: ignore[type-arg]
+        nonlocal read_call_count
+        read_call_count += 1
+        if read_call_count == 1:
+            return {
+                "jsonrpc": "2.0",
+                "method": "stream.tool_call",
+                "params": {"tool_name": "bash", "arguments": {"command": "ls"}},
+            }
+        elif read_call_count == 2:
+            return {
+                "jsonrpc": "2.0",
+                "method": "stream.tool_result",
+                "params": {"tool_name": "bash", "success": True, "output": "file.txt"},
+            }
+        elif read_call_count == 3:
+            return {
+                "jsonrpc": "2.0",
+                "method": "stream.todo_update",
+                "params": {
+                    "todos": [
+                        {"id": "1", "content": "Do something", "status": "pending"}
+                    ],
+                    "status": "created",
+                },
+            }
+        else:
+            # Final response matching execute_id
+            return {
+                "jsonrpc": "2.0",
+                "id": captured_id[0],
+                "result": "done",
+            }
+
+    with (
+        patch("amplifier_ipc.host.host.write_message", fake_write),
+        patch("amplifier_ipc.host.host.read_message", fake_read),
+    ):
+        events = []
+        async for event in host._orchestrator_loop(
+            orchestrator_key="orch",
+            prompt="hello",
+            system_prompt="be helpful",
+        ):
+            events.append(event)
+
+    assert len(events) == 4
+
+    # ToolCallEvent
+    tool_call_event = events[0]
+    assert isinstance(tool_call_event, ToolCallEvent)
+    assert tool_call_event.tool_name == "bash"
+    assert tool_call_event.arguments == {"command": "ls"}
+
+    # ToolResultEvent
+    tool_result_event = events[1]
+    assert isinstance(tool_result_event, ToolResultEvent)
+    assert tool_result_event.tool_name == "bash"
+    assert tool_result_event.success is True
+    assert tool_result_event.output == "file.txt"
+
+    # TodoUpdateEvent
+    todo_update_event = events[2]
+    assert isinstance(todo_update_event, TodoUpdateEvent)
+    assert todo_update_event.status == "created"
+    assert len(todo_update_event.todos) == 1
+    assert todo_update_event.todos[0]["id"] == "1"
+
+    # CompleteEvent
+    assert isinstance(events[3], CompleteEvent)
+    assert events[3].result == "done"
+
+
 async def test_build_spawn_handler_provides_event_callback() -> None:
     """_build_spawn_handler passes event_callback that wraps child events in ChildSessionEvent.
 
