@@ -8,12 +8,12 @@ module.
 from __future__ import annotations
 
 import uuid
-from pydantic import BaseModel, Field
 from typing import Any
+
+from pydantic import BaseModel, Field
 
 from amplifier_ipc.host.config import HostSettings, SessionConfig
 from amplifier_ipc.host.host import Host
-
 
 # ---------------------------------------------------------------------------
 # Models
@@ -161,8 +161,8 @@ async def spawn_sub_session(
         RuntimeError: If the child session completes without emitting a
             :class:`~amplifier_ipc.host.events.CompleteEvent`.
     """
-    from amplifier_ipc.host.definitions import resolve_agent
     from amplifier_ipc.cli.session_launcher import build_session_config
+    from amplifier_ipc.host.definitions import resolve_agent
     from amplifier_ipc.host.events import CompleteEvent
 
     # Resolve child agent definition

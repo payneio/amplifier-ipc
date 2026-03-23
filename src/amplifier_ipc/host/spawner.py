@@ -8,10 +8,9 @@ and formatting parent conversation context for child instructions.
 from __future__ import annotations
 
 from typing import Any
-
-from pydantic import BaseModel
 from uuid import uuid4
 
+from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
 # Session ID generation
