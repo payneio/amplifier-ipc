@@ -29,7 +29,9 @@ def test_discover_finds_definitions() -> None:
 
 def test_discover_register_creates_alias_files(tmp_path: Path) -> None:
     runner = CliRunner()
-    result = runner.invoke(cli, ["discover", str(SERVICES_DIR), "--register", "--home", str(tmp_path)])
+    result = runner.invoke(
+        cli, ["discover", str(SERVICES_DIR), "--register", "--home", str(tmp_path)]
+    )
     assert result.exit_code == 0, result.output
     agents = yaml.safe_load((tmp_path / "agents.yaml").read_text()) or {}
     assert len(agents) > 0, "agents.yaml should have at least one entry"
@@ -39,7 +41,10 @@ def test_discover_register_creates_alias_files(tmp_path: Path) -> None:
 
 def test_registered_definitions_are_valid(tmp_path: Path) -> None:
     runner = CliRunner()
-    runner.invoke(cli, ["discover", str(SERVICES_DIR), "--register", "--home", str(tmp_path)])
+    result = runner.invoke(
+        cli, ["discover", str(SERVICES_DIR), "--register", "--home", str(tmp_path)]
+    )
+    assert result.exit_code == 0, result.output
     defs_dir = tmp_path / "definitions"
     for def_file in sorted(defs_dir.glob("*.yaml")):
         stored = yaml.safe_load(def_file.read_text()) or {}
