@@ -189,7 +189,7 @@ def discover(location: str, register: bool, install: bool, home: str | None) -> 
         console.print(f"[green]Found {count} definition(s):[/green]")
         for item in definitions:
             console.print(
-                f"  [{item['type']}] {item['ref'] or '(no ref)'}  {item['path']}"
+                f"  \\[{item['type']}] {item['ref'] or '(no ref)'}  {item['path']}"
             )
 
     if register and definitions:
@@ -197,5 +197,7 @@ def discover(location: str, register: bool, install: bool, home: str | None) -> 
         registry = Registry(home=home_path)
         registry.ensure_home()
         for item in definitions:
+            if not item["ref"]:
+                continue
             registry.register_definition(item["raw_content"])
             console.print(f"[blue]Registered[/blue] {item['type']} '{item['ref']}'")
