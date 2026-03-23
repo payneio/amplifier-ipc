@@ -349,3 +349,55 @@ async def test_orchestrator_emits_stream_tool_call_start_before_tool_execution()
         f"stream.tool_call_start (idx {tool_start_idx}) must come before "
         f"tool:pre hook emit (idx {tool_pre_idx})"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 7: stream.tool_call notification with tool_name and arguments
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_stream_tool_call_notification() -> None:
+    """stream.tool_call notification sent with tool_name and arguments before tool execution."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    tool_call_response = chat_response(
+        text="",
+        tool_calls=[
+            {"id": "call_xyz", "tool": "bash", "arguments": {"command": "ls -la"}}
+        ],
+    )
+    final_response = chat_response("Done!")
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": Sequence(tool_call_response, final_response),
+            "request.tool_execute": tool_result_ok("file listing"),
+        }
+    )
+
+    result = await orch.execute("List files", {}, client)
+
+    assert result == "Done!"
+
+    # Verify exactly 1 stream.tool_call notification
+    tool_call_notifs = [
+        (m, p) for m, p in client.notifications if m == "stream.tool_call"
+    ]
+    assert len(tool_call_notifs) == 1, (
+        f"Expected exactly 1 stream.tool_call notification, got {len(tool_call_notifs)}"
+    )
+
+    # Verify the notification contains correct tool_name and arguments
+    notif_params = tool_call_notifs[0][1]
+    assert notif_params["tool_name"] == "bash", (
+        f"Expected tool_name='bash', got {notif_params['tool_name']!r}"
+    )
+    assert notif_params["arguments"] == {"command": "ls -la"}, (
+        f"Expected arguments={{'command': 'ls -la'}}, got {notif_params['arguments']!r}"
+    )

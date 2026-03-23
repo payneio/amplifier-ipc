@@ -46,6 +46,7 @@ CONTENT_BLOCK_START = "content:block_start"  # reserved for streaming block even
 CONTENT_BLOCK_END = "content:block_end"  # reserved for streaming block events
 STREAM_THINKING = "stream.thinking"
 STREAM_TOOL_CALL_START = "stream.tool_call_start"
+STREAM_TOOL_CALL = "stream.tool_call"
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +287,12 @@ class StreamingOrchestrator:
             # --- emit stream.tool_call_start (before tool:pre hook) ---
             await client.send_notification(
                 STREAM_TOOL_CALL_START, {"tool_name": tool_call.name}
+            )
+
+            # --- emit stream.tool_call with name and arguments ---
+            await client.send_notification(
+                STREAM_TOOL_CALL,
+                {"tool_name": tool_call.name, "arguments": tool_call.arguments},
             )
 
             # --- emit tool:pre, check DENY ---
