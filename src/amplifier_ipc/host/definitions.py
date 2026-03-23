@@ -85,6 +85,7 @@ class ResolvedAgent:
 
     services: list[tuple[str, ServiceEntry]] = field(default_factory=list)
     service_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    definition_ids: dict[str, str] = field(default_factory=dict)
     orchestrator: str | None = None
     context_manager: str | None = None
     provider: str | None = None
@@ -254,8 +255,10 @@ async def resolve_agent(
 
     # Step 3: Collect agent's own service, keyed by its ref.
     services_by_ref: dict[str, ServiceEntry] = {}
+    definition_ids: dict[str, str] = {}
     if agent_def.service is not None:
         services_by_ref[agent_ref] = agent_def.service
+        definition_ids[agent_ref] = agent_path.stem
 
     # Step 4: Split agent-level component_config into per-service buckets.
     # Keys like "modes:gate_policy" route to service "modes" with key "gate_policy".
@@ -351,6 +354,7 @@ async def resolve_agent(
         # Collect service, deduplicating by ref.
         if behavior_def.service is not None and behavior_ref not in services_by_ref:
             services_by_ref[behavior_ref] = behavior_def.service
+            definition_ids[behavior_ref] = behavior_path.stem
 
         # Merge config for this behavior (first visit wins).
         if behavior_ref not in service_configs:
@@ -382,6 +386,7 @@ async def resolve_agent(
     return ResolvedAgent(
         services=list(services_by_ref.items()),
         service_configs=service_configs,
+        definition_ids=definition_ids,
         orchestrator=agent_def.orchestrator,
         context_manager=agent_def.context_manager,
         provider=agent_def.provider,

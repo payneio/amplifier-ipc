@@ -565,3 +565,107 @@ agent:
         # This must not raise TypeError
         host = Host(config, settings, service_configs=service_configs)
         assert host._service_configs == service_configs
+
+
+# ---------------------------------------------------------------------------
+# Test 9: Lazy install on first run
+# ---------------------------------------------------------------------------
+
+
+class TestLazyInstallOnFirstRun:
+    def test_lazy_install_installs_uninstalled_services(self, tmp_path: Path) -> None:
+        """launch_session calls install_service for services with source that aren't installed."""
+        from amplifier_ipc.host.definition_registry import Registry
+        from amplifier_ipc.cli.session_launcher import launch_session
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+
+        agent_yaml = """\
+agent:
+  ref: lazy-agent
+  uuid: cccccccc-0000-0000-0000-000000000001
+  service:
+    source: my-package>=1.0
+"""
+        registry.register_definition(agent_yaml)
+        # Environment directory does NOT exist, so is_installed() returns False.
+
+        mock_host_instance = MagicMock()
+
+        with (
+            patch("amplifier_ipc.cli.session_launcher.Host") as mock_host_class,
+            patch("amplifier_ipc.cli.session_launcher.install_service") as mock_install,
+        ):
+            mock_host_class.return_value = mock_host_instance
+            asyncio.run(launch_session("lazy-agent", registry=registry))
+
+        mock_install.assert_called_once()
+        call_args = mock_install.call_args
+        assert call_args[0][0] is registry
+        assert (
+            call_args[0][1] == "agent_lazy-agent_cccccccc-0000-0000-0000-000000000001"
+        )
+        assert call_args[0][2] == "my-package>=1.0"
+
+    def test_lazy_install_skips_already_installed(self, tmp_path: Path) -> None:
+        """launch_session skips install_service when the environment already exists."""
+        from amplifier_ipc.host.definition_registry import Registry
+        from amplifier_ipc.cli.session_launcher import launch_session
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+
+        agent_yaml = """\
+agent:
+  ref: installed-agent
+  uuid: cccccccc-0000-0000-0000-000000000002
+  service:
+    source: my-package>=1.0
+"""
+        registry.register_definition(agent_yaml)
+        definition_id = "agent_installed-agent_cccccccc-0000-0000-0000-000000000002"
+        # Simulate already installed by creating the environment directory.
+        (tmp_path / "amplifier_home" / "environments" / definition_id).mkdir(
+            parents=True
+        )
+
+        mock_host_instance = MagicMock()
+
+        with (
+            patch("amplifier_ipc.cli.session_launcher.Host") as mock_host_class,
+            patch("amplifier_ipc.cli.session_launcher.install_service") as mock_install,
+        ):
+            mock_host_class.return_value = mock_host_instance
+            asyncio.run(launch_session("installed-agent", registry=registry))
+
+        mock_install.assert_not_called()
+
+    def test_lazy_install_skips_services_without_source(self, tmp_path: Path) -> None:
+        """launch_session skips install_service for services that have no source field."""
+        from amplifier_ipc.host.definition_registry import Registry
+        from amplifier_ipc.cli.session_launcher import launch_session
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+
+        agent_yaml = """\
+agent:
+  ref: no-source-agent
+  uuid: cccccccc-0000-0000-0000-000000000003
+  service:
+    command: my-command
+"""
+        registry.register_definition(agent_yaml)
+        # No 'source' field — install should be skipped even though env doesn't exist.
+
+        mock_host_instance = MagicMock()
+
+        with (
+            patch("amplifier_ipc.cli.session_launcher.Host") as mock_host_class,
+            patch("amplifier_ipc.cli.session_launcher.install_service") as mock_install,
+        ):
+            mock_host_class.return_value = mock_host_instance
+            asyncio.run(launch_session("no-source-agent", registry=registry))
+
+        mock_install.assert_not_called()

@@ -12,6 +12,7 @@ from amplifier_ipc.host.config import (
 )
 from amplifier_ipc.host.host import Host
 
+from amplifier_ipc.cli.commands.install import install_service
 from amplifier_ipc.host.definition_registry import Registry
 from amplifier_ipc.host.definitions import ResolvedAgent, ServiceEntry, resolve_agent
 
@@ -102,6 +103,15 @@ async def launch_session(
         registry = Registry()
 
     resolved = await resolve_agent(registry, agent_name, extra_behaviors)
+
+    # Lazy install: for each service that has a source but no installed environment,
+    # run the install step automatically so the user doesn't have to run it manually.
+    for ref, svc in resolved.services:
+        definition_id = resolved.definition_ids.get(ref)
+        if definition_id and svc.source and not registry.is_installed(definition_id):
+            print(f"Installing service {ref}...")  # noqa: T201
+            install_service(registry, definition_id, svc.source)
+
     config = build_session_config(resolved)
 
     # Load settings from the standard locations (silently skips missing files).
