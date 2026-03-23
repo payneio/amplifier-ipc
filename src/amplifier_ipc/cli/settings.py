@@ -9,11 +9,11 @@ Settings are loaded from three scopes and deep-merged (global < project < local)
 from __future__ import annotations
 
 import logging
-from pydantic import BaseModel
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
