@@ -68,10 +68,10 @@ def _collect_definitions() -> list[dict[str, Any]]:
     for entry in raw_results:
         path = entry["path"]
         # Skip entries from .venv directories (installed/vendored packages)
-        if "/.venv/" in path:
+        if ".venv" in Path(path).parts:
             continue
         # Skip entries from src/ directories (duplicates of top-level definitions)
-        if "/src/" in path:
+        if "src" in Path(path).parts:
             continue
         # Augment with parsed YAML data
         try:
@@ -99,6 +99,12 @@ def _def_id(d: dict[str, Any]) -> str:
     return d.get("ref") or Path(d["path"]).stem
 
 
+def _inner(defn: dict[str, Any]) -> dict[str, Any]:
+    """Extract the type-keyed inner block from a parsed definition dict."""
+    parsed = defn["parsed"]
+    return parsed.get(defn["type"], {}) if isinstance(parsed, dict) else {}
+
+
 # ---------------------------------------------------------------------------
 # Tests: Every definition
 # ---------------------------------------------------------------------------
@@ -113,10 +119,7 @@ def test_definition_has_ref(defn: dict[str, Any]) -> None:
 @pytest.mark.parametrize("defn", DEFINITIONS, ids=_def_id)
 def test_definition_has_valid_uuid(defn: dict[str, Any]) -> None:
     """Every definition must have a valid UUID v4."""
-    parsed = defn["parsed"]
-    inner: dict[str, Any] = (
-        parsed.get(defn["type"], {}) if isinstance(parsed, dict) else {}
-    )
+    inner = _inner(defn)
     uuid_str = inner.get("uuid")
     assert uuid_str, f"Missing uuid in {defn['path']}"
     try:
@@ -129,10 +132,7 @@ def test_definition_has_valid_uuid(defn: dict[str, Any]) -> None:
 @pytest.mark.parametrize("defn", DEFINITIONS, ids=_def_id)
 def test_definition_has_no_old_format_fields(defn: dict[str, Any]) -> None:
     """No old fields: type, local_ref, services, installer, or name in service block."""
-    parsed = defn["parsed"]
-    inner: dict[str, Any] = (
-        parsed.get(defn["type"], {}) if isinstance(parsed, dict) else {}
-    )
+    inner = _inner(defn)
 
     old_inner_fields = ["type", "local_ref", "services", "installer"]
     for field_name in old_inner_fields:
@@ -151,10 +151,7 @@ def test_definition_has_no_old_format_fields(defn: dict[str, Any]) -> None:
 @pytest.mark.parametrize("defn", DEFINITIONS, ids=_def_id)
 def test_definition_service_block_is_valid(defn: dict[str, Any]) -> None:
     """If service: is present, it must have stack, source, and command."""
-    parsed = defn["parsed"]
-    inner: dict[str, Any] = (
-        parsed.get(defn["type"], {}) if isinstance(parsed, dict) else {}
-    )
+    inner = _inner(defn)
     service = inner.get("service")
 
     if service is None:
@@ -170,10 +167,7 @@ def test_definition_service_block_is_valid(defn: dict[str, Any]) -> None:
 @pytest.mark.parametrize("defn", DEFINITIONS, ids=_def_id)
 def test_definition_behaviors_format(defn: dict[str, Any]) -> None:
     """If behaviors: is present, all entries must be single-key {{alias: url}} dicts."""
-    parsed = defn["parsed"]
-    inner: dict[str, Any] = (
-        parsed.get(defn["type"], {}) if isinstance(parsed, dict) else {}
-    )
+    inner = _inner(defn)
     behaviors = inner.get("behaviors")
 
     if not behaviors:
@@ -233,10 +227,7 @@ def test_behavior_definition_parseable(defn: dict[str, Any]) -> None:
 )
 def test_behavior_with_config_has_config_block(defn: dict[str, Any]) -> None:
     """Behaviors that require config must have a non-empty config: block."""
-    parsed = defn["parsed"]
-    inner: dict[str, Any] = (
-        parsed.get("behavior", {}) if isinstance(parsed, dict) else {}
-    )
+    inner = _inner(defn)
     assert "config" in inner, (
         f"Behavior '{defn['ref']}' in {defn['path']} is missing required config: block"
     )
@@ -253,10 +244,7 @@ def test_behavior_with_config_has_config_block(defn: dict[str, Any]) -> None:
 )
 def test_config_keys_are_component_names(defn: dict[str, Any]) -> None:
     """Config block keys must be bare component names (no ref: prefix or colon)."""
-    parsed = defn["parsed"]
-    inner: dict[str, Any] = (
-        parsed.get("behavior", {}) if isinstance(parsed, dict) else {}
-    )
+    inner = _inner(defn)
     config = inner.get("config", {})
 
     if not isinstance(config, dict) or not config:
