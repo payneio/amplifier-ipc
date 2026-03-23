@@ -16,5 +16,5 @@ behavior:
       skills: []
   service:
     stack: uv
-    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-superpowers
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=services/amplifier-superpowers
     command: amplifier-superpowers-serve

@@ -12,5 +12,5 @@ behavior:
       cleanup: true
   service:
     stack: uv
-    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-recipes
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=services/amplifier-recipes
     command: amplifier-recipes-serve

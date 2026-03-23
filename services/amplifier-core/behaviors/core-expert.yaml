@@ -7,5 +7,5 @@ behavior:
   behaviors: []
   service:
     stack: uv
-    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-core
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=services/amplifier-core
     command: amplifier-core-serve

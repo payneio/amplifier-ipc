@@ -16,5 +16,5 @@ agent:
     - routing: https://raw.githubusercontent.com/payneio/amplifier-ipc/main/services/amplifier-routing-matrix/behaviors/routing.yaml
   service:
     stack: uv
-    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-foundation
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=services/amplifier-foundation
     command: amplifier-foundation-serve

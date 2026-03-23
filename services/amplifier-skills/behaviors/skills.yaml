@@ -12,5 +12,5 @@ behavior:
       visibility: full
   service:
     stack: uv
-    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-skills
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=services/amplifier-skills
     command: amplifier-skills-serve

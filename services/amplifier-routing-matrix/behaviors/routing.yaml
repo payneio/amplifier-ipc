@@ -11,5 +11,5 @@ behavior:
       default_matrix: balanced
   service:
     stack: uv
-    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-routing-matrix
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=services/amplifier-routing-matrix
     command: amplifier-routing-matrix-serve

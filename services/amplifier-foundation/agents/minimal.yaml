@@ -15,5 +15,5 @@ agent:
     - sessions: https://raw.githubusercontent.com/payneio/amplifier-ipc/main/services/amplifier-foundation/behaviors/sessions.yaml
   service:
     stack: uv
-    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-foundation
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=services/amplifier-foundation
     command: amplifier-foundation-serve

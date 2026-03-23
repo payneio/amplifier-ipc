@@ -12,5 +12,5 @@ behavior:
       allowed_paths: []
   service:
     stack: uv
-    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=/services/amplifier-filesystem
+    source: git+https://github.com/payneio/amplifier-ipc@main#subdirectory=services/amplifier-filesystem
     command: amplifier-filesystem-serve
