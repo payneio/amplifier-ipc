@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine
@@ -40,7 +41,7 @@ from amplifier_ipc.host.events import (
 )
 from amplifier_ipc.host.lifecycle import ServiceProcess, shutdown_service, spawn_service
 from amplifier_ipc.host.persistence import SessionPersistence
-from amplifier_ipc.host.registry import CapabilityRegistry
+from amplifier_ipc.host.service_index import ServiceIndex
 from amplifier_ipc.host.router import Router
 from amplifier_ipc.host.spawner import (
     SpawnRequest,
@@ -77,14 +78,14 @@ class Host:
         session_dir: Path | None = None,
         service_configs: dict[str, Any] | None = None,
         shared_services: dict[str, Any] | None = None,
-        shared_registry: CapabilityRegistry | None = None,
+        shared_registry: ServiceIndex | None = None,
     ) -> None:
         self._config = config
         self._settings = settings
         self._session_dir = session_dir or (Path.home() / ".amplifier" / "sessions")
 
         # When shared_services/shared_registry are provided (child sessions), the Host
-        # reuses the parent's already-running service processes and capability registry
+        # reuses the parent's already-running service processes and service index
         # rather than spawning new ones.  _owns_services tracks whether teardown is
         # the responsibility of this Host instance.
         self._owns_services: bool = shared_services is None
@@ -96,8 +97,8 @@ class Host:
         # Per-service merged component configs for the configure protocol.
         # Populated from resolved.service_configs via launch_session().
         self._service_configs: dict[str, Any] = service_configs or {}
-        self._registry: CapabilityRegistry = (
-            shared_registry if shared_registry is not None else CapabilityRegistry()
+        self._registry: ServiceIndex = (
+            shared_registry if shared_registry is not None else ServiceIndex()
         )
         self._router: Router | None = None
         self._persistence: SessionPersistence | None = None
@@ -113,6 +114,157 @@ class Host:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Query methods (REPL introspection — callable between turns)
+    # ------------------------------------------------------------------
+
+    def get_tools(self) -> list[dict]:
+        """Return list of registered tools with name and description.
+
+        Reads from the in-process :class:`ServiceIndex` populated after
+        the last ``run()`` call.  Returns an empty list before the first turn.
+        """
+        return [
+            {
+                "name": spec.get("name", ""),
+                "description": spec.get("description", ""),
+            }
+            for spec in self._registry.get_all_tool_specs()
+        ]
+
+    def get_session_info(self) -> dict:
+        """Return current session info: session_id, orchestrator, message_count, etc."""
+        message_count = 0
+        if self._persistence is not None:
+            try:
+                message_count = len(self._persistence.load_transcript())
+            except Exception:  # noqa: BLE001
+                pass
+        return {
+            "session_id": self._session_id,
+            "orchestrator": self._config.orchestrator,
+            "provider": self._config.provider,
+            "context_manager": self._config.context_manager,
+            "services": list(self._config.services),
+            "message_count": message_count,
+            "active_mode": self.get_active_mode(),
+        }
+
+    def get_agents(self) -> list[dict]:
+        """Return list of available agents from the definition registry.
+
+        Reads ``$AMPLIFIER_HOME/agents.yaml``.  Returns an empty list if the
+        file does not exist or cannot be read.
+        """
+        try:
+            import yaml  # noqa: PLC0415
+
+            from amplifier_ipc.host.definition_registry import (  # noqa: PLC0415
+                Registry,
+            )
+
+            reg = Registry()
+            agents_path = reg.home / "agents.yaml"
+            if not agents_path.exists():
+                return []
+            raw = yaml.safe_load(agents_path.read_text(encoding="utf-8")) or {}
+            return [
+                {"name": name, "definition_id": def_id}
+                for name, def_id in raw.items()
+                if isinstance(name, str)
+            ]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def get_active_mode(self) -> str | None:
+        """Return name of active mode, if any, from session state."""
+        active = self._state.get("active_mode")
+        return str(active) if active is not None else None
+
+    def get_available_modes(self) -> list[dict]:
+        """Return list of available modes.
+
+        Checks session state (populated by a modes service) first, then falls
+        back to the ``modes.available`` key in component_config.
+        """
+        # 1. Session state — populated at runtime by the modes service
+        state_modes: list[Any] = self._state.get("available_modes", [])  # type: ignore[assignment]
+        if state_modes:
+            return [{"name": m} if isinstance(m, str) else dict(m) for m in state_modes]
+        # 2. Static component config
+        modes_cfg = self._config.component_config.get("modes", {})
+        if isinstance(modes_cfg, dict):
+            cfg_modes: list[Any] = modes_cfg.get("available", [])
+            if cfg_modes:
+                return [
+                    {"name": m} if isinstance(m, str) else dict(m) for m in cfg_modes
+                ]
+        return []
+
+    async def clear_context(self) -> None:
+        """Clear conversation context via the context manager service.
+
+        If a :class:`Router` is active, sends ``request.context_clear`` to the
+        context manager.  Also removes the persisted transcript so that the
+        next ``run()`` call starts with a fresh context.
+        """
+        if self._router is not None:
+            try:
+                await self._router.route_request("request.context_clear", {})
+            except Exception:  # noqa: BLE001
+                logger.warning("Failed to clear context via router")
+        if self._persistence is not None:
+            try:
+                if self._persistence.transcript_path.exists():
+                    self._persistence.transcript_path.unlink()
+            except Exception:  # noqa: BLE001
+                logger.warning("Failed to remove persisted transcript")
+
+    async def set_mode(self, mode_name: str | None) -> dict:
+        """Set or clear the active mode.
+
+        Persists the value via ``request.state_set`` when a router is
+        available; otherwise writes directly to the in-process state dict.
+
+        Args:
+            mode_name: Mode to activate, or ``None`` to clear the active mode.
+
+        Returns:
+            ``{"ok": True}`` on success.
+        """
+        if self._router is not None:
+            try:
+                result = await self._router.route_request(
+                    "request.state_set",
+                    {"key": "active_mode", "value": mode_name},
+                )
+                return result if isinstance(result, dict) else {"ok": True}
+            except Exception:  # noqa: BLE001
+                pass
+        # Fallback: update in-process state directly
+        self._state["active_mode"] = mode_name
+        if self._persistence is not None:
+            self._persistence.save_state(self._state)
+        return {"ok": True, "mode": mode_name}
+
+    def get_config_summary(self) -> dict:
+        """Return resolved config summary (orchestrator, provider, tools, hooks).
+
+        Useful for displaying the active configuration in the REPL without
+        triggering any IPC calls.
+        """
+        tools = [s.get("name", "") for s in self._registry.get_all_tool_specs()]
+        hooks = [h.get("name", "") for h in self._registry.get_all_hook_descriptors()]
+        return {
+            "orchestrator": self._config.orchestrator,
+            "context_manager": self._config.context_manager,
+            "provider": self._config.provider,
+            "services": list(self._config.services),
+            "tools": tools,
+            "hooks": hooks,
+            "component_config": dict(self._config.component_config),
+        }
 
     @property
     def session_id(self) -> str | None:
@@ -276,12 +428,13 @@ class Host:
 
             # 8. Save state, metadata, and finalize
             self._persistence.save_state(self._state)
-            self._persistence.save_metadata(
-                {
-                    "session_id": session_id,
-                    "prompt": prompt,
-                }
-            )
+            existing_meta: dict[str, Any] = {}
+            try:
+                existing_meta = json.loads(self._persistence.metadata_path.read_text())
+            except Exception:  # noqa: BLE001
+                pass
+            existing_meta.update({"session_id": session_id, "prompt": prompt})
+            self._persistence.save_metadata(existing_meta)
             self._persistence.finalize()
 
         finally:
@@ -292,13 +445,13 @@ class Host:
     # ------------------------------------------------------------------
 
     def _build_spawn_handler(
-        self, session_id: str
+        self, session_id: str, current_depth: int = 0
     ) -> Callable[[Any], Coroutine[Any, Any, Any]]:
         """Build and return the async ``_handle_spawn`` closure for *session_id*.
 
         The returned coroutine function handles ``request.session_spawn`` by
         building a ``parent_config`` dict populated from the host's resolved
-        configuration and capability registry, then delegating to
+        configuration and service index, then delegating to
         :func:`~amplifier_ipc.host.spawner.spawn_child_session`.
 
         Extracting this into a factory method makes the spawn logic directly
@@ -370,6 +523,7 @@ class Host:
                     settings=self._settings,
                     service_configs=self._service_configs,
                     event_callback=_forward_child_event,
+                    current_depth=current_depth + 1 if agent_name == "self" else 0,
                 )
             finally:
                 self._child_event_queue.put_nowait(
@@ -729,7 +883,7 @@ class Host:
         The IPC protocol server wraps capabilities under a ``capabilities`` key
         and represents content as ``{\"paths\": [...]}`` rather than a flat list.
         This method normalises the nested format into the flat dict expected by
-        :meth:`~amplifier_ipc.host.registry.CapabilityRegistry.register`.
+        :meth:`~amplifier_ipc.host.service_index.ServiceIndex.register`.
 
         If the service has a merged config in ``_service_configs``, a
         ``configure`` call is sent after registration.

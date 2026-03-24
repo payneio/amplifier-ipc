@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib
+import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,8 @@ from amplifier_ipc.protocol.errors import (
 )
 from amplifier_ipc.protocol.framing import read_message, write_message
 from amplifier_ipc.protocol.models import HookAction, HookResult
+
+_log = logging.getLogger(__name__)
 
 
 class Server:
@@ -84,6 +87,10 @@ class Server:
         # Tracks the active orchestrator's IPC client during orchestrator.execute,
         # so tools can use it to make delegate/task calls back to the host.
         self._current_orchestrator_client: Any = None
+
+        # Tracks the orchestrator instance currently running execute() so that
+        # an orchestrator.cancel request can reach it.
+        self._active_orchestrator_instance: Any = None
 
     # ------------------------------------------------------------------
     # Lazy instantiation and configuration
@@ -352,12 +359,14 @@ class Server:
             server=self, ipc_reader=reader, ipc_writer=writer
         )
         self._current_orchestrator_client = client
+        self._active_orchestrator_instance = orch_instance
         try:
             return await orch_instance.execute(
                 prompt=prompt, config=config, client=client
             )
         finally:
             self._current_orchestrator_client = None
+            self._active_orchestrator_instance = None
             # Cancel any background IPC read task started by the local client.
             ipc = client._ipc_client
             if (
@@ -368,6 +377,52 @@ class Server:
                 ipc._read_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await ipc._read_task
+
+    async def _handle_orchestrator_cancel(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Cancel the currently executing orchestrator.
+
+        Looks up the active orchestrator instance (set by
+        :meth:`_handle_orchestrator_execute`) and calls its ``cancel()``
+        method.  If a specific orchestrator name is provided via
+        ``params["orchestrator"]``, that named instance is used instead,
+        so the call also works before execution starts (the cancel flag
+        will be honoured at the top of the next :meth:`execute` call).
+
+        Args:
+            params: Optional dict with an ``orchestrator`` key (name string).
+
+        Returns:
+            ``{"status": "ok"}`` when a ``cancel()``-capable instance was
+            found, or ``{"status": "no_active_orchestrator"}`` otherwise.
+        """
+        self._ensure_instances()
+        orchestrator_name: str | None = params.get("orchestrator")
+
+        if orchestrator_name:
+            # Caller specified a name — find that instance directly.
+            orch_instance = next(
+                (
+                    o
+                    for o in self._orchestrator_instances
+                    if getattr(o, "name", None) == orchestrator_name
+                ),
+                None,
+            )
+        else:
+            # Default to whatever is currently executing.
+            orch_instance = self._active_orchestrator_instance
+
+        if orch_instance is None or not hasattr(orch_instance, "cancel"):
+            return {"status": "no_active_orchestrator"}
+
+        orch_instance.cancel()
+        _log.info(
+            "Orchestrator cancel requested for %r",
+            getattr(orch_instance, "name", type(orch_instance).__name__),
+        )
+        return {"status": "ok"}
 
     # ------------------------------------------------------------------
     # Dispatcher
@@ -399,6 +454,8 @@ class Server:
             return await self._handle_context_clear()
         if method == "provider.complete":
             return await self._handle_provider_complete(params or {})
+        if method == "orchestrator.cancel":
+            return await self._handle_orchestrator_cancel(params or {})
         raise JsonRpcError(METHOD_NOT_FOUND, f"Method not found: {method!r}")
 
     # ------------------------------------------------------------------
@@ -767,10 +824,20 @@ class _OrchestratorLocalClient:
             return await self._server._handle_context_clear()
 
         if method == "request.tool_execute":
-            return await self._server._handle_tool_execute(p)
+            # Check if the tool exists in this service's local registry.
+            # If it does, execute locally (fast path).  If not, forward to the
+            # host via IPC so it can route to the correct external service
+            # (e.g. amplifier-skills provides load_skill, amplifier-modes
+            # provides mode, etc.).
+            tool_name = p.get("name", "")
+            self._server._ensure_instances()
+            if tool_name in self._server._tools:
+                return await self._server._handle_tool_execute(p)
+            # Tool not local — fall through to IPC.
 
         # Any other request (e.g. request.provider_complete, request.state_*,
-        # request.session_spawn) must go through the host via IPC.
+        # request.session_spawn, or external tool calls) must go through the
+        # host via IPC.
         return await self._ipc_request(method, params)
 
     async def send_notification(self, method: str, params: Any = None) -> None:
@@ -801,4 +868,8 @@ class _StdoutWriter:
         self._transport.write(data)  # type: ignore[attr-defined]
 
     async def drain(self) -> None:
-        pass  # stdout transport doesn't need draining
+        # Yield control to the event loop so that consumers (e.g. the CLI
+        # display loop) can process events between writes.  Without this,
+        # a burst of back-to-back notifications starves the reader task and
+        # the user sees all output batched at the end.
+        await asyncio.sleep(0)

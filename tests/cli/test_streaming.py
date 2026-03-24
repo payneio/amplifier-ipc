@@ -449,7 +449,7 @@ class TestChildSessionStartEvent:
 
         output = buf.getvalue()
         assert "explorer" in output
-        assert "\u2699" in output  # ⚙ gear icon
+        assert "\U0001f527" in output  # 🔧 wrench icon
 
 
 class TestChildSessionEventUnwraps:
@@ -510,7 +510,7 @@ class TestToolCallStartShowsGearIcon:
 
         output = buf.getvalue()
         assert "bash" in output
-        assert "\u2699" in output  # ⚙ gear icon
+        assert "\U0001f527" in output  # 🔧 wrench icon
 
 
 # ---------------------------------------------------------------------------
@@ -533,7 +533,7 @@ class TestChildSessionStartRendersDelegateHeader:
 
         output = buf.getvalue()
         assert "explorer" in output
-        assert "delegate" in output and "\u2699" in output  # ⚙ gear icon
+        assert "delegate" in output and "\U0001f527" in output  # 🔧 wrench icon
 
 
 class TestChildSessionEventIndentsInner:
