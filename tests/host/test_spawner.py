@@ -418,13 +418,13 @@ async def test_spawn_child_session_recent_depth_requires_context_turns() -> None
 async def test_run_child_session_passes_shared_services_to_host() -> None:
     """_run_child_session forwards shared_services and shared_registry to Host."""
     from amplifier_ipc.host.events import CompleteEvent
-    from amplifier_ipc.host.registry import CapabilityRegistry
+    from amplifier_ipc.host.service_index import ServiceIndex
 
     async def mock_run(prompt: str):  # type: ignore[return]
         yield CompleteEvent(result="done")
 
     shared_svcs = {"svc": object()}
-    shared_reg = CapabilityRegistry()
+    shared_reg = ServiceIndex()
 
     with patch("amplifier_ipc.host.host.Host") as MockHost:
         mock_instance = MagicMock()

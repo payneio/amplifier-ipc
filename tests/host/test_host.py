@@ -16,7 +16,7 @@ from amplifier_ipc.host.events import (
     StreamTokenEvent,
 )
 from amplifier_ipc.host.host import Host
-from amplifier_ipc.host.registry import CapabilityRegistry
+from amplifier_ipc.host.service_index import ServiceIndex
 from amplifier_ipc.host.router import Router
 
 
@@ -102,7 +102,7 @@ async def test_host_build_registry() -> None:
 
 async def test_host_route_orchestrator_message() -> None:
     """_handle_orchestrator_request delegates to Router.route_request."""
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register(
         "foundation",
         {
@@ -284,7 +284,7 @@ async def test_orchestrator_loop_yields_stream_events() -> None:
 
 async def test_host_routes_session_spawn_to_spawner() -> None:
     """_handle_orchestrator_request routes request.session_spawn to the spawn handler."""
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register(
         "foundation",
         {
@@ -353,7 +353,7 @@ async def test_host_spawn_handler_passes_parent_config() -> None:
 
     from amplifier_ipc.host.spawner import SpawnRequest
 
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register(
         "foundation",
         {
@@ -442,7 +442,7 @@ async def test_host_resume_handler_wired() -> None:
         child_persistence.append_message({"role": "user", "content": "Old question"})
         child_persistence.append_message({"role": "assistant", "content": "Old answer"})
 
-        registry = CapabilityRegistry()
+        registry = ServiceIndex()
         registry.register(
             "foundation",
             {
@@ -1161,7 +1161,7 @@ async def test_build_spawn_handler_provides_event_callback() -> None:
     )
     from amplifier_ipc.host.spawner import SpawnRequest
 
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register(
         "foundation",
         {

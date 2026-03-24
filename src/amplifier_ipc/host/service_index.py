@@ -1,13 +1,13 @@
-"""Capability registry — routing table built from service describe responses."""
+"""Service index — routing table built from service describe responses."""
 
 from __future__ import annotations
 
 
-class CapabilityRegistry:
-    """Maps capability names to the services that provide them.
+class ServiceIndex:
+    """Maps component names to the services that provide them.
 
     Built by calling :meth:`register` once per service with the result of that
-    service's ``describe`` response.  The registry can then be queried to
+    service's ``describe`` response.  The index can then be queried to
     determine which service should handle a given tool call, hook event,
     orchestrator request, etc.
     """
@@ -27,7 +27,7 @@ class CapabilityRegistry:
     # ------------------------------------------------------------------
 
     def register(self, service_key: str, describe_result: dict) -> None:
-        """Index all capabilities advertised by *service_key*.
+        """Index all components advertised by *service_key*.
 
         Args:
             service_key: Stable identifier for the service (e.g. ``"foundation"``).
@@ -161,7 +161,7 @@ class CapabilityRegistry:
         return self._provider_to_service.get(name)
 
     def get_content_services(self) -> dict[str, list[str]]:
-        """Return a mapping of service_key → list of content paths."""
+        """Return a mapping of service_key -> list of content paths."""
         return dict(self._content_by_service)
 
     def get_all_tool_specs(self) -> list[dict]:
@@ -171,3 +171,13 @@ class CapabilityRegistry:
     def get_all_hook_descriptors(self) -> list[dict]:
         """Return all hook descriptors accumulated across all registered services."""
         return list(self._all_hook_descriptors)
+
+    def get_providers_by_priority(self) -> list[dict]:
+        """Return all registered providers as ``[{"name": ...}]``.
+
+        Since the index does not track per-provider priority, the providers
+        are returned in insertion order (which is also the order they were
+        discovered from ``describe`` responses).  Qualified names (containing
+        ``:``) are excluded so that each logical provider appears only once.
+        """
+        return [{"name": name} for name in self._provider_to_service if ":" not in name]

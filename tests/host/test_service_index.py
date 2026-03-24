@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from amplifier_ipc.host.registry import CapabilityRegistry
+from amplifier_ipc.host.service_index import ServiceIndex
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +66,7 @@ def _modes_describe() -> dict:
 
 
 def test_register_and_lookup_tool() -> None:
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register("foundation", _foundation_describe())
 
     assert registry.get_tool_service("bash") == "foundation"
@@ -74,14 +74,14 @@ def test_register_and_lookup_tool() -> None:
 
 
 def test_lookup_unknown_tool() -> None:
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register("foundation", _foundation_describe())
 
     assert registry.get_tool_service("nonexistent") is None
 
 
 def test_register_and_lookup_hook_services() -> None:
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register("foundation", _foundation_describe())
     registry.register("modes", _modes_describe())
 
@@ -104,28 +104,28 @@ def test_register_and_lookup_hook_services() -> None:
 
 
 def test_lookup_hooks_unknown_event() -> None:
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register("foundation", _foundation_describe())
 
     assert registry.get_hook_services("unknown:event") == []
 
 
 def test_register_and_lookup_orchestrator() -> None:
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register("foundation", _foundation_describe())
 
     assert registry.get_orchestrator_service("streaming") == "foundation"
 
 
 def test_register_and_lookup_context_manager() -> None:
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register("foundation", _foundation_describe())
 
     assert registry.get_context_manager_service("simple") == "foundation"
 
 
 def test_register_and_lookup_provider() -> None:
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register("providers", _providers_describe())
 
     assert registry.get_provider_service("anthropic") == "providers"
@@ -133,7 +133,7 @@ def test_register_and_lookup_provider() -> None:
 
 
 def test_get_all_tool_specs() -> None:
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register("foundation", _foundation_describe())
     registry.register("modes", _modes_describe())
 
@@ -147,7 +147,7 @@ def test_get_all_tool_specs() -> None:
 
 
 def test_get_all_hook_descriptors() -> None:
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register("foundation", _foundation_describe())
     registry.register("modes", _modes_describe())
 
@@ -161,7 +161,7 @@ def test_get_all_hook_descriptors() -> None:
 
 
 def test_get_content_services() -> None:
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register("foundation", _foundation_describe())
     registry.register("modes", _modes_describe())
 
@@ -172,7 +172,7 @@ def test_get_content_services() -> None:
 
 
 def test_lookup_unknown_provider() -> None:
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register("providers", _providers_describe())
 
     assert registry.get_provider_service("unknown-provider") is None

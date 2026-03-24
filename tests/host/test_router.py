@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from amplifier_ipc.host.registry import CapabilityRegistry
+from amplifier_ipc.host.service_index import ServiceIndex
 from amplifier_ipc.host.router import Router
 from amplifier_ipc.protocol.errors import INVALID_PARAMS, METHOD_NOT_FOUND, JsonRpcError
 
@@ -47,7 +47,7 @@ def _build_router_with_two_services(
     provider_responses: dict[str, Any] | None = None,
 ) -> tuple[Router, FakeClient, FakeClient]:
     """Build a Router with foundation (tool:bash, hook:approval) and providers services."""
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register(
         "foundation",
         {
@@ -227,7 +227,7 @@ async def test_route_provider_complete_includes_provider_name() -> None:
     backend (e.g. 'anthropic' vs 'openai' vs 'azure_openai').
     """
     completion = {"content": "Hello from Anthropic"}
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register(
         "providers",
         {
@@ -287,8 +287,10 @@ async def test_route_provider_complete_with_content_blocks() -> None:
     assert len(provider_client.calls) == 1
     method, call_params = provider_client.calls[0]
     assert method == "provider.complete"
-    # All params forwarded to provider unchanged
-    assert call_params == params
+    # The router injects "provider" into the forwarded params when the
+    # caller did not supply one (so the service knows which backend to use).
+    expected_params = {**params, "provider": "anthropic"}
+    assert call_params == expected_params
 
 
 async def test_route_unknown_method() -> None:
@@ -304,7 +306,7 @@ async def test_route_unknown_method() -> None:
 
 async def test_hook_fanout_deny_short_circuits() -> None:
     """DENY from first hook prevents second hook from being called."""
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register(
         "service_a",
         {
@@ -499,7 +501,7 @@ async def test_provider_streaming_notifications_relayed() -> None:
             self.notification_during_call = self.on_notification
             return await super().request(method, params)
 
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register(
         "providers",
         {

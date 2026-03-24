@@ -39,7 +39,7 @@ from amplifier_ipc.host.events import (
 from amplifier_ipc.host.host import Host
 from amplifier_ipc.host.lifecycle import ServiceProcess, shutdown_service, spawn_service
 from amplifier_ipc.host.persistence import SessionPersistence
-from amplifier_ipc.host.registry import CapabilityRegistry
+from amplifier_ipc.host.service_index import ServiceIndex
 from amplifier_ipc.host.router import Router
 from amplifier_ipc.host.spawner import (
     SpawnRequest,
@@ -91,7 +91,7 @@ __all__ = [
     "parse_behavior_definition",
     "resolve_agent",
     # Registry
-    "CapabilityRegistry",
+    "ServiceIndex",
     # Router
     "Router",
     # Content

@@ -1,4 +1,4 @@
-"""Integration tests: full stack from CLI definition resolution to Host capability registry.
+"""Integration tests: full stack from CLI definition resolution to Host service index.
 
 Proves the end-to-end data flow:
   definition resolution -> SessionConfig -> Host -> real subprocess service -> registry built.
@@ -183,7 +183,7 @@ agent:
 class TestHostBuildRegistryFromCliDefinitions:
     @pytest.mark.timeout(30)
     def test_host_build_registry_from_cli_definitions(self, tmp_path: Path) -> None:
-        """Full stack: CLI definitions produce a working Host that builds capability registry.
+        """Full stack: CLI definitions produce a working Host that builds service index.
 
         Proves:
           - Registry + definition resolution produces a valid SessionConfig
@@ -229,7 +229,7 @@ agent:
             # ── Step 5: Inject subprocess into host (bypasses _spawn_services) ─
             host._services = {"mock_service": service}
 
-            # ── Step 6: Build capability registry from real subprocess ─────────
+            # ── Step 6: Build service index from real subprocess ─────────
             await host._build_registry()
 
             # ── Step 7: Verify echo tool is correctly attributed ───────────────

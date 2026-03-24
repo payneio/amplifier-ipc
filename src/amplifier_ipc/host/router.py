@@ -7,23 +7,26 @@ based on method name.  Supports:
 * Hook fan-out in priority order, with short-circuit on DENY/ASK_USER and
   data propagation on MODIFY.
 * Context manager operations (add_message, get_messages, clear).
-* Provider completion.
+* Provider completion with priority-based fallback.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from amplifier_ipc.host.registry import CapabilityRegistry
+from amplifier_ipc.host.service_index import ServiceIndex
 from amplifier_ipc.protocol.errors import INVALID_PARAMS, METHOD_NOT_FOUND, JsonRpcError
+
+logger = logging.getLogger(__name__)
 
 
 class Router:
     """Routes orchestrator JSON-RPC requests to the appropriate service.
 
     Args:
-        registry: Capability registry mapping capability names to service keys.
+        registry: Service index mapping component names to service keys.
         services: Dict of service_key → service object (must have a ``.client``
             with an async ``request(method, params)`` method).
         context_manager_key: Key in *services* for the context manager service.
@@ -39,7 +42,7 @@ class Router:
 
     def __init__(
         self,
-        registry: CapabilityRegistry,
+        registry: ServiceIndex,
         services: dict[str, Any],
         context_manager_key: str,
         provider_key: str,
@@ -95,28 +98,7 @@ class Router:
             )
 
         if method == "request.provider_complete":
-            provider_client = self._services[self._provider_key].client
-            prev_callback = getattr(provider_client, "on_notification", None)
-            # Inject the configured provider name so the service selects the
-            # correct backend (e.g. "anthropic" instead of the first discovered).
-            provider_params: dict[str, Any] = (
-                dict(params) if isinstance(params, dict) else {}
-            )
-            if self._provider_name and "provider" not in provider_params:
-                # Strip the service qualifier if present (e.g.
-                # "providers:anthropic" → "anthropic") since the service
-                # only knows bare component names.
-                name = self._provider_name
-                if ":" in name:
-                    name = name.partition(":")[2]
-                provider_params["provider"] = name
-            try:
-                provider_client.on_notification = self._on_provider_notification
-                return await provider_client.request(
-                    "provider.complete", provider_params
-                )
-            finally:
-                provider_client.on_notification = prev_callback
+            return await self._route_provider_complete(params)
 
         if method == "request.state_get":
             key: str | None = params.get("key") if isinstance(params, dict) else None
@@ -155,6 +137,95 @@ class Router:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    async def _route_provider_complete(self, params: Any) -> Any:
+        """Route a provider completion request with priority-based fallback.
+
+        Attempts the configured primary provider first.  If it raises a
+        ``JsonRpcError`` whose code is ``INVALID_PARAMS`` (e.g. missing API
+        key, unknown provider name), falls back to other registered providers
+        in priority order.
+
+        Transient errors (rate limits, network timeouts) are NOT retried via
+        fallback — they are raised to the caller so the orchestrator's own
+        retry logic can handle them.
+        """
+        provider_params: dict[str, Any] = (
+            dict(params) if isinstance(params, dict) else {}
+        )
+
+        # Build the ordered list of (provider_name, service_key) to attempt.
+        primary_name = self._provider_name
+        if primary_name and ":" in primary_name:
+            primary_name = primary_name.partition(":")[2]
+
+        # Start with the primary provider, then fallback candidates by priority.
+        candidates: list[tuple[str, str]] = []
+        if primary_name:
+            svc_key = self._registry.get_provider_service(primary_name)
+            if svc_key:
+                candidates.append((primary_name, svc_key))
+
+        for desc in self._registry.get_providers_by_priority():
+            name = desc.get("name", "")
+            if name == primary_name:
+                continue  # already in the list
+            svc_key = self._registry.get_provider_service(name)
+            if svc_key:
+                candidates.append((name, svc_key))
+
+        if not candidates:
+            raise JsonRpcError(
+                code=INVALID_PARAMS,
+                message="No providers registered in any service",
+            )
+
+        last_error: Exception | None = None
+        for provider_name, service_key in candidates:
+            attempt_params = dict(provider_params)
+            if "provider" not in attempt_params:
+                attempt_params["provider"] = provider_name
+
+            provider_client = self._services[service_key].client
+            prev_callback = getattr(provider_client, "on_notification", None)
+            try:
+                provider_client.on_notification = self._on_provider_notification
+                result = await provider_client.request(
+                    "provider.complete", attempt_params
+                )
+                return result
+            except JsonRpcError as exc:
+                last_error = exc
+                # INVALID_PARAMS typically means provider not available (missing
+                # API key, unknown name).  Try the next candidate.
+                if exc.code == INVALID_PARAMS:
+                    logger.warning(
+                        "Provider '%s' unavailable (%s), trying next fallback",
+                        provider_name,
+                        exc.message,
+                    )
+                    continue
+                # Other errors (rate limit, network, server) are not fallback
+                # candidates — re-raise for the orchestrator to handle.
+                raise
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "Provider '%s' raised %s, trying next fallback",
+                    provider_name,
+                    type(exc).__name__,
+                )
+                continue
+            finally:
+                provider_client.on_notification = prev_callback
+
+        # All candidates exhausted
+        if isinstance(last_error, JsonRpcError):
+            raise last_error
+        raise JsonRpcError(
+            code=INVALID_PARAMS,
+            message=f"All providers failed. Last error: {last_error}",
+        )
 
     async def _route_tool_execute(self, params: Any) -> Any:
         """Route a tool execution request to the service that owns the tool.

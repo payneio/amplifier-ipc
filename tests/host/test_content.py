@@ -13,7 +13,7 @@ from amplifier_ipc.host.content import assemble_system_prompt, resolve_mention
 from amplifier_ipc.host.config import HostSettings, SessionConfig
 from amplifier_ipc.host.host import Host
 from amplifier_ipc.host.lifecycle import ServiceProcess, shutdown_service
-from amplifier_ipc.host.registry import CapabilityRegistry
+from amplifier_ipc.host.service_index import ServiceIndex
 from amplifier_ipc.protocol.client import Client
 
 _IPC_SRC = Path(__file__).parent.parent.parent / "src"
@@ -51,7 +51,7 @@ class FakeService:
 # ---------------------------------------------------------------------------
 
 
-def _build_registry_and_services() -> tuple[CapabilityRegistry, dict]:
+def _build_registry_and_services() -> tuple[ServiceIndex, dict]:
     """Create a registry and services dict with foundation and superpowers.
 
     foundation advertises: agents/explorer.md, context/shared/common.md
@@ -65,7 +65,7 @@ def _build_registry_and_services() -> tuple[CapabilityRegistry, dict]:
         "context/philosophy.md": "philosophy content",
     }
 
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register(
         "foundation",
         {
@@ -184,7 +184,7 @@ async def test_assemble_system_prompt_skips_failed_reads() -> None:
         # context/shared/common.md intentionally absent → FakeClient raises KeyError
     }
 
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register(
         "foundation",
         {
@@ -287,7 +287,7 @@ async def test_content_injection_end_to_end(tmp_path: Path) -> None:
     1. A real service subprocess reports context/ and agents/ paths in its
        ``describe`` response (nested ``{"capabilities": {"content": {"paths": [...]}}}``).
     2. ``Host._build_registry()`` normalises the nested format and registers
-       the content paths in the capability registry.
+       the content paths in the service index.
     3. ``assemble_system_prompt()`` fetches only ``context/`` files via
        ``content.read`` RPC—agents/ files are filtered out.
     4. Fetched content is wrapped in ``<context_file>`` XML blocks.

@@ -43,7 +43,7 @@ async def resolve_mention(mention: str, registry: Any, services: dict[str, Any])
 
     Args:
         mention: The mention string, with or without a leading ``@``.
-        registry: A :class:`~amplifier_ipc.host.registry.CapabilityRegistry`
+        registry: A :class:`~amplifier_ipc.host.service_index.ServiceIndex`
             instance used to look up which service owns *namespace*.
         services: Mapping of service key → service object (must expose a
             ``.client.request(method, params)`` coroutine).
@@ -88,7 +88,7 @@ async def assemble_system_prompt(
     ``<context_file>`` block.
 
     Args:
-        registry: Capability registry mapping service keys to their content paths.
+        registry: Service index mapping service keys to their content paths.
         services: Mapping of service key → service object.
         mentions: Optional list of extra ``@namespace:path`` mentions to resolve
             and include.

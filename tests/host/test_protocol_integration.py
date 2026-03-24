@@ -20,7 +20,7 @@ from amplifier_ipc.host.events import (
     StreamTokenEvent,
 )
 from amplifier_ipc.host.host import Host
-from amplifier_ipc.host.registry import CapabilityRegistry
+from amplifier_ipc.host.service_index import ServiceIndex
 from amplifier_ipc.host.router import Router
 
 
@@ -54,7 +54,7 @@ class FakeService:
 
 async def test_state_set_then_get_round_trip() -> None:
     """state.set followed by state.get returns the value through the router."""
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     registry.register(
         "foundation",
         {
@@ -244,7 +244,7 @@ async def test_full_streaming_event_sequence() -> None:
 
 async def test_spawn_handler_receives_correct_params() -> None:
     """request.session_spawn passes all params to spawn handler unchanged."""
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     services: dict[str, Any] = {
         "ctx": FakeService(FakeClient()),
         "prov": FakeService(FakeClient()),
@@ -296,7 +296,7 @@ async def test_spawn_handler_receives_correct_params() -> None:
 
 async def test_state_persists_across_multiple_operations() -> None:
     """Multiple state.set calls accumulate; state.get reads the latest value."""
-    registry = CapabilityRegistry()
+    registry = ServiceIndex()
     services: dict[str, Any] = {
         "ctx": FakeService(FakeClient()),
         "prov": FakeService(FakeClient()),

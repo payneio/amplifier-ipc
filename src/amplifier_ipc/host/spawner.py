@@ -335,7 +335,7 @@ async def _run_child_session(
         service_configs: Optional per-service component config dicts.
         shared_services: Parent's running service processes.  When supplied
             the child Host will not spawn or tear down services.
-        shared_registry: Parent's :class:`~amplifier_ipc.host.registry.CapabilityRegistry`.
+        shared_registry: Parent's :class:`~amplifier_ipc.host.service_index.ServiceIndex`.
             When supplied the child Host skips the ``describe``/``configure``
             discovery phase.
 
@@ -439,7 +439,7 @@ async def spawn_child_session(
         service_configs:   Optional per-service component config dicts.
         shared_services:   Parent's running service processes.  When provided
                            the child Host skips spawning new processes.
-        shared_registry:   Parent's capability registry.  When provided the
+        shared_registry:   Parent's service index.  When provided the
                            child Host skips ``describe``/``configure`` discovery.
 
     Returns:

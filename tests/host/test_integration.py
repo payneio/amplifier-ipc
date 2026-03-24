@@ -17,7 +17,7 @@ from pathlib import Path
 from amplifier_ipc.host.config import HostSettings, SessionConfig
 from amplifier_ipc.host.host import Host
 from amplifier_ipc.host.lifecycle import ServiceProcess, shutdown_service
-from amplifier_ipc.host.registry import CapabilityRegistry
+from amplifier_ipc.host.service_index import ServiceIndex
 from amplifier_ipc.protocol.client import Client
 
 # ---------------------------------------------------------------------------
@@ -175,7 +175,7 @@ async def test_spawn_describe_and_teardown(tmp_path: Path) -> None:
 
 
 async def test_registry_from_real_service(tmp_path: Path) -> None:
-    """Spawn real mock service, build CapabilityRegistry from describe, verify lookups."""
+    """Spawn real mock service, build ServiceIndex from describe, verify lookups."""
     pkg_parent = _create_mock_service_package(tmp_path)
     service = await _spawn_mock_service(pkg_parent)
 
@@ -186,7 +186,7 @@ async def test_registry_from_real_service(tmp_path: Path) -> None:
         describe_result = await client.request("describe")
 
         # Transform server's nested capabilities format into the flat format
-        # that CapabilityRegistry.register() expects
+        # that ServiceIndex.register() expects
         caps = describe_result.get("capabilities", {})
         flat_describe = {
             "tools": caps.get("tools", []),
@@ -197,7 +197,7 @@ async def test_registry_from_real_service(tmp_path: Path) -> None:
             "content": caps.get("content", {}).get("paths", []),
         }
 
-        registry = CapabilityRegistry()
+        registry = ServiceIndex()
         registry.register("mock", flat_describe)
 
         # --- verify registry lookups ---
