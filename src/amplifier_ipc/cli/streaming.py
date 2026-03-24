@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from io import StringIO
+from typing import Any
 
 from rich.console import Console
 
@@ -28,6 +30,20 @@ __all__ = ["StreamingDisplay"]
 # Indentation applied per child-session nesting level.
 _NESTING_INDENT = "    "  # 4 spaces
 
+# Default truncation limits for tool call/result rendering.
+_DEFAULT_TOOL_ARG_VALUE_LEN = 200
+_DEFAULT_TOOL_ARGS_COUNT = 10
+_DEFAULT_TOOL_RESULT_LINES = 10
+_DEFAULT_TOOL_RESULT_LINE_LEN = 200
+_DEFAULT_RESULT_PREVIEW_LEN = 500
+
+# Verbose truncation limits — more generous so full detail is visible.
+_VERBOSE_TOOL_ARG_VALUE_LEN = 2000
+_VERBOSE_TOOL_ARGS_COUNT = 50
+_VERBOSE_TOOL_RESULT_LINES = 50
+_VERBOSE_TOOL_RESULT_LINE_LEN = 500
+_VERBOSE_RESULT_PREVIEW_LEN = 2000
+
 
 class StreamingDisplay:
     """Renders host streaming events to a Rich console.
@@ -36,6 +52,11 @@ class StreamingDisplay:
         console: Rich Console instance for output.
         show_thinking: Whether to render StreamThinkingEvent text (default True).
         show_token_usage: Whether to display token usage information (default True).
+        trace_mode: If True, accumulate tool call and delegation trace entries
+            alongside normal rendering.  Access results via :attr:`trace` and
+            :attr:`trace_metadata` after the run completes (default False).
+        verbose: If True, expand truncation limits for tool arguments and
+            results, and show additional session lifecycle detail (default False).
     """
 
     def __init__(
@@ -43,14 +64,37 @@ class StreamingDisplay:
         console: Console,
         show_thinking: bool = True,
         show_token_usage: bool = True,
+        trace_mode: bool = False,
+        verbose: bool = False,
     ) -> None:
         self._console = console
         self._show_thinking = show_thinking
         self._show_token_usage = (
             show_token_usage  # reserved for future token-usage rendering
         )
+        self._trace_mode = trace_mode
+        self._verbose = verbose
         self._response: str | None = None
         self._in_thinking_block: bool = False
+
+        # ------------------------------------------------------------------
+        # Trace accumulation state (populated when trace_mode=True)
+        # ------------------------------------------------------------------
+        self._trace: list[dict[str, Any]] = []
+        self._start_time: float = time.monotonic()
+
+        # Pending tool call: set by ToolCallEvent, consumed by ToolResultEvent.
+        self._pending_tool_name: str | None = None
+        self._pending_tool_args: dict[str, Any] = {}
+        self._pending_tool_start: float | None = None
+
+        # Pending delegations keyed by session_id.
+        # Value: (agent_name, instruction_preview, monotonic start time)
+        self._pending_delegations: dict[str, tuple[str, str, float]] = {}
+
+        # Running totals for metadata
+        self._tool_call_count: int = 0
+        self._delegation_count: int = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -61,12 +105,55 @@ class StreamingDisplay:
         """The final response text from the most recent CompleteEvent, or None."""
         return self._response
 
+    @property
+    def trace(self) -> list[dict[str, Any]]:
+        """Accumulated execution trace entries.
+
+        Each entry is a dict with at minimum a ``"type"`` key.  Populated only
+        when ``trace_mode=True``.
+
+        Tool call entry shape::
+
+            {
+                "type": "tool_call",
+                "tool": "<tool_name>",
+                "args": {<arguments>},
+                "result_preview": "<truncated output>",
+                "duration_ms": <int>,
+            }
+
+        Delegation entry shape::
+
+            {
+                "type": "delegation",
+                "agent": "<agent_name>",
+                "instruction_preview": "<empty — not available in events>",
+                "duration_ms": <int>,
+            }
+        """
+        return list(self._trace)
+
+    @property
+    def trace_metadata(self) -> dict[str, Any]:
+        """Summary metadata for the current execution.
+
+        Returns a dict with ``total_tool_calls``, ``total_delegations``, and
+        ``duration_ms`` (elapsed milliseconds since this :class:`StreamingDisplay`
+        was constructed).
+        """
+        duration_ms = int((time.monotonic() - self._start_time) * 1000)
+        return {
+            "total_tool_calls": self._tool_call_count,
+            "total_delegations": self._delegation_count,
+            "duration_ms": duration_ms,
+        }
+
     def handle_event(self, event: HostEvent) -> None:
         """Dispatch a host event to the appropriate handler."""
         if isinstance(event, ChildSessionStartEvent):
             self._handle_child_session_start(event)
         elif isinstance(event, ChildSessionEndEvent):
-            pass  # silent
+            self._handle_child_session_end(event)
         elif isinstance(event, ChildSessionEvent):
             self._handle_child_session_event(event)
         elif isinstance(event, StreamTokenEvent):
@@ -120,16 +207,36 @@ class StreamingDisplay:
 
     def _handle_tool_call_start(self, event: StreamToolCallStartEvent) -> None:
         """Print the tool name for a tool call start event."""
-        self._console.print(f"\n[dim]\u2699 {event.tool_name}[/dim]")
+        self._console.print(f"\n[dim]\U0001f527 {event.tool_name}[/dim]")
+        self._saw_tool_call_start = True
 
     def _handle_tool_call(self, event: ToolCallEvent) -> None:
-        """Print tool name header and YAML-formatted arguments."""
-        self._console.print(f"\n\u2699 [bold]{event.tool_name}[/bold]")
+        """Print tool call arguments.
+
+        If a preceding ``StreamToolCallStartEvent`` already printed the tool
+        name, we skip the header to avoid duplicate display.  When no start
+        event was received (e.g. non-streaming execution), we still show the
+        full header.
+        """
+        if not getattr(self, "_saw_tool_call_start", False):
+            # No start event preceded this \u2014 show the tool name header.
+            self._console.print(f"\n\U0001f527 [bold]{event.tool_name}[/bold]")
+        self._saw_tool_call_start = False
+
+        arg_value_len = (
+            _VERBOSE_TOOL_ARG_VALUE_LEN
+            if self._verbose
+            else _DEFAULT_TOOL_ARG_VALUE_LEN
+        )
+        args_count = (
+            _VERBOSE_TOOL_ARGS_COUNT if self._verbose else _DEFAULT_TOOL_ARGS_COUNT
+        )
+
         items = list(event.arguments.items())
-        display_items = items[:10]
+        display_items = items[:args_count]
         remaining = len(items) - len(display_items)
         for key, value in display_items:
-            truncated = str(value)[:200]
+            truncated = str(value)[:arg_value_len]
             self._console.print(
                 f"   [dim]{key}:[/dim] {truncated}",
                 markup=True,
@@ -137,6 +244,12 @@ class StreamingDisplay:
             )
         if remaining > 0:
             self._console.print(f"   [dim]... ({remaining} more)[/dim]")
+
+        # Record start time and arguments for trace
+        if self._trace_mode:
+            self._pending_tool_name = event.tool_name
+            self._pending_tool_args = dict(event.arguments)
+            self._pending_tool_start = time.monotonic()
 
     def _handle_tool_result(self, event: ToolResultEvent) -> None:
         """Print tool result with success/failure icon and truncated output."""
@@ -147,12 +260,25 @@ class StreamingDisplay:
             icon = "\u274c"
             style = "red"
         self._console.print(f"{icon} {event.tool_name}", style=style, markup=False)
+
+        result_lines = (
+            _VERBOSE_TOOL_RESULT_LINES if self._verbose else _DEFAULT_TOOL_RESULT_LINES
+        )
+        result_line_len = (
+            _VERBOSE_TOOL_RESULT_LINE_LEN
+            if self._verbose
+            else _DEFAULT_TOOL_RESULT_LINE_LEN
+        )
+
         lines = event.output.split("\n")
-        display_lines = lines[:10]
+        display_lines = lines[:result_lines]
         remaining = len(lines) - len(display_lines)
         for line in display_lines:
             self._console.print(
-                f"   {line[:200]}", style="dim", markup=False, highlight=False
+                f"   {line[:result_line_len]}",
+                style="dim",
+                markup=False,
+                highlight=False,
             )
         if remaining > 0:
             self._console.print(
@@ -161,6 +287,29 @@ class StreamingDisplay:
                 markup=False,
                 highlight=False,
             )
+
+        # Complete the pending trace entry
+        if self._trace_mode and self._pending_tool_start is not None:
+            duration_ms = int((time.monotonic() - self._pending_tool_start) * 1000)
+            preview_len = (
+                _VERBOSE_RESULT_PREVIEW_LEN
+                if self._verbose
+                else _DEFAULT_RESULT_PREVIEW_LEN
+            )
+            self._trace.append(
+                {
+                    "type": "tool_call",
+                    "tool": event.tool_name,
+                    "args": self._pending_tool_args,
+                    "result_preview": event.output[:preview_len],
+                    "duration_ms": duration_ms,
+                }
+            )
+            self._tool_call_count += 1
+            # Reset pending state
+            self._pending_tool_name = None
+            self._pending_tool_args = {}
+            self._pending_tool_start = None
 
     def _handle_todo_update(self, event: TodoUpdateEvent) -> None:
         """Print a bordered todo list box with status symbols and a progress bar."""
@@ -251,11 +400,39 @@ class StreamingDisplay:
     # ------------------------------------------------------------------
 
     def _handle_child_session_start(self, event: ChildSessionStartEvent) -> None:
-        """Print gear icon and delegate header with agent name in bold cyan."""
+        """Print gear icon and delegate header; record delegation start for trace."""
         indent = _NESTING_INDENT * (event.depth - 1)
         self._console.print(
-            f"{indent}\u2699 [bold cyan]delegate -> {event.agent_name}[/bold cyan]"
+            f"{indent}\U0001f527 [bold cyan]delegate -> {event.agent_name}[/bold cyan]"
         )
+        if self._verbose:
+            self._console.print(f"{indent}  [dim]session_id: {event.session_id}[/dim]")
+        if self._trace_mode:
+            # ChildSessionStartEvent has no instruction field — use empty preview.
+            self._pending_delegations[event.session_id] = (
+                event.agent_name,
+                "",
+                time.monotonic(),
+            )
+
+    def _handle_child_session_end(self, event: ChildSessionEndEvent) -> None:
+        """Complete a delegation trace entry when the child session ends."""
+        if not self._trace_mode:
+            return
+
+        start_info = self._pending_delegations.pop(event.session_id, None)
+        if start_info is not None:
+            agent_name, instruction_preview, start_time = start_info
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            self._trace.append(
+                {
+                    "type": "delegation",
+                    "agent": agent_name,
+                    "instruction_preview": instruction_preview,
+                    "duration_ms": duration_ms,
+                }
+            )
+            self._delegation_count += 1
 
     def _handle_child_session_event(self, event: ChildSessionEvent) -> None:
         """Render inner event with nesting indentation using an isolated buffer."""
@@ -269,8 +446,15 @@ class StreamingDisplay:
             console=inner_console,
             show_thinking=self._show_thinking,
             show_token_usage=self._show_token_usage,
+            trace_mode=self._trace_mode,
+            verbose=self._verbose,
         )
         inner_display.handle_event(event.inner)
+
+        if self._trace_mode:
+            self._trace.extend(inner_display.trace)
+            self._tool_call_count += inner_display._tool_call_count
+            self._delegation_count += inner_display._delegation_count
 
         inner_output = inner_buf.getvalue()
         indent = _NESTING_INDENT * event.depth
