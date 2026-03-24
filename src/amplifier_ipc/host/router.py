@@ -234,9 +234,7 @@ class Router:
             JsonRpcError: With ``INVALID_PARAMS`` if the tool is not found in
                 the registry.
         """
-        tool_name: str | None = (
-            params.get("tool_name") if isinstance(params, dict) else None
-        )
+        tool_name: str | None = params.get("name") if isinstance(params, dict) else None
         service_key = (
             self._registry.get_tool_service(tool_name)
             if tool_name is not None

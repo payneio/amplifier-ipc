@@ -102,14 +102,14 @@ async def test_route_tool_execute() -> None:
 
     result = await router.route_request(
         "request.tool_execute",
-        {"tool_name": "bash", "arguments": {"command": "echo hello"}},
+        {"name": "bash", "arguments": {"command": "echo hello"}},
     )
 
     assert result == {"output": "hello world"}
     assert len(foundation_client.calls) == 1
     method, params = foundation_client.calls[0]
     assert method == "tool.execute"
-    assert params["tool_name"] == "bash"
+    assert params["name"] == "bash"
 
 
 async def test_route_tool_execute_unknown_tool() -> None:
@@ -119,7 +119,7 @@ async def test_route_tool_execute_unknown_tool() -> None:
     with pytest.raises(JsonRpcError) as exc_info:
         await router.route_request(
             "request.tool_execute",
-            {"tool_name": "nonexistent", "arguments": {}},
+            {"name": "nonexistent", "arguments": {}},
         )
 
     assert exc_info.value.code == INVALID_PARAMS

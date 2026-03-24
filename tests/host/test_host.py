@@ -145,13 +145,13 @@ async def test_host_route_orchestrator_message() -> None:
 
     result = await host._handle_orchestrator_request(
         "request.tool_execute",
-        {"tool_name": "bash", "arguments": {"command": "echo hello"}},
+        {"name": "bash", "arguments": {"command": "echo hello"}},
     )
 
     assert result == {"output": "hello world"}
     assert len(tool_client.calls) == 1
     assert tool_client.calls[0][0] == "tool.execute"
-    assert tool_client.calls[0][1]["tool_name"] == "bash"
+    assert tool_client.calls[0][1]["name"] == "bash"
 
 
 async def test_orchestrator_loop_raises_on_error_response() -> None:
@@ -713,7 +713,9 @@ async def test_host_resume_loads_previous_transcript() -> None:
         # Create a previous session with a transcript and state
         prev_session_id = "prev-session-abc"
         prev_persistence = SessionPersistence(prev_session_id, session_dir)
-        prev_persistence.append_message({"message": {"role": "user", "content": "Hello"}})
+        prev_persistence.append_message(
+            {"message": {"role": "user", "content": "Hello"}}
+        )
         prev_persistence.append_message(
             {"message": {"role": "assistant", "content": "Hi there!"}}
         )
@@ -1406,9 +1408,9 @@ async def test_run_replays_transcript_on_second_turn(tmp_path: Any) -> None:
             events.append(event)
 
     # Verify that the context manager received the replayed messages
-    add_calls = [
-        (m, p) for m, p in ctx_client.calls if m == "context.add_message"
-    ]
-    assert len(add_calls) == 2, f"Expected 2 replay calls, got {len(add_calls)}: {add_calls}"
+    add_calls = [(m, p) for m, p in ctx_client.calls if m == "context.add_message"]
+    assert len(add_calls) == 2, (
+        f"Expected 2 replay calls, got {len(add_calls)}: {add_calls}"
+    )
     assert add_calls[0][1] == {"message": {"role": "user", "content": "Hello!"}}
     assert add_calls[1][1] == {"message": {"role": "assistant", "content": "Hi there!"}}

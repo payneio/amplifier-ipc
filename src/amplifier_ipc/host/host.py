@@ -79,10 +79,12 @@ class Host:
         service_configs: dict[str, Any] | None = None,
         shared_services: dict[str, Any] | None = None,
         shared_registry: ServiceIndex | None = None,
+        spawn_depth: int = 0,
     ) -> None:
         self._config = config
         self._settings = settings
         self._session_dir = session_dir or (Path.home() / ".amplifier" / "sessions")
+        self._spawn_depth = spawn_depth
 
         # When shared_services/shared_registry are provided (child sessions), the Host
         # reuses the parent's already-running service processes and service index
@@ -368,7 +370,7 @@ class Host:
                 if method.startswith("stream.provider."):
                     self._provider_notification_queue.put_nowait(msg)
 
-            _handle_spawn = self._build_spawn_handler(session_id)
+            _handle_spawn = self._build_spawn_handler(session_id, self._spawn_depth)
             _handle_resume = self._build_resume_handler(session_id)
 
             self._router = Router(
@@ -523,7 +525,7 @@ class Host:
                     settings=self._settings,
                     service_configs=self._service_configs,
                     event_callback=_forward_child_event,
-                    current_depth=current_depth + 1 if agent_name == "self" else 0,
+                    current_depth=current_depth,
                 )
             finally:
                 self._child_event_queue.put_nowait(

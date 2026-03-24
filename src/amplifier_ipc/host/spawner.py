@@ -314,6 +314,7 @@ async def _run_child_session(
     shared_services: dict[str, Any] | None = None,
     shared_registry: Any | None = None,
     event_callback: Any | None = None,
+    spawn_depth: int = 0,
 ) -> dict[str, Any]:
     """Execute a child session by creating and running a child Host.
 
@@ -378,6 +379,7 @@ async def _run_child_session(
         service_configs=service_configs,
         shared_services=shared_services,
         shared_registry=shared_registry,
+        spawn_depth=spawn_depth,
     )
 
     # 4. Run the host, iterating async events, collecting CompleteEvent response
@@ -487,7 +489,9 @@ async def spawn_child_session(
     else:
         instruction = request.instruction
 
-    # 7. Execute child session
+    # 7. Execute child session — propagate depth so the child Host
+    #    enforces the self-delegation limit at the correct nesting level.
+    child_depth = current_depth + 1 if request.agent == "self" else 0
     return await _run_child_session(
         child_session_id,
         child_config,
@@ -498,4 +502,5 @@ async def spawn_child_session(
         shared_services=shared_services,
         shared_registry=shared_registry,
         event_callback=event_callback,
+        spawn_depth=child_depth,
     )
