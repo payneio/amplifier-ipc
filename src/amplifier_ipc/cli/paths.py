@@ -18,12 +18,44 @@ def is_running_from_home() -> bool:
 def get_project_slug() -> str:
     """Return the project slug for the current working directory.
 
-    Returns 'global' when running from the home directory, otherwise returns
-    the name of the current directory.
+    Returns 'global' when running from the home directory.
+
+    The slug encodes the full path relative to the user's home directory to
+    avoid collisions between projects that happen to share the same directory
+    name (e.g. ``~/work/myproject`` and ``~/personal/myproject`` both used to
+    produce "myproject").
+
+    New scheme
+    ----------
+    Replace the home prefix with ``~``, then replace each ``/`` with ``--``:
+
+        ~/work/myproject  →  ~--work--myproject
+
+    Backward compatibility
+    ----------------------
+    If a project directory already exists using the old scheme (just
+    ``cwd.name``), that slug is returned unchanged so existing sessions and
+    history are not orphaned.
     """
     if is_running_from_home():
         return "global"
-    return Path.cwd().name
+
+    cwd = Path.cwd()
+    home = Path.home()
+
+    # Backward compat: if the old-style directory exists, keep using it.
+    old_slug = cwd.name
+    projects_base = get_projects_base_dir()
+    if (projects_base / old_slug).exists():
+        return old_slug
+
+    # New scheme: tilde-relative path with "/" → "--" substitution.
+    try:
+        rel = cwd.relative_to(home)
+        return "~--" + str(rel).replace("/", "--")
+    except ValueError:
+        # cwd is not under home — fall back to bare directory name.
+        return cwd.name
 
 
 def get_projects_base_dir() -> Path:
