@@ -12,6 +12,7 @@ from amplifier_ipc.cli.commands.init_cmd import init_cmd
 from amplifier_ipc.cli.commands.install import install
 from amplifier_ipc.cli.commands.notify import notify_group
 from amplifier_ipc.cli.commands.provider import provider_group
+from amplifier_ipc.cli.commands.refresh import refresh
 from amplifier_ipc.cli.commands.register import register
 from amplifier_ipc.cli.commands.reset import reset_cmd
 from amplifier_ipc.cli.commands.tool import tool
@@ -41,6 +42,7 @@ cli.add_command(install)
 cli.add_command(unregister)
 cli.add_command(uninstall)
 cli.add_command(update)
+cli.add_command(refresh)
 cli.add_command(session_group)
 cli.add_command(agents)
 cli.add_command(tool)
