@@ -14,8 +14,14 @@ All three live in a single package (`amplifier-ipc`) with sub-packages at
 
 Sessions:
 
-- bb782c99
-- 6b596d62: Merged packages. Wrote all def files. Migrated providers. Spawning fixes. CLI UX.
+- Amplifier-lite sessions:
+  - a7006245: Architectural brainstorming session:
+  - bf19db24: Building session
+  - 3ab4d8ff
+  - cb8ec124: Redesigned to "packages for everything", reworked conversion
+- Amplifier IPC sessions:
+  - bb782c99
+  - 6b596d62: Merged packages. Wrote all def files. Migrated providers. Spawning fixes. CLI UX.
 
 ## Usage
 

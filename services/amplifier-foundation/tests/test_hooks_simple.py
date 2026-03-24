@@ -24,7 +24,7 @@ def all_hooks() -> list:
 @pytest.fixture(scope="module")
 def hooks_by_name(all_hooks) -> dict:
     """Map hook instances by class name for convenient lookup."""
-    return {type(h).__name__: h for h in all_hooks}
+    return {h.__name__: h() for h in all_hooks}
 
 
 # ---------------------------------------------------------------------------

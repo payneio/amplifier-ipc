@@ -15,7 +15,7 @@ def todo_tool():
     tools = components.get("tool", [])
     for t in tools:
         if getattr(t, "name", None) == "todo":
-            return t
+            return t()
     return None
 
 

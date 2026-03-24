@@ -12,7 +12,7 @@ from amplifier_ipc.protocol.discovery import scan_package
 def all_tools() -> dict:
     """Discover all tools via scan_package and return as name->instance dict."""
     components = scan_package("amplifier_foundation")
-    return {getattr(t, "name", None): t for t in components.get("tool", [])}
+    return {getattr(t, "name", None): t() for t in components.get("tool", [])}
 
 
 def test_bash_tool_discovered(all_tools: dict) -> None:

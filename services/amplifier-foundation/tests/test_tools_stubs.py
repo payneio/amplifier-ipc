@@ -19,7 +19,7 @@ STUB_TOOL_NAMES = ["mcp", "recipes", "apply_patch", "python_check", "shadow"]
 def all_tools() -> dict:
     """Discover all tools via scan_package and return as name->instance dict."""
     components = scan_package("amplifier_foundation")
-    return {getattr(t, "name", None): t for t in components.get("tool", [])}
+    return {getattr(t, "name", None): t() for t in components.get("tool", [])}
 
 
 def test_all_stub_tools_discovered(all_tools: dict) -> None:

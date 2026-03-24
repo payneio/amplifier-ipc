@@ -46,7 +46,8 @@ def content_paths() -> list[str]:
 def test_orchestrator_count(components: dict) -> None:
     """Must have exactly 1 orchestrator: streaming."""
     orchestrators = components.get("orchestrator", [])
-    names = [type(o).__name__ for o in orchestrators]
+    # scan_package returns classes (not instances); use cls.__name__ directly.
+    names = [o.__name__ for o in orchestrators]
     assert len(orchestrators) == 1, (
         f"Expected 1 orchestrator, got {len(orchestrators)}: {names}"
     )
@@ -63,7 +64,7 @@ def test_orchestrator_count(components: dict) -> None:
 def test_context_manager_count(components: dict) -> None:
     """Must have exactly 1 context manager: simple."""
     context_managers = components.get("context_manager", [])
-    names = [type(cm).__name__ for cm in context_managers]
+    names = [cm.__name__ for cm in context_managers]
     assert len(context_managers) == 1, (
         f"Expected 1 context_manager, got {len(context_managers)}: {names}"
     )
@@ -95,7 +96,7 @@ EXPECTED_HOOKS = {
 def test_hook_count(components: dict) -> None:
     """Must have exactly 12 hooks."""
     hooks = components.get("hook", [])
-    names = [type(h).__name__ for h in hooks]
+    names = [h.__name__ for h in hooks]
     assert len(hooks) == 12, f"Expected exactly 12 hooks, got {len(hooks)}: {names}"
 
 
@@ -142,7 +143,7 @@ REQUIRED_TOOLS = {
 def test_tool_count(components: dict) -> None:
     """Must have >= 14 tools."""
     tools = components.get("tool", [])
-    names = [type(t).__name__ for t in tools]
+    names = [t.__name__ for t in tools]
     assert len(tools) >= 14, f"Expected >= 14 tools, got {len(tools)}: {names}"
 
 

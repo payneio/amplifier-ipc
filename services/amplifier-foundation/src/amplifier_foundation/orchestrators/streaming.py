@@ -37,6 +37,7 @@ PROMPT_SUBMIT = "prompt:submit"
 PROMPT_COMPLETE = "prompt:complete"
 PROVIDER_REQUEST = "provider:request"
 PROVIDER_ERROR = "provider:error"
+PROVIDER_RETRY = "provider:retry"
 TOOL_PRE = "tool:pre"
 TOOL_POST = "tool:post"
 TOOL_ERROR = "tool:error"
@@ -49,6 +50,13 @@ STREAM_TOOL_CALL_START = "stream.tool_call_start"
 STREAM_TOOL_CALL = "stream.tool_call"
 STREAM_TOOL_RESULT = "stream.tool_result"
 STREAM_TODO_UPDATE = "stream.todo_update"
+
+# ---------------------------------------------------------------------------
+# Provider retry configuration
+# ---------------------------------------------------------------------------
+
+_MAX_PROVIDER_RETRIES: int = 3
+_PROVIDER_RETRY_DELAYS: tuple[float, ...] = (1.0, 2.0, 4.0)  # seconds per attempt
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +81,20 @@ class StreamingOrchestrator:
         # will corrupt _pending_ephemeral_injections. One instance per session.
         self._pending_ephemeral_injections: list[dict[str, Any]] = []
         self._last_provider_call_end: float | None = None
+        self._cancelled: bool = False
+
+    # ------------------------------------------------------------------
+    # Cancellation
+    # ------------------------------------------------------------------
+
+    def cancel(self) -> None:
+        """Signal the running execute() loop to stop at the next checkpoint.
+
+        Safe to call from any coroutine.  The loop checks ``_cancelled`` at
+        the top of each iteration and before dispatching tool calls, so
+        cancellation is honoured promptly without aborting mid-tool-execution.
+        """
+        self._cancelled = True
 
     # ------------------------------------------------------------------
     # Public execute entry-point
@@ -96,6 +118,7 @@ class StreamingOrchestrator:
         # Reset per-execute state
         self._pending_ephemeral_injections = []
         self._last_provider_call_end = None
+        self._cancelled = False
 
         # ----------------------------------------------------------------
         # Step 1: emit prompt:submit — check for DENY
@@ -122,9 +145,15 @@ class StreamingOrchestrator:
         # ----------------------------------------------------------------
         iteration = 0
         response_text = ""
+        _was_cancelled = False
 
         while max_iterations == -1 or iteration < max_iterations:
             iteration += 1
+
+            # --- cancellation checkpoint (top of iteration) ---
+            if self._cancelled:
+                _was_cancelled = True
+                break
 
             # --- emit provider:request, check DENY ---
             req_result = await self._hook_emit(
@@ -165,23 +194,71 @@ class StreamingOrchestrator:
                 reasoning_effort=config.get("reasoning_effort"),
             )
 
-            # --- call provider.complete ---
-            try:
-                response_raw = await client.request(
-                    "request.provider_complete",
-                    {"request": chat_request.model_dump()},
-                )
-            except Exception as exc:
-                logger.error("Provider call failed on iteration %d: %s", iteration, exc)
-                await self._hook_emit(
-                    client,
-                    PROVIDER_ERROR,
-                    {
-                        "iteration": iteration,
-                        "error": {"type": type(exc).__name__, "msg": str(exc)},
-                    },
-                )
-                raise
+            # --- call provider.complete (with retry + exponential backoff) ---
+            response_raw: Any = None
+            for _attempt in range(_MAX_PROVIDER_RETRIES + 1):
+                try:
+                    response_raw = await client.request(
+                        "request.provider_complete",
+                        {"request": chat_request.model_dump()},
+                    )
+                    break  # success — exit retry loop
+                except Exception as exc:
+                    # Determine whether the error is retryable.
+                    # Check both a top-level attribute and a nested data dict
+                    # (e.g. JsonRpcError carries error details in .data).
+                    retryable: bool = bool(getattr(exc, "retryable", False))
+                    if not retryable:
+                        exc_data = getattr(exc, "data", None)
+                        if isinstance(exc_data, dict):
+                            retryable = bool(exc_data.get("retryable", False))
+
+                    is_last_attempt = _attempt >= _MAX_PROVIDER_RETRIES
+
+                    if not retryable or is_last_attempt:
+                        logger.error(
+                            "Provider call failed on iteration %d (attempt %d/%d): %s",
+                            iteration,
+                            _attempt + 1,
+                            _MAX_PROVIDER_RETRIES + 1,
+                            exc,
+                        )
+                        await self._hook_emit(
+                            client,
+                            PROVIDER_ERROR,
+                            {
+                                "iteration": iteration,
+                                "error": {
+                                    "type": type(exc).__name__,
+                                    "msg": str(exc),
+                                },
+                            },
+                        )
+                        raise
+
+                    # Retryable error — back off then retry.
+                    delay = _PROVIDER_RETRY_DELAYS[_attempt]
+                    logger.warning(
+                        "Provider call failed (attempt %d/%d, retrying in %.1fs): %s",
+                        _attempt + 1,
+                        _MAX_PROVIDER_RETRIES + 1,
+                        delay,
+                        exc,
+                    )
+                    await self._hook_emit(
+                        client,
+                        PROVIDER_RETRY,
+                        {
+                            "attempt": _attempt + 1,
+                            "max_retries": _MAX_PROVIDER_RETRIES,
+                            "delay_s": delay,
+                            "error": {
+                                "type": type(exc).__name__,
+                                "msg": str(exc),
+                            },
+                        },
+                    )
+                    await asyncio.sleep(delay)
             self._last_provider_call_end = time.monotonic()
 
             chat_response = ChatResponse.model_validate(response_raw)
@@ -224,6 +301,11 @@ class StreamingOrchestrator:
             if not chat_response.tool_calls:
                 break
 
+            # --- cancellation checkpoint (before tool dispatch) ---
+            if self._cancelled:
+                _was_cancelled = True
+                break
+
             # --- parallel tool dispatch ---
             tool_tasks = [
                 self._execute_tool(tc, client) for tc in chat_response.tool_calls
@@ -231,20 +313,48 @@ class StreamingOrchestrator:
             tool_results = await asyncio.gather(*tool_tasks)
 
             # --- add tool results to context sequentially ---
-            for tool_call_id, tool_name, content in tool_results:
+            # Iterate in tool_call order (asyncio.gather preserves order).
+            # Two fixes applied here:
+            #
+            # Fix 29 (ephemeral ordering): post_results are stored NOW, in
+            # tool_call order, rather than in non-deterministic completion
+            # order inside _execute_tool.
+            #
+            # Fix 31 (is_error visibility): when success is False, mark the
+            # message with metadata["is_error"] = True so providers that
+            # support it (e.g. Anthropic) can treat it as a tool error block.
+            for tool_call_id, tool_name, content, success, post_result in tool_results:
+                # Fix 29: queue ephemeral injection in original tool_call order.
+                if post_result is not None:
+                    self._store_ephemeral_injection(post_result)
+
+                # Fix 31: add is_error metadata for failed tool results.
+                metadata: dict[str, Any] | None = (
+                    {"is_error": True} if not success else None
+                )
                 tool_msg = Message(
                     role="tool",
                     name=tool_name,
                     tool_call_id=tool_call_id,
                     content=content,
+                    metadata=metadata,
                 )
                 await client.request(
                     "request.context_add_message",
                     {"message": tool_msg.model_dump()},
                 )
 
+        # ----------------------------------------------------------------
+        # Cancellation: skip orchestrator:complete / prompt:complete and
+        # return immediately.  The caller sees the last partial response.
+        # ----------------------------------------------------------------
+        if _was_cancelled:
+            logger.info("Orchestrator cancelled after %d iteration(s)", iteration)
+            return response_text
+
         # warn if we hit max iterations
-        if max_iterations != -1 and iteration >= max_iterations:
+        max_iterations_hit = max_iterations != -1 and iteration >= max_iterations
+        if max_iterations_hit:
             logger.warning("Max iterations (%d) reached", max_iterations)
 
         # ----------------------------------------------------------------
@@ -256,7 +366,7 @@ class StreamingOrchestrator:
             {
                 "orchestrator": "streaming",
                 "turn_count": iteration,
-                "status": "success",
+                "status": "max_iterations_reached" if max_iterations_hit else "success",
             },
         )
 
@@ -280,10 +390,20 @@ class StreamingOrchestrator:
 
     async def _execute_tool(
         self, tool_call: ToolCall, client: Any
-    ) -> tuple[str, str, str]:
-        """Execute a single tool via IPC, returning (id, name, content).
+    ) -> tuple[str, str, str, bool, HookResult | None]:
+        """Execute a single tool via IPC, returning (id, name, content, success, post_result).
 
         Never raises — errors become error-message strings.
+
+        Returns:
+            A 5-tuple of:
+              - tool_call_id (str)
+              - tool_name (str)
+              - content (str): serialised tool output or error message
+              - success (bool): False when the tool failed, was denied, or raised
+              - post_result (HookResult | None): the tool:post hook result, used to
+                queue ephemeral injections in tool_call order after gather() completes;
+                None when no post hook was run (deny/ask_user/exception paths).
         """
         try:
             # --- emit stream.tool_call_start (before tool:pre hook) ---
@@ -312,6 +432,8 @@ class StreamingOrchestrator:
                     tool_call.id,
                     tool_call.name,
                     f"Denied by hook: {pre_result.reason}",
+                    False,
+                    None,
                 )
 
             # --- call tool.execute ---
@@ -334,8 +456,9 @@ class StreamingOrchestrator:
                 },
             )
 
-            # Store ephemeral injection from tool:post
-            self._store_ephemeral_injection(post_result)
+            # NOTE: ephemeral injection is NOT stored here.  All tool:post
+            # post_results are returned and processed in tool_call order by
+            # the caller after asyncio.gather() completes (Task 29 fix).
 
             # Check if hook MODIFY-ed the tool result
             content = tool_result.get_serialized_output()
@@ -376,7 +499,13 @@ class StreamingOrchestrator:
                         "stream.todo_update skipped: could not parse todo tool output"
                     )
 
-            return (tool_call.id, tool_call.name, content)
+            return (
+                tool_call.id,
+                tool_call.name,
+                content,
+                tool_result.success,
+                post_result,
+            )
 
         except Exception as exc:
             logger.error("Tool %s failed: %s", tool_call.name, exc)
@@ -402,6 +531,8 @@ class StreamingOrchestrator:
                 tool_call.id,
                 tool_call.name,
                 f"Internal error executing tool: {exc}",
+                False,
+                None,
             )
 
     # ------------------------------------------------------------------

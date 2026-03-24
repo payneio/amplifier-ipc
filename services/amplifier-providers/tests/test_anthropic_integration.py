@@ -82,6 +82,9 @@ class _MockResponse:
 
 def _get_anthropic_provider(server: Server) -> Any:
     """Return the AnthropicProvider instance discovered by *server*, or None."""
+    # _components is only populated after instances are built (lazy init).
+    # _ensure_instances() is idempotent and safe to call here.
+    server._ensure_instances()
     providers = server._components.get("provider", [])
     return next((p for p in providers if getattr(p, "name", None) == "anthropic"), None)
 
