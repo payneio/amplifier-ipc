@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from amplifier_ipc.host.mentions import NamespaceResolver, parse_mentions
+from amplifier_ipc.host.mentions import (
+    NamespaceResolver,
+    WorkingDirResolver,
+    parse_mentions,
+)
 from amplifier_ipc.host.service_index import ServiceIndex
 
 
@@ -194,3 +199,60 @@ async def test_namespace_resolver_strips_at_prefix() -> None:
     # Without @ prefix
     result = await resolver("foundation:context/shared/common.md")
     assert result == "Common context content"
+
+
+# ---------------------------------------------------------------------------
+# Tests: WorkingDirResolver
+# ---------------------------------------------------------------------------
+
+
+def test_working_dir_resolver_resolves_tilde_path(tmp_path: Path) -> None:
+    """@~/path resolves relative to home_dir."""
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    (home_dir / "docs").mkdir()
+    (home_dir / "docs" / "AGENTS.md").write_text("Home AGENTS content")
+
+    resolver = WorkingDirResolver(working_dir=tmp_path, home_dir=home_dir)
+    result = resolver("@~/docs/AGENTS.md")
+    assert result == "Home AGENTS content"
+
+
+def test_working_dir_resolver_resolves_user_path(tmp_path: Path) -> None:
+    """@user:path resolves relative to home_dir/.amplifier/."""
+    home_dir = tmp_path / "home"
+    amplifier_dir = home_dir / ".amplifier"
+    (amplifier_dir / "skills").mkdir(parents=True)
+    (amplifier_dir / "skills" / "foo.md").write_text("User skill content")
+
+    resolver = WorkingDirResolver(working_dir=tmp_path, home_dir=home_dir)
+    result = resolver("@user:skills/foo.md")
+    assert result == "User skill content"
+
+
+def test_working_dir_resolver_resolves_project_path(tmp_path: Path) -> None:
+    """@project:path resolves relative to working_dir/.amplifier/."""
+    amplifier_dir = tmp_path / ".amplifier"
+    amplifier_dir.mkdir()
+    (amplifier_dir / "AGENTS.md").write_text("Project AGENTS content")
+
+    resolver = WorkingDirResolver(working_dir=tmp_path)
+    result = resolver("@project:AGENTS.md")
+    assert result == "Project AGENTS content"
+
+
+def test_working_dir_resolver_returns_none_for_unhandled(tmp_path: Path) -> None:
+    """Returns None for mentions with unrecognised prefixes."""
+    resolver = WorkingDirResolver(working_dir=tmp_path)
+    result = resolver("@unknown:some/path.md")
+    assert result is None
+
+
+def test_working_dir_resolver_returns_none_for_missing_file(tmp_path: Path) -> None:
+    """Returns None (with warning) when the resolved file does not exist."""
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+
+    resolver = WorkingDirResolver(working_dir=tmp_path, home_dir=home_dir)
+    result = resolver("@~/nonexistent.md")
+    assert result is None

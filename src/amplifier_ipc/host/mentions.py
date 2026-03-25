@@ -18,7 +18,7 @@ import hashlib  # noqa: F401 — used by resolve_and_load (future task)
 import logging
 import re
 from dataclasses import dataclass  # noqa: F401 — used by resolver classes (future task)
-from pathlib import Path  # noqa: F401 — used by WorkingDirResolver (future task)
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from amplifier_ipc.host.service_index import ServiceIndex
@@ -84,6 +84,45 @@ class NamespaceResolver:
             return result["content"]
         except Exception:
             logger.warning("NamespaceResolver: failed to resolve %r", mention)
+            return None
+
+
+# ---------------------------------------------------------------------------
+# WorkingDirResolver
+# ---------------------------------------------------------------------------
+
+
+class WorkingDirResolver:
+    """Resolves ``@~/``, ``@user:``, and ``@project:`` mentions from the local filesystem.
+
+    * ``@~/path`` — resolves relative to *home_dir*
+    * ``@user:path`` — resolves relative to ``<home_dir>/.amplifier/``
+    * ``@project:path`` — resolves relative to ``<working_dir>/.amplifier/``
+
+    Returns ``None`` for unrecognised prefixes or files that cannot be read.
+    """
+
+    def __init__(self, working_dir: Path, home_dir: Path | None = None) -> None:
+        self._working_dir = working_dir
+        self._home_dir = home_dir if home_dir is not None else Path.home()
+
+    def __call__(self, mention: str) -> str | None:
+        """Resolve *mention* to its file content, or return ``None`` on failure."""
+        ref = mention.lstrip("@")
+
+        if ref.startswith("~/"):
+            file_path = self._home_dir / ref[2:]
+        elif ref.startswith("user:"):
+            file_path = self._home_dir / ".amplifier" / ref[len("user:") :]
+        elif ref.startswith("project:"):
+            file_path = self._working_dir / ".amplifier" / ref[len("project:") :]
+        else:
+            return None
+
+        try:
+            return file_path.read_text()
+        except (FileNotFoundError, OSError):
+            logger.warning("WorkingDirResolver: could not read file %r", str(file_path))
             return None
 
 
