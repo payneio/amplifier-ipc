@@ -14,8 +14,10 @@ Provides:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
@@ -212,3 +214,96 @@ def parse_mentions(text: str) -> list[str]:
             seen.add(mention)
             result.append(mention)
     return result
+
+
+# ---------------------------------------------------------------------------
+# ResolvedContent and resolve_and_load
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class _ResolvableChain(Protocol):
+    """Structural protocol for sync resolver chains accepted by :func:`resolve_and_load`."""
+
+    def resolve(self, mention: str) -> str | None:  # pragma: no cover
+        ...
+
+
+@dataclass
+class ResolvedContent:
+    """A resolved mention with its key (without ``@`` prefix) and content."""
+
+    key: str
+    """The mention string without the leading ``@``."""
+
+    content: str
+    """The resolved content of the mention."""
+
+
+def resolve_and_load(
+    text: str,
+    chain: _ResolvableChain,
+    *,
+    seen_hashes: set[str] | None = None,
+    max_depth: int = 3,
+) -> list[ResolvedContent]:
+    """Recursively resolve and load ``@mention`` references found in *text*.
+
+    For each unique mention in *text*:
+
+    1. Resolves via *chain*.
+    2. Skips ``None`` results and exceptions from the resolver.
+    3. Deduplicates by SHA-256 hash of the content so identical files loaded
+       via different mentions are not returned twice.
+    4. Recurses into the resolved content (up to *max_depth* levels deep),
+       sharing the same *seen_hashes* set so no content is emitted twice across
+       the entire traversal.
+
+    Args:
+        text: The source text to scan for mentions.
+        chain: Resolver chain used to resolve each mention.
+        seen_hashes: Set of already-seen SHA-256 hashes (shared across
+            recursive calls). If ``None`` a fresh set is created.
+        max_depth: Maximum recursion depth. ``0`` returns ``[]`` immediately.
+
+    Returns:
+        Ordered list of :class:`ResolvedContent` items (parent before children).
+    """
+    if max_depth <= 0:
+        return []
+
+    if seen_hashes is None:
+        seen_hashes = set()
+
+    results: list[ResolvedContent] = []
+
+    for mention in parse_mentions(text):
+        try:
+            content = chain.resolve(mention)
+        except Exception:
+            logger.warning(
+                "resolve_and_load: resolver raised an exception for %r", mention
+            )
+            continue
+
+        if content is None:
+            continue
+
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
+        if content_hash in seen_hashes:
+            continue
+
+        seen_hashes.add(content_hash)
+
+        resolved = ResolvedContent(key=mention.lstrip("@"), content=content)
+        results.append(resolved)
+
+        nested = resolve_and_load(
+            content,
+            chain,
+            seen_hashes=seen_hashes,
+            max_depth=max_depth - 1,
+        )
+        results.extend(nested)
+
+    return results

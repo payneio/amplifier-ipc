@@ -8,11 +8,15 @@ from typing import Any
 
 import pytest
 
+import hashlib
+
 from amplifier_ipc.host.mentions import (
     MentionResolverChain,
     NamespaceResolver,
+    ResolvedContent,
     WorkingDirResolver,
     parse_mentions,
+    resolve_and_load,
 )
 from amplifier_ipc.host.service_index import ServiceIndex
 
@@ -332,3 +336,102 @@ def test_chain_append() -> None:
     r_appended = FakeSyncResolver("appended")
     chain.append(r_appended)  # type: ignore[arg-type]
     assert chain.resolve("@ns:path.md") == "appended"
+
+
+# ---------------------------------------------------------------------------
+# Helpers for resolve_and_load tests
+# ---------------------------------------------------------------------------
+
+
+class FakeChain:
+    """Fake chain that maps mentions to fixed content strings."""
+
+    def __init__(self, mapping: dict[str, str | None]) -> None:
+        self._mapping = mapping
+
+    def resolve(self, mention: str) -> str | None:
+        return self._mapping.get(mention)
+
+
+class ExplodingChain:
+    """Chain whose resolve() always raises RuntimeError."""
+
+    def resolve(self, mention: str) -> str | None:
+        raise RuntimeError("Resolver exploded!")
+
+
+# ---------------------------------------------------------------------------
+# Tests: resolve_and_load
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_and_load_resolves_mentions() -> None:
+    """Basic: resolves mentions in text and returns a ResolvedContent list."""
+    chain = FakeChain({"@ns:a.md": "Content of A"})
+    results = resolve_and_load("Load @ns:a.md here", chain)  # type: ignore[arg-type]
+    assert len(results) == 1
+    assert isinstance(results[0], ResolvedContent)
+    assert results[0].key == "ns:a.md"
+    assert results[0].content == "Content of A"
+
+
+def test_resolve_and_load_recursive() -> None:
+    """Resolved content that itself contains mentions is recursively loaded."""
+    chain = FakeChain(
+        {
+            "@ns:a.md": "Load @ns:b.md here",
+            "@ns:b.md": "Content of B",
+        }
+    )
+    results = resolve_and_load("Load @ns:a.md here", chain)
+    keys = [r.key for r in results]
+    assert "ns:a.md" in keys
+    assert "ns:b.md" in keys
+
+
+def test_resolve_and_load_deduplicates_by_hash() -> None:
+    """Two mentions resolving to identical content (same hash) produce only one result."""
+    chain = FakeChain(
+        {
+            "@ns:a.md": "Same content",
+            "@ns:b.md": "Same content",
+        }
+    )
+    results = resolve_and_load("Load @ns:a.md and @ns:b.md here", chain)
+    assert len(results) == 1
+
+
+def test_resolve_and_load_depth_limit() -> None:
+    """max_depth <= 0 returns an empty list immediately."""
+    chain = FakeChain({"@ns:a.md": "Content of A"})
+    results = resolve_and_load("Load @ns:a.md here", chain, max_depth=0)
+    assert results == []
+
+
+def test_resolve_and_load_shared_seen_hashes() -> None:
+    """Passing an already-populated seen_hashes set prevents re-resolving content."""
+    content = "Content of A"
+    content_hash = hashlib.sha256(content.encode()).hexdigest()
+    seen: set[str] = {content_hash}
+    chain = FakeChain({"@ns:a.md": content})
+    results = resolve_and_load("Load @ns:a.md here", chain, seen_hashes=seen)
+    assert results == []
+
+
+def test_resolve_and_load_skips_unresolved() -> None:
+    """Mentions for which the chain returns None are silently skipped."""
+    chain = FakeChain(
+        {
+            "@ns:a.md": None,
+            "@ns:b.md": "Content of B",
+        }
+    )
+    results = resolve_and_load("Load @ns:a.md and @ns:b.md here", chain)
+    assert len(results) == 1
+    assert results[0].key == "ns:b.md"
+
+
+def test_resolve_and_load_handles_resolver_exception() -> None:
+    """Exceptions raised by chain.resolve() are caught; the mention is skipped."""
+    results = resolve_and_load("Load @ns:a.md here", ExplodingChain())
+    assert results == []
