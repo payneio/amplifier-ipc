@@ -527,6 +527,7 @@ class Host:
                     service_configs=self._service_configs,
                     event_callback=_forward_child_event,
                     current_depth=current_depth,
+                    child_session_id=child_session_id,
                 )
             finally:
                 self._child_event_queue.put_nowait(

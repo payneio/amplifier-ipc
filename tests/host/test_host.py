@@ -1241,6 +1241,63 @@ async def test_build_spawn_handler_provides_event_callback() -> None:
     assert queue_items[2].depth == 1
 
 
+async def test_build_spawn_handler_passes_child_session_id() -> None:
+    """_build_spawn_handler generates child_session_id once and passes it to spawn_child_session.
+
+    Verifies that the spawn handler:
+    1. Passes child_session_id as a keyword argument to spawn_child_session.
+    2. The child_session_id contains the agent name (e.g., '_explorer').
+    """
+    registry = ServiceIndex()
+    registry.register(
+        "foundation",
+        {
+            "tools": [],
+            "hooks": [],
+            "orchestrators": [{"name": "loop"}],
+            "context_managers": [{"name": "simple"}],
+            "providers": [{"name": "anthropic"}],
+            "content": [],
+        },
+    )
+
+    config = SessionConfig(
+        services=["foundation"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+
+    host = Host(config=config, settings=settings)
+    host._registry = registry
+    host._persistence = None
+
+    captured_kwargs: list[dict[str, Any]] = []
+
+    async def mock_spawn_child_session(**kwargs: Any) -> dict[str, Any]:
+        captured_kwargs.append(kwargs)
+        return {
+            "session_id": "child-123",
+            "response": "done",
+            "turn_count": 1,
+            "metadata": {},
+        }
+
+    spawn_handler = host._build_spawn_handler("test-session-id")
+
+    with patch("amplifier_ipc.host.host.spawn_child_session", mock_spawn_child_session):
+        await spawn_handler({"agent": "explorer", "instruction": "Find files"})
+
+    assert len(captured_kwargs) == 1, "spawn_child_session should be called once"
+    assert "child_session_id" in captured_kwargs[0], (
+        "child_session_id must be passed to spawn_child_session"
+    )
+    assert "_explorer" in captured_kwargs[0]["child_session_id"], (
+        f"child_session_id should contain '_explorer', got: {captured_kwargs[0]['child_session_id']}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests for transcript persistence via stream.context_message_added
 # ---------------------------------------------------------------------------
