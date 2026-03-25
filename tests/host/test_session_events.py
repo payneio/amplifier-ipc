@@ -1,4 +1,4 @@
-"""Unit tests for Host._emit_hook_event() and parent_session_id parameter."""
+"""Tests for Host._emit_hook_event(), parent_session_id, and session:start event emission."""
 
 from __future__ import annotations
 
@@ -111,8 +111,8 @@ async def _drain(host: Host) -> list[tuple[str, dict[str, Any]]]:
         captured.append((event_name, data))
 
     async def noop_orchestrator_loop(*args: Any, **kwargs: Any) -> Any:
-        return
-        yield  # noqa: unreachable — makes this an async generator
+        return  # return before yield makes this a no-op async generator
+        yield  # noqa: unreachable
 
     with (
         patch.object(host, "_emit_hook_event", capture_emit),

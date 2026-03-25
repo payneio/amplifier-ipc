@@ -54,7 +54,7 @@ from amplifier_ipc.protocol.errors import (
     JsonRpcError,
     make_error_response,
 )
-from amplifier_ipc_protocol.events import SESSION_END, SESSION_START  # noqa: F401
+from amplifier_ipc_protocol.events import SESSION_END, SESSION_START  # noqa: F401  # SESSION_END used in a future task (session:end emission)
 from amplifier_ipc.protocol.framing import read_message, write_message
 
 logger = logging.getLogger(__name__)
