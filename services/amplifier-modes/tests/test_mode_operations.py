@@ -9,6 +9,7 @@ import pytest
 
 from amplifier_modes.__main__ import ModeServer
 from amplifier_modes.hooks.mode import ModeDefinition, ModeHooks
+from amplifier_modes.tools.mode import ModeTool
 
 
 def make_mode(name: str = "test-mode") -> ModeDefinition:
@@ -142,3 +143,52 @@ async def test_mode_server_describe_still_works() -> None:
     tools = result["capabilities"]["tools"]
     tool_names = [t["name"] for t in tools]
     assert "mode" in tool_names, f"Expected 'mode' in tool names; found: {tool_names}"
+
+
+# ---------------------------------------------------------------------------
+# _handle_current operation tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_current_returns_none_when_no_mode_active() -> None:
+    """_handle_current returns active_mode=None when ModeHooks has no active mode."""
+    tool = ModeTool()
+    hooks = ModeHooks()
+    tool._mode_hooks = hooks  # wire hooks with no active mode
+
+    result = await tool.execute({"operation": "current"})
+
+    assert result.success is True
+    assert result.output is not None
+    assert result.output["active_mode"] is None
+
+
+@pytest.mark.asyncio
+async def test_current_returns_mode_info_when_active() -> None:
+    """_handle_current returns name and description when a mode is active."""
+    tool = ModeTool()
+    hooks = ModeHooks()
+    focus_mode = ModeDefinition(name="focus", description="Deep work mode")
+    hooks.set_active_mode(focus_mode)
+    tool._mode_hooks = hooks
+
+    result = await tool.execute({"operation": "current"})
+
+    assert result.success is True
+    assert result.output is not None
+    assert result.output["active_mode"] == "focus"
+    assert result.output["description"] == "Deep work mode"
+
+
+@pytest.mark.asyncio
+async def test_current_returns_error_when_hooks_not_wired() -> None:
+    """_handle_current returns not_ready error when _mode_hooks is None."""
+    tool = ModeTool()
+    # Do NOT set _mode_hooks — leave it as the class default (None)
+
+    result = await tool.execute({"operation": "current"})
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error["code"] == "not_ready"

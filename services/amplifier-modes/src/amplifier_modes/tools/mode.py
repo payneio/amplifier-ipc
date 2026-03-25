@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from amplifier_ipc.protocol import ToolResult, tool
+
+from amplifier_modes.hooks.mode import ModeHooks
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,14 @@ class ModeTool:
         "required": ["operation"],
     }
 
+    _mode_hooks: Optional[ModeHooks] = None
+
+    def _not_ready_result(self) -> ToolResult:
+        return ToolResult(
+            success=False,
+            error={"code": "not_ready", "message": "Mode service not ready"},
+        )
+
     async def execute(self, input: dict[str, Any]) -> ToolResult:
         """Execute a mode operation."""
         operation = input.get("operation", "")
@@ -73,13 +83,18 @@ class ModeTool:
         )
 
     async def _handle_current(self) -> ToolResult:
-        """Show the currently active mode — stub returns no active mode."""
+        """Show the currently active mode."""
+        if self._mode_hooks is None:
+            return self._not_ready_result()
+        mode = self._mode_hooks.get_active_mode()
+        if mode is None:
+            return ToolResult(
+                success=True,
+                output={"active_mode": None, "message": "No mode is currently active."},
+            )
         return ToolResult(
             success=True,
-            output={
-                "active_mode": None,
-                "message": "No mode is currently active.",
-            },
+            output={"active_mode": mode.name, "description": mode.description},
         )
 
     async def _handle_set(self, input: dict[str, Any]) -> ToolResult:
