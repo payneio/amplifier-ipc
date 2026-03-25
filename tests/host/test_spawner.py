@@ -16,6 +16,7 @@ from amplifier_ipc.host.spawner import (
     filter_tools,
     format_parent_context,
     generate_child_session_id,
+    is_top_level_session,
     merge_configs,
     spawn_child_session,
 )
@@ -89,6 +90,28 @@ def test_generate_child_session_id_empty_agent_defaults() -> None:
     assert result.endswith("_agent"), (
         f"Expected result to end with _agent, got: {result}"
     )
+
+
+# ---------------------------------------------------------------------------
+# is_top_level_session (3 tests)
+# ---------------------------------------------------------------------------
+
+
+def test_is_top_level_session_root_uuid() -> None:
+    """Plain UUID (no underscore) is a top-level session."""
+    session_id = "5b67d79f-4b83-4d05-8c63-666569550fcf"
+    assert is_top_level_session(session_id) is True
+
+
+def test_is_top_level_session_child_id() -> None:
+    """Child session ID containing an underscore is not a top-level session."""
+    session_id = "0000000000000000-99887766aabbccdd_my-agent"
+    assert is_top_level_session(session_id) is False
+
+
+def test_is_top_level_session_empty_string() -> None:
+    """Empty string has no underscore, so it is considered top-level."""
+    assert is_top_level_session("") is True
 
 
 # ---------------------------------------------------------------------------

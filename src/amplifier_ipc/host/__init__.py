@@ -46,6 +46,7 @@ from amplifier_ipc.host.spawner import (
     filter_hooks,
     filter_tools,
     generate_child_session_id,
+    is_top_level_session,
     merge_configs,
     spawn_child_session,
 )
@@ -104,6 +105,7 @@ __all__ = [
     "filter_hooks",
     "filter_tools",
     "generate_child_session_id",
+    "is_top_level_session",
     "merge_configs",
     "spawn_child_session",
 ]

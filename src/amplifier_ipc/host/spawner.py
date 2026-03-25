@@ -66,6 +66,10 @@ def generate_child_session_id(parent_session_id: str, agent_name: str) -> str:
     return f"{parent_span}-{child_span}_{sanitized}"
 
 
+def is_top_level_session(session_id: str) -> bool:
+    return "_" not in session_id
+
+
 # ---------------------------------------------------------------------------
 # Config merging
 # ---------------------------------------------------------------------------
