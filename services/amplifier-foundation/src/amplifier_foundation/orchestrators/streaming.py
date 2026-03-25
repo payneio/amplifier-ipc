@@ -26,6 +26,11 @@ from amplifier_ipc.protocol import (
     ToolSpec,  # noqa: F401 — required by spec; unused pending future tool spec handling
     orchestrator,
 )
+from amplifier_ipc_protocol.events import (
+    CONTENT_BLOCK_END,  # noqa: F401 — required by spec; unused pending future streaming block events
+    CONTENT_BLOCK_START,  # noqa: F401 — required by spec; unused pending future streaming block events
+    PROVIDER_RESPONSE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +48,7 @@ TOOL_POST = "tool:post"
 TOOL_ERROR = "tool:error"
 ORCHESTRATOR_COMPLETE = "orchestrator:complete"
 ORCHESTRATOR_RATE_LIMIT_DELAY = "orchestrator:rate_limit_delay"
-CONTENT_BLOCK_START = "content:block_start"  # reserved for streaming block events
-CONTENT_BLOCK_END = "content:block_end"  # reserved for streaming block events
+# CONTENT_BLOCK_START and CONTENT_BLOCK_END imported from amplifier_ipc_protocol.events
 STREAM_THINKING = "stream.thinking"
 STREAM_TOOL_CALL_START = "stream.tool_call_start"
 STREAM_TOOL_CALL = "stream.tool_call"
@@ -114,6 +118,7 @@ class StreamingOrchestrator:
         # Allow config overrides
         max_iterations: int = config.get("max_iterations", self.max_iterations)
         min_delay_ms: int = config.get("min_delay_between_calls_ms", 0)
+        provider_name: str = config.get("provider_name", "unknown")
 
         # Reset per-execute state
         self._pending_ephemeral_injections = []
@@ -262,6 +267,17 @@ class StreamingOrchestrator:
             self._last_provider_call_end = time.monotonic()
 
             chat_response = ChatResponse.model_validate(response_raw)
+
+            # --- emit provider:response hook ---
+            await self._hook_emit(
+                client,
+                PROVIDER_RESPONSE,
+                {
+                    "provider": provider_name,
+                    "response": response_raw,
+                    "usage": chat_response.usage,
+                },
+            )
 
             # --- extract response text ---
             response_text = self._extract_text(chat_response)

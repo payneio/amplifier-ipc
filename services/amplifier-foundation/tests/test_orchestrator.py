@@ -660,3 +660,74 @@ async def test_orchestrator_does_not_emit_stream_todo_update_for_non_json_output
         f"Expected 0 stream.todo_update notifications for non-JSON todo output, "
         f"got {len(todo_update_notifs)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 13: provider:response hook event emitted after successful provider.complete
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_provider_response() -> None:
+    """provider:response hook event emitted after successful provider.complete with provider name and usage."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    provider_response = {
+        "content": "Response from provider.",
+        "text": "Response from provider.",
+        "tool_calls": None,
+        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        "finish_reason": None,
+    }
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": provider_response,
+        }
+    )
+
+    result = await orch.execute("Hello", {"provider_name": "anthropic"}, client)
+
+    assert result == "Response from provider."
+
+    # Find all hook_emit calls with event='provider:response'
+    provider_response_hook_calls = [
+        params
+        for method, params in client.requests
+        if method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") == "provider:response"
+    ]
+
+    # Verify exactly 1 provider:response hook was emitted
+    assert len(provider_response_hook_calls) == 1, (
+        f"Expected exactly 1 provider:response hook_emit, got {len(provider_response_hook_calls)}"
+    )
+
+    # Verify data payload
+    data = provider_response_hook_calls[0].get("data", {})
+    assert data.get("provider") == "anthropic", (
+        f"Expected provider='anthropic', got {data.get('provider')!r}"
+    )
+    assert data.get("usage") is not None, "Expected usage to be present in hook data"
+    usage = data["usage"]
+    # Usage may be a dict or Usage model - check the token counts
+    if isinstance(usage, dict):
+        assert usage.get("input_tokens") == 10, (
+            f"Expected input_tokens=10, got {usage.get('input_tokens')!r}"
+        )
+        assert usage.get("output_tokens") == 5, (
+            f"Expected output_tokens=5, got {usage.get('output_tokens')!r}"
+        )
+    else:
+        assert getattr(usage, "input_tokens", None) == 10, (
+            f"Expected input_tokens=10, got {getattr(usage, 'input_tokens', None)!r}"
+        )
+        assert getattr(usage, "output_tokens", None) == 5, (
+            f"Expected output_tokens=5, got {getattr(usage, 'output_tokens', None)!r}"
+        )

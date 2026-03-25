@@ -762,6 +762,7 @@ class Host:
                 "config": {
                     "tools": self._registry.get_all_tool_specs(),
                     "hooks": self._registry.get_all_hook_descriptors(),
+                    "provider_name": self._config.provider or "unknown",
                 },
             },
         }
