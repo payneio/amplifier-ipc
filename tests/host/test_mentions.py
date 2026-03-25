@@ -386,6 +386,7 @@ def test_resolve_and_load_recursive() -> None:
     keys = [r.key for r in results]
     assert "ns:a.md" in keys
     assert "ns:b.md" in keys
+    assert keys.index("ns:a.md") < keys.index("ns:b.md")  # parent before children
 
 
 def test_resolve_and_load_deduplicates_by_hash() -> None:
@@ -405,6 +406,20 @@ def test_resolve_and_load_depth_limit() -> None:
     chain = FakeChain({"@ns:a.md": "Content of A"})
     results = resolve_and_load("Load @ns:a.md here", chain, max_depth=0)
     assert results == []
+
+
+def test_resolve_and_load_depth_limit_one() -> None:
+    """max_depth=1 resolves top-level mentions but stops before nested mentions."""
+    chain = FakeChain(
+        {
+            "@ns:a.md": "Load @ns:b.md here",
+            "@ns:b.md": "Content of B",
+        }
+    )
+    results = resolve_and_load("Load @ns:a.md here", chain, max_depth=1)
+    keys = [r.key for r in results]
+    assert "ns:a.md" in keys
+    assert "ns:b.md" not in keys
 
 
 def test_resolve_and_load_shared_seen_hashes() -> None:
