@@ -134,6 +134,12 @@ class MentionResolverChain:
 
     Tries each resolver in order and returns the first non-``None`` result.
     If all resolvers return ``None`` (or the chain is empty), returns ``None``.
+
+    .. note::
+        :meth:`resolve` is synchronous; only sync-callable resolvers (e.g.,
+        :class:`WorkingDirResolver`) should be added to the chain.  For async
+        resolvers such as :class:`NamespaceResolver`, call them directly or
+        use an async wrapper.
     """
 
     def __init__(self, resolvers: list[MentionResolver] | None = None) -> None:
