@@ -7,12 +7,11 @@ import os
 import sys
 from pathlib import Path
 
-import pytest
-
-from amplifier_ipc.host.content import assemble_system_prompt, resolve_mention
+from amplifier_ipc.host.content import assemble_system_prompt
 from amplifier_ipc.host.config import HostSettings, SessionConfig
 from amplifier_ipc.host.host import Host
 from amplifier_ipc.host.lifecycle import ServiceProcess, shutdown_service
+from amplifier_ipc.host.mentions import MentionResolverChain, NamespaceResolver
 from amplifier_ipc.host.service_index import ServiceIndex
 from amplifier_ipc.protocol.client import Client
 
@@ -44,6 +43,17 @@ class FakeService:
 
     def __init__(self, client: FakeClient) -> None:
         self.client = client
+
+
+class FakeSyncResolver:
+    """Test-only synchronous resolver that looks up mentions from a fixed mapping."""
+
+    def __init__(self, mapping: dict[str, str]) -> None:
+        self._mapping = mapping
+
+    def __call__(self, mention: str) -> str | None:
+        key = mention.removeprefix("@")
+        return self._mapping.get(key)
 
 
 # ---------------------------------------------------------------------------
@@ -98,36 +108,6 @@ def _build_registry_and_services() -> tuple[ServiceIndex, dict]:
 
 
 # ---------------------------------------------------------------------------
-# Tests: resolve_mention
-# ---------------------------------------------------------------------------
-
-
-async def test_resolve_mention_simple() -> None:
-    """Resolves a @namespace:path mention and returns the content."""
-    registry, services = _build_registry_and_services()
-
-    result = await resolve_mention("@foundation:agents/explorer.md", registry, services)
-
-    assert result == "explorer agent content"
-
-
-async def test_resolve_mention_unknown_service() -> None:
-    """Raises ValueError when the namespace is not registered."""
-    registry, services = _build_registry_and_services()
-
-    with pytest.raises(ValueError, match="Unknown content namespace"):
-        await resolve_mention("@unknown:some/path.md", registry, services)
-
-
-async def test_resolve_mention_no_colon() -> None:
-    """Raises ValueError when the mention contains no colon separator."""
-    registry, services = _build_registry_and_services()
-
-    with pytest.raises(ValueError, match="Invalid mention format"):
-        await resolve_mention("@invalidformat", registry, services)
-
-
-# ---------------------------------------------------------------------------
 # Tests: assemble_system_prompt
 # ---------------------------------------------------------------------------
 
@@ -146,32 +126,74 @@ async def test_assemble_system_prompt_gathers_context() -> None:
     assert "explorer agent content" not in result
 
 
-async def test_assemble_system_prompt_with_mentions() -> None:
-    """Resolves extra @mentions and includes them in the output."""
-    registry, services = _build_registry_and_services()
+async def test_assemble_system_prompt_with_resolver_chain() -> None:
+    """resolver_chain resolves @mentions found in context/ files recursively."""
+    # context/main.md contains an @mention to an agents/ file (excluded from auto-assembly)
+    foundation_content: dict[str, str] = {
+        "context/main.md": "main content referencing @foundation:agents/explorer.md",
+        "agents/explorer.md": "explorer agent content",
+    }
 
-    result = await assemble_system_prompt(
-        registry, services, mentions=["@foundation:agents/explorer.md"]
+    registry = ServiceIndex()
+    registry.register(
+        "foundation",
+        {
+            "tools": [],
+            "hooks": [],
+            "orchestrators": [],
+            "context_managers": [],
+            "providers": [],
+            "content": ["context/main.md"],
+        },
     )
+    services = {"foundation": FakeService(FakeClient(foundation_content))}
 
-    # Extra mention should be included
+    # Sync resolver that maps the @mention to the explorer content
+    resolver = FakeSyncResolver(
+        {"foundation:agents/explorer.md": "explorer agent content"}
+    )
+    chain = MentionResolverChain([resolver])  # type: ignore[arg-type]
+
+    result = await assemble_system_prompt(registry, services, resolver_chain=chain)
+
+    # Direct context/ content is present
+    assert "main content" in result
+    # @mention in context/ file was resolved and appended
     assert "explorer agent content" in result
-    # Context files still present
-    assert "common shared content" in result
-    assert "philosophy content" in result
 
 
 async def test_assemble_system_prompt_deduplicates() -> None:
-    """Same content appearing both as context file and as @mention is included only once."""
-    registry, services = _build_registry_and_services()
+    """Content resolved via @mention and also present as context/ file appears only once."""
+    # context/main.md references @svc:context/shared.md via an @mention.
+    # context/shared.md is also gathered as a context/ file.
+    # The shared content must appear exactly once.
+    svc_content: dict[str, str] = {
+        "context/main.md": "main content mentioning @svc:context/shared.md",
+        "context/shared.md": "shared content",
+    }
 
-    # @superpowers:context/philosophy.md is already gathered as a context/ file
-    result = await assemble_system_prompt(
-        registry, services, mentions=["@superpowers:context/philosophy.md"]
+    registry = ServiceIndex()
+    registry.register(
+        "svc",
+        {
+            "tools": [],
+            "hooks": [],
+            "orchestrators": [],
+            "context_managers": [],
+            "providers": [],
+            "content": ["context/main.md", "context/shared.md"],
+        },
     )
+    services = {"svc": FakeService(FakeClient(svc_content))}
 
-    # philosophy content appears exactly once despite being listed twice
-    assert result.count("philosophy content") == 1
+    # Resolver can resolve the @mention to "shared content"
+    resolver = FakeSyncResolver({"svc:context/shared.md": "shared content"})
+    chain = MentionResolverChain([resolver])  # type: ignore[arg-type]
+
+    result = await assemble_system_prompt(registry, services, resolver_chain=chain)
+
+    # "shared content" must appear exactly once even though it was reachable via two paths
+    assert result.count("shared content") == 1
 
 
 async def test_assemble_system_prompt_skips_failed_reads() -> None:
@@ -285,7 +307,7 @@ async def test_content_injection_end_to_end(tmp_path: Path) -> None:
     Spans the full content injection pipeline:
 
     1. A real service subprocess reports context/ and agents/ paths in its
-       ``describe`` response (nested ``{"capabilities": {"content": {"paths": [...]}}}``).
+       ``describe`` response (nested ``{"capabilities": {"content": {"paths": [...]}}}``)
     2. ``Host._build_registry()`` normalises the nested format and registers
        the content paths in the service index.
     3. ``assemble_system_prompt()`` fetches only ``context/`` files via
@@ -324,10 +346,10 @@ async def test_content_injection_end_to_end(tmp_path: Path) -> None:
 
 
 async def test_mention_resolution_end_to_end(tmp_path: Path) -> None:
-    """Integration: resolve_mention() routes @namespace:path to the correct service.
+    """Integration: NamespaceResolver routes @namespace:path to the correct service.
 
     Verifies that after ``_build_registry()`` populates the content registry,
-    ``resolve_mention()`` can:
+    ``NamespaceResolver`` can:
 
     * Fetch a non-context/ file (agents/explorer.md) that is excluded from
       auto-assembly but accessible via explicit @mention.
@@ -350,20 +372,14 @@ async def test_mention_resolution_end_to_end(tmp_path: Path) -> None:
     try:
         await host._build_registry()
 
+        ns_resolver = NamespaceResolver(host._registry, host._services)
+
         # agents/ file: excluded from auto-assembly but reachable via @mention
-        agent_content = await resolve_mention(
-            "@content_svc:agents/explorer.md",
-            host._registry,
-            host._services,
-        )
+        agent_content = await ns_resolver("@content_svc:agents/explorer.md")
         assert agent_content == "# Explorer Agent\nExplore things."
 
         # context/ file: also reachable via explicit @mention
-        ctx_content = await resolve_mention(
-            "@content_svc:context/philosophy.md",
-            host._registry,
-            host._services,
-        )
+        ctx_content = await ns_resolver("@content_svc:context/philosophy.md")
         assert ctx_content == "# Philosophy\nBe excellent."
     finally:
         await shutdown_service(service, timeout=5.0)

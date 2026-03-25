@@ -8,7 +8,7 @@ from amplifier_ipc.host.config import (
     parse_session_config,
     resolve_service_command,
 )
-from amplifier_ipc.host.content import assemble_system_prompt, resolve_mention
+from amplifier_ipc.host.content import assemble_system_prompt
 from amplifier_ipc.host.definition_registry import Registry
 from amplifier_ipc.host.definitions import (
     AgentDefinition,
@@ -96,7 +96,6 @@ __all__ = [
     # Router
     "Router",
     # Content
-    "resolve_mention",
     "assemble_system_prompt",
     # Persistence
     "SessionPersistence",
