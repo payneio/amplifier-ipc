@@ -104,6 +104,20 @@ class ModeHooks:
         self._warned_tools: set[str] = set()
         self._active_mode: ModeDefinition | None = None
 
+    def set_active_mode(self, mode: ModeDefinition) -> None:
+        """Set the active mode and reset warned-tools tracking."""
+        self._active_mode = mode
+        self._warned_tools.clear()
+
+    def clear_active_mode(self) -> None:
+        """Clear the active mode and reset warned-tools tracking."""
+        self._active_mode = None
+        self._warned_tools.clear()
+
+    def get_active_mode(self) -> ModeDefinition | None:
+        """Return the currently active mode, or None if no mode is active."""
+        return self._active_mode
+
     async def handle(self, event: str, data: dict) -> HookResult:
         """Dispatch to the appropriate handler based on event type."""
         if event == "provider:request":
