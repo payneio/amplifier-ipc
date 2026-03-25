@@ -3,7 +3,8 @@
 Every interaction with context, provider, hooks, and tools is performed via
 JSON-RPC requests through ``client``.  No direct object references.
 
-Event names are defined locally (no amplifier_lite dependency).
+Core events (session, prompt, tool) are defined locally; content-block and
+provider:response events are imported from amplifier_ipc_protocol.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ from amplifier_ipc_protocol.events import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Event name constants (local — no amplifier_lite dependency)
+# Event name constants — local definitions (remaining Phase-1 events; see import above for content_block/provider:response)
 # ---------------------------------------------------------------------------
 
 PROMPT_SUBMIT = "prompt:submit"

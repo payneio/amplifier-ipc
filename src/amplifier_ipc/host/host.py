@@ -130,7 +130,7 @@ class Host:
         hook never crashes the session.
 
         Args:
-            event_name: The hook event name (e.g. ``"session.start"``).
+            event_name: The hook event name (e.g. ``"session:start"``).
             data: Arbitrary payload attached to the event.
         """
         if self._router is None:
