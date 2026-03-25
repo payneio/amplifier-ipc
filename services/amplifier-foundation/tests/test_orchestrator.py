@@ -849,3 +849,217 @@ async def test_orchestrator_emits_content_block_start_end() -> None:
     assert start_events[1]["data"]["block_type"] == "text", (
         f"Expected block_type='text' for block 1, got {start_events[1]['data']['block_type']!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 16: execution:start is the very first hook event emitted by execute()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_execution_start() -> None:
+    """execution:start must be the first hook event fired with payload {\"prompt\": ...}."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": chat_response("Hello!"),
+        }
+    )
+
+    result = await orch.execute("Hello", {}, client)
+    assert result == "Hello!"
+
+    # Find all hook_emit calls in order
+    hook_emit_calls = [
+        params
+        for kind, method, params in client.call_log
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+    ]
+
+    assert len(hook_emit_calls) >= 1, "Expected at least one hook_emit call"
+
+    # execution:start must be the very first hook event
+    first_hook = hook_emit_calls[0]
+    assert first_hook.get("event") == "execution:start", (
+        f"Expected first hook event to be 'execution:start', got {first_hook.get('event')!r}"
+    )
+
+    # Payload must contain prompt
+    data = first_hook.get("data", {})
+    assert data.get("prompt") == "Hello", (
+        f"Expected prompt='Hello' in execution:start payload, got {data.get('prompt')!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 17: execution:end has status='completed' and response text on normal exit
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_execution_end_completed() -> None:
+    """execution:end must fire with status='completed' and the final response text on normal exit."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": chat_response("Final answer."),
+        }
+    )
+
+    result = await orch.execute("Hello", {}, client)
+    assert result == "Final answer."
+
+    # Find execution:end hook_emit call
+    execution_end_calls = [
+        params
+        for kind, method, params in client.call_log
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") == "execution:end"
+    ]
+
+    assert len(execution_end_calls) == 1, (
+        f"Expected exactly 1 execution:end hook_emit, got {len(execution_end_calls)}"
+    )
+
+    data = execution_end_calls[0].get("data", {})
+    assert data.get("status") == "completed", (
+        f"Expected status='completed' in execution:end payload, got {data.get('status')!r}"
+    )
+    assert data.get("response") == "Final answer.", (
+        f"Expected response='Final answer.' in execution:end payload, got {data.get('response')!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 18: execution:end has status='cancelled' on cancelled exit path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_execution_end_cancelled() -> None:
+    """execution:end must fire with status='cancelled' when orch._cancelled is set True mid-loop."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    # Custom client that sets _cancelled=True after provider_complete is called
+    # so the cancellation checkpoint after the call fires.
+    class CancellingClient(MockClient):
+        def __init__(self, target_orch: Any, responses: dict) -> None:
+            super().__init__(responses)
+            self._target_orch = target_orch
+
+        async def request(self, method: str, params: Any = None) -> Any:
+            result = await super().request(method, params)
+            if method == "request.provider_complete":
+                self._target_orch._cancelled = True
+            return result
+
+    client = CancellingClient(
+        orch,
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            # Return a response with tool_calls so the second cancellation
+            # checkpoint (before tool dispatch) is reached.
+            "request.provider_complete": chat_response(
+                "partial response",
+                tool_calls=[{"id": "c1", "tool": "my_tool", "arguments": {}}],
+            ),
+        },
+    )
+
+    result = await orch.execute("Hello", {}, client)
+    assert result == "partial response"
+
+    # Find execution:end hook_emit call
+    execution_end_calls = [
+        params
+        for kind, method, params in client.call_log
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") == "execution:end"
+    ]
+
+    assert len(execution_end_calls) == 1, (
+        f"Expected exactly 1 execution:end hook_emit, got {len(execution_end_calls)}"
+    )
+
+    data = execution_end_calls[0].get("data", {})
+    assert data.get("status") == "cancelled", (
+        f"Expected status='cancelled' in execution:end payload, got {data.get('status')!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 19: execution:end fires with status='error' even when provider raises
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_execution_end_error() -> None:
+    """execution:end must fire with status='error' and response='' even when provider raises."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    class ProviderError(Exception):
+        retryable = False
+
+    orch = StreamingOrchestrator()
+
+    class RaisingClient(MockClient):
+        async def request(self, method: str, params: Any = None) -> Any:
+            if method == "request.provider_complete":
+                raise ProviderError("provider exploded")
+            return await super().request(method, params)
+
+    client = RaisingClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+        }
+    )
+
+    # execute() must re-raise the ProviderError
+    with pytest.raises(ProviderError):
+        await orch.execute("Hello", {}, client)
+
+    # Despite the exception, execution:end must still have fired (via finally)
+    execution_end_calls = [
+        params
+        for kind, method, params in client.call_log
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") == "execution:end"
+    ]
+
+    assert len(execution_end_calls) == 1, (
+        f"Expected exactly 1 execution:end hook_emit on error path, got {len(execution_end_calls)}"
+    )
+
+    data = execution_end_calls[0].get("data", {})
+    assert data.get("status") == "error", (
+        f"Expected status='error' in execution:end payload, got {data.get('status')!r}"
+    )
+    assert data.get("response") == "", (
+        f"Expected response='' in execution:end payload on error path, got {data.get('response')!r}"
+    )

@@ -125,312 +125,345 @@ class StreamingOrchestrator:
         Returns:
             The final assistant response text.
         """
+        # --- emit execution:start (first event in execute) ---
+        await self._hook_emit(client, EXECUTION_START, {"prompt": prompt})
+
         # Allow config overrides
         max_iterations: int = config.get("max_iterations", self.max_iterations)
         min_delay_ms: int = config.get("min_delay_between_calls_ms", 0)
         provider_name: str = config.get("provider_name", "unknown")
 
-        # Reset per-execute state
-        self._pending_ephemeral_injections = []
-        self._last_provider_call_end = None
-        self._cancelled = False
+        _execution_status = "completed"
+        _execution_response = ""
 
-        # ----------------------------------------------------------------
-        # Step 1: emit prompt:submit — check for DENY
-        # ----------------------------------------------------------------
-        submit_result = await self._hook_emit(client, PROMPT_SUBMIT, {"prompt": prompt})
+        try:
+            # Reset per-execute state
+            self._pending_ephemeral_injections = []
+            self._last_provider_call_end = None
+            self._cancelled = False
 
-        if submit_result.action == HookAction.DENY:
-            return f"Operation denied: {submit_result.reason}"
-
-        # Store ephemeral injection from prompt:submit
-        self._store_ephemeral_injection(submit_result)
-
-        # ----------------------------------------------------------------
-        # Step 2: add user message to context
-        # ----------------------------------------------------------------
-        user_msg = Message(role="user", content=prompt)
-        await client.request(
-            "request.context_add_message",
-            {"message": user_msg.model_dump()},
-        )
-
-        # ----------------------------------------------------------------
-        # Step 3: main agent loop
-        # ----------------------------------------------------------------
-        iteration = 0
-        response_text = ""
-        _was_cancelled = False
-
-        while max_iterations == -1 or iteration < max_iterations:
-            iteration += 1
-
-            # --- cancellation checkpoint (top of iteration) ---
-            if self._cancelled:
-                _was_cancelled = True
-                break
-
-            # --- emit provider:request, check DENY ---
-            req_result = await self._hook_emit(
-                client, PROVIDER_REQUEST, {"iteration": iteration}
+            # ----------------------------------------------------------------
+            # Step 1: emit prompt:submit — check for DENY
+            # ----------------------------------------------------------------
+            submit_result = await self._hook_emit(
+                client, PROMPT_SUBMIT, {"prompt": prompt}
             )
-            if req_result.action == HookAction.DENY:
-                return f"Operation denied: {req_result.reason}"
 
-            # --- get messages from context ---
-            messages_raw = await client.request("request.context_get_messages", {})
-            messages: list[Message] = [
-                Message.model_validate(m) for m in (messages_raw or [])
-            ]
+            if submit_result.action == HookAction.DENY:
+                return f"Operation denied: {submit_result.reason}"
 
-            # --- apply ephemeral injections from previous tool:post or prompt:submit ---
-            messages = self._apply_ephemeral_injections(messages)
+            # Store ephemeral injection from prompt:submit
+            self._store_ephemeral_injection(submit_result)
 
-            # --- apply any context injection from provider:request hook ---
-            if (
-                req_result.action == HookAction.INJECT_CONTEXT
-                and req_result.ephemeral
-                and req_result.context_injection
-            ):
-                messages = self._inject_into_messages(
-                    messages,
-                    req_result.context_injection,
-                    req_result.context_injection_role,
-                    req_result.append_to_last_tool_result,
+            # ----------------------------------------------------------------
+            # Step 2: add user message to context
+            # ----------------------------------------------------------------
+            user_msg = Message(role="user", content=prompt)
+            await client.request(
+                "request.context_add_message",
+                {"message": user_msg.model_dump()},
+            )
+
+            # ----------------------------------------------------------------
+            # Step 3: main agent loop
+            # ----------------------------------------------------------------
+            iteration = 0
+            response_text = ""
+            _was_cancelled = False
+
+            while max_iterations == -1 or iteration < max_iterations:
+                iteration += 1
+
+                # --- cancellation checkpoint (top of iteration) ---
+                if self._cancelled:
+                    _was_cancelled = True
+                    break
+
+                # --- emit provider:request, check DENY ---
+                req_result = await self._hook_emit(
+                    client, PROVIDER_REQUEST, {"iteration": iteration}
+                )
+                if req_result.action == HookAction.DENY:
+                    return f"Operation denied: {req_result.reason}"
+
+                # --- get messages from context ---
+                messages_raw = await client.request("request.context_get_messages", {})
+                messages: list[Message] = [
+                    Message.model_validate(m) for m in (messages_raw or [])
+                ]
+
+                # --- apply ephemeral injections from previous tool:post or prompt:submit ---
+                messages = self._apply_ephemeral_injections(messages)
+
+                # --- apply any context injection from provider:request hook ---
+                if (
+                    req_result.action == HookAction.INJECT_CONTEXT
+                    and req_result.ephemeral
+                    and req_result.context_injection
+                ):
+                    messages = self._inject_into_messages(
+                        messages,
+                        req_result.context_injection,
+                        req_result.context_injection_role,
+                        req_result.append_to_last_tool_result,
+                    )
+
+                # --- apply rate limit delay ---
+                await self._apply_rate_limit_delay(client, min_delay_ms, iteration)
+
+                # --- build ChatRequest ---
+                chat_request = ChatRequest(
+                    messages=messages,
+                    tools=config.get("tools"),
+                    reasoning_effort=config.get("reasoning_effort"),
                 )
 
-            # --- apply rate limit delay ---
-            await self._apply_rate_limit_delay(client, min_delay_ms, iteration)
+                # --- call provider.complete (with retry + exponential backoff) ---
+                response_raw: Any = None
+                for _attempt in range(_MAX_PROVIDER_RETRIES + 1):
+                    try:
+                        response_raw = await client.request(
+                            "request.provider_complete",
+                            {"request": chat_request.model_dump()},
+                        )
+                        break  # success — exit retry loop
+                    except Exception as exc:
+                        # Determine whether the error is retryable.
+                        # Check both a top-level attribute and a nested data dict
+                        # (e.g. JsonRpcError carries error details in .data).
+                        retryable: bool = bool(getattr(exc, "retryable", False))
+                        if not retryable:
+                            exc_data = getattr(exc, "data", None)
+                            if isinstance(exc_data, dict):
+                                retryable = bool(exc_data.get("retryable", False))
 
-            # --- build ChatRequest ---
-            chat_request = ChatRequest(
-                messages=messages,
-                tools=config.get("tools"),
-                reasoning_effort=config.get("reasoning_effort"),
-            )
+                        is_last_attempt = _attempt >= _MAX_PROVIDER_RETRIES
 
-            # --- call provider.complete (with retry + exponential backoff) ---
-            response_raw: Any = None
-            for _attempt in range(_MAX_PROVIDER_RETRIES + 1):
-                try:
-                    response_raw = await client.request(
-                        "request.provider_complete",
-                        {"request": chat_request.model_dump()},
-                    )
-                    break  # success — exit retry loop
-                except Exception as exc:
-                    # Determine whether the error is retryable.
-                    # Check both a top-level attribute and a nested data dict
-                    # (e.g. JsonRpcError carries error details in .data).
-                    retryable: bool = bool(getattr(exc, "retryable", False))
-                    if not retryable:
-                        exc_data = getattr(exc, "data", None)
-                        if isinstance(exc_data, dict):
-                            retryable = bool(exc_data.get("retryable", False))
+                        if not retryable or is_last_attempt:
+                            logger.error(
+                                "Provider call failed on iteration %d (attempt %d/%d): %s",
+                                iteration,
+                                _attempt + 1,
+                                _MAX_PROVIDER_RETRIES + 1,
+                                exc,
+                            )
+                            await self._hook_emit(
+                                client,
+                                PROVIDER_ERROR,
+                                {
+                                    "iteration": iteration,
+                                    "error": {
+                                        "type": type(exc).__name__,
+                                        "msg": str(exc),
+                                    },
+                                },
+                            )
+                            raise
 
-                    is_last_attempt = _attempt >= _MAX_PROVIDER_RETRIES
-
-                    if not retryable or is_last_attempt:
-                        logger.error(
-                            "Provider call failed on iteration %d (attempt %d/%d): %s",
-                            iteration,
+                        # Retryable error — back off then retry.
+                        delay = _PROVIDER_RETRY_DELAYS[_attempt]
+                        logger.warning(
+                            "Provider call failed (attempt %d/%d, retrying in %.1fs): %s",
                             _attempt + 1,
                             _MAX_PROVIDER_RETRIES + 1,
+                            delay,
                             exc,
                         )
                         await self._hook_emit(
                             client,
-                            PROVIDER_ERROR,
+                            PROVIDER_RETRY,
                             {
-                                "iteration": iteration,
+                                "attempt": _attempt + 1,
+                                "max_retries": _MAX_PROVIDER_RETRIES,
+                                "delay_s": delay,
                                 "error": {
                                     "type": type(exc).__name__,
                                     "msg": str(exc),
                                 },
                             },
                         )
-                        raise
+                        await asyncio.sleep(delay)
+                self._last_provider_call_end = time.monotonic()
 
-                    # Retryable error — back off then retry.
-                    delay = _PROVIDER_RETRY_DELAYS[_attempt]
-                    logger.warning(
-                        "Provider call failed (attempt %d/%d, retrying in %.1fs): %s",
-                        _attempt + 1,
-                        _MAX_PROVIDER_RETRIES + 1,
-                        delay,
-                        exc,
-                    )
-                    await self._hook_emit(
-                        client,
-                        PROVIDER_RETRY,
-                        {
-                            "attempt": _attempt + 1,
-                            "max_retries": _MAX_PROVIDER_RETRIES,
-                            "delay_s": delay,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "msg": str(exc),
-                            },
-                        },
-                    )
-                    await asyncio.sleep(delay)
-            self._last_provider_call_end = time.monotonic()
+                chat_response = ChatResponse.model_validate(response_raw)
 
-            chat_response = ChatResponse.model_validate(response_raw)
+                # --- emit provider:response hook ---
+                await self._hook_emit(
+                    client,
+                    PROVIDER_RESPONSE,
+                    {
+                        "provider": provider_name,
+                        "response": response_raw,
+                        "usage": chat_response.usage,
+                    },
+                )
 
-            # --- emit provider:response hook ---
-            await self._hook_emit(
-                client,
-                PROVIDER_RESPONSE,
-                {
-                    "provider": provider_name,
-                    "response": response_raw,
-                    "usage": chat_response.usage,
-                },
-            )
+                # --- extract response text ---
+                response_text = self._extract_text(chat_response)
 
-            # --- extract response text ---
-            response_text = self._extract_text(chat_response)
+                # --- stream thinking notifications (before stream.token) ---
+                if chat_response.content_blocks:
+                    for _block_idx, block in enumerate(chat_response.content_blocks):
+                        # Determine block type
+                        if isinstance(block, dict):
+                            _block_type = block.get("type", "unknown")
+                        elif hasattr(block, "type"):
+                            _block_type = block.type
+                        else:
+                            _block_type = "unknown"
 
-            # --- stream thinking notifications (before stream.token) ---
-            if chat_response.content_blocks:
-                for _block_idx, block in enumerate(chat_response.content_blocks):
-                    # Determine block type
-                    if isinstance(block, dict):
-                        _block_type = block.get("type", "unknown")
-                    elif hasattr(block, "type"):
-                        _block_type = block.type
-                    else:
-                        _block_type = "unknown"
-
-                    # Emit content_block:start before processing
-                    await self._hook_emit(
-                        client,
-                        CONTENT_BLOCK_START,
-                        {"block_type": _block_type, "index": _block_idx},
-                    )
-
-                    if isinstance(block, ThinkingBlock):
-                        thinking_text = block.thinking
-                    elif isinstance(block, dict) and block.get("type") == "thinking":
-                        thinking_text = block.get("thinking", "")
-                    else:
-                        thinking_text = None
-                    if thinking_text:
-                        await client.send_notification(
-                            STREAM_THINKING, {"thinking": thinking_text}
+                        # Emit content_block:start before processing
+                        await self._hook_emit(
+                            client,
+                            CONTENT_BLOCK_START,
+                            {"block_type": _block_type, "index": _block_idx},
                         )
 
-                    # Emit content_block:end after processing
-                    await self._hook_emit(
-                        client,
-                        CONTENT_BLOCK_END,
-                        {"block_type": _block_type, "index": _block_idx},
+                        if isinstance(block, ThinkingBlock):
+                            thinking_text = block.thinking
+                        elif (
+                            isinstance(block, dict) and block.get("type") == "thinking"
+                        ):
+                            thinking_text = block.get("thinking", "")
+                        else:
+                            thinking_text = None
+                        if thinking_text:
+                            await client.send_notification(
+                                STREAM_THINKING, {"thinking": thinking_text}
+                            )
+
+                        # Emit content_block:end after processing
+                        await self._hook_emit(
+                            client,
+                            CONTENT_BLOCK_END,
+                            {"block_type": _block_type, "index": _block_idx},
+                        )
+
+                # --- stream token notification ---
+                if response_text:
+                    await client.send_notification(
+                        "stream.token", {"text": response_text}
                     )
 
-            # --- stream token notification ---
-            if response_text:
-                await client.send_notification("stream.token", {"text": response_text})
-
-            # --- add assistant message to context ---
-            # Always store extracted text in content (not chat_response.content which
-            # may include ToolCallBlock objects that duplicate the tool_calls field).
-            assistant_msg = Message(
-                role="assistant",
-                content=response_text,
-                tool_calls=chat_response.tool_calls,
-            )
-            await client.request(
-                "request.context_add_message",
-                {"message": assistant_msg.model_dump()},
-            )
-
-            # --- if no tool calls, we're done ---
-            if not chat_response.tool_calls:
-                break
-
-            # --- cancellation checkpoint (before tool dispatch) ---
-            if self._cancelled:
-                _was_cancelled = True
-                break
-
-            # --- parallel tool dispatch ---
-            tool_tasks = [
-                self._execute_tool(tc, client) for tc in chat_response.tool_calls
-            ]
-            tool_results = await asyncio.gather(*tool_tasks)
-
-            # --- add tool results to context sequentially ---
-            # Iterate in tool_call order (asyncio.gather preserves order).
-            # Two fixes applied here:
-            #
-            # Fix 29 (ephemeral ordering): post_results are stored NOW, in
-            # tool_call order, rather than in non-deterministic completion
-            # order inside _execute_tool.
-            #
-            # Fix 31 (is_error visibility): when success is False, mark the
-            # message with metadata["is_error"] = True so providers that
-            # support it (e.g. Anthropic) can treat it as a tool error block.
-            for tool_call_id, tool_name, content, success, post_result in tool_results:
-                # Fix 29: queue ephemeral injection in original tool_call order.
-                if post_result is not None:
-                    self._store_ephemeral_injection(post_result)
-
-                # Fix 31: add is_error metadata for failed tool results.
-                metadata: dict[str, Any] | None = (
-                    {"is_error": True} if not success else None
-                )
-                tool_msg = Message(
-                    role="tool",
-                    name=tool_name,
-                    tool_call_id=tool_call_id,
-                    content=content,
-                    metadata=metadata,
+                # --- add assistant message to context ---
+                # Always store extracted text in content (not chat_response.content which
+                # may include ToolCallBlock objects that duplicate the tool_calls field).
+                assistant_msg = Message(
+                    role="assistant",
+                    content=response_text,
+                    tool_calls=chat_response.tool_calls,
                 )
                 await client.request(
                     "request.context_add_message",
-                    {"message": tool_msg.model_dump()},
+                    {"message": assistant_msg.model_dump()},
                 )
 
-        # ----------------------------------------------------------------
-        # Cancellation: skip orchestrator:complete / prompt:complete and
-        # return immediately.  The caller sees the last partial response.
-        # ----------------------------------------------------------------
-        if _was_cancelled:
-            logger.info("Orchestrator cancelled after %d iteration(s)", iteration)
+                # --- if no tool calls, we're done ---
+                if not chat_response.tool_calls:
+                    break
+
+                # --- cancellation checkpoint (before tool dispatch) ---
+                if self._cancelled:
+                    _was_cancelled = True
+                    break
+
+                # --- parallel tool dispatch ---
+                tool_tasks = [
+                    self._execute_tool(tc, client) for tc in chat_response.tool_calls
+                ]
+                tool_results = await asyncio.gather(*tool_tasks)
+
+                # --- add tool results to context sequentially ---
+                # Iterate in tool_call order (asyncio.gather preserves order).
+                # Two fixes applied here:
+                #
+                # Fix 29 (ephemeral ordering): post_results are stored NOW, in
+                # tool_call order, rather than in non-deterministic completion
+                # order inside _execute_tool.
+                #
+                # Fix 31 (is_error visibility): when success is False, mark the
+                # message with metadata["is_error"] = True so providers that
+                # support it (e.g. Anthropic) can treat it as a tool error block.
+                for (
+                    tool_call_id,
+                    tool_name,
+                    content,
+                    success,
+                    post_result,
+                ) in tool_results:
+                    # Fix 29: queue ephemeral injection in original tool_call order.
+                    if post_result is not None:
+                        self._store_ephemeral_injection(post_result)
+
+                    # Fix 31: add is_error metadata for failed tool results.
+                    metadata: dict[str, Any] | None = (
+                        {"is_error": True} if not success else None
+                    )
+                    tool_msg = Message(
+                        role="tool",
+                        name=tool_name,
+                        tool_call_id=tool_call_id,
+                        content=content,
+                        metadata=metadata,
+                    )
+                    await client.request(
+                        "request.context_add_message",
+                        {"message": tool_msg.model_dump()},
+                    )
+
+            # ----------------------------------------------------------------
+            # Cancellation: skip orchestrator:complete / prompt:complete and
+            # return immediately.  The caller sees the last partial response.
+            # ----------------------------------------------------------------
+            if _was_cancelled:
+                logger.info("Orchestrator cancelled after %d iteration(s)", iteration)
+                _execution_status = "cancelled"
+                _execution_response = response_text
+                return response_text
+
+            # warn if we hit max iterations
+            max_iterations_hit = max_iterations != -1 and iteration >= max_iterations
+            if max_iterations_hit:
+                logger.warning("Max iterations (%d) reached", max_iterations)
+
+            # ----------------------------------------------------------------
+            # Step 4: emit orchestrator:complete
+            # ----------------------------------------------------------------
+            await self._hook_emit(
+                client,
+                ORCHESTRATOR_COMPLETE,
+                {
+                    "orchestrator": "streaming",
+                    "turn_count": iteration,
+                    "status": "max_iterations_reached"
+                    if max_iterations_hit
+                    else "success",
+                },
+            )
+
+            # ----------------------------------------------------------------
+            # Step 5: emit prompt:complete and return
+            # ----------------------------------------------------------------
+            await self._hook_emit(
+                client,
+                PROMPT_COMPLETE,
+                {
+                    "response_preview": response_text[:200],
+                    "length": len(response_text),
+                },
+            )
+
+            _execution_response = response_text
             return response_text
-
-        # warn if we hit max iterations
-        max_iterations_hit = max_iterations != -1 and iteration >= max_iterations
-        if max_iterations_hit:
-            logger.warning("Max iterations (%d) reached", max_iterations)
-
-        # ----------------------------------------------------------------
-        # Step 4: emit orchestrator:complete
-        # ----------------------------------------------------------------
-        await self._hook_emit(
-            client,
-            ORCHESTRATOR_COMPLETE,
-            {
-                "orchestrator": "streaming",
-                "turn_count": iteration,
-                "status": "max_iterations_reached" if max_iterations_hit else "success",
-            },
-        )
-
-        # ----------------------------------------------------------------
-        # Step 5: emit prompt:complete and return
-        # ----------------------------------------------------------------
-        await self._hook_emit(
-            client,
-            PROMPT_COMPLETE,
-            {
-                "response_preview": response_text[:200],
-                "length": len(response_text),
-            },
-        )
-
-        return response_text
+        except Exception:
+            _execution_status = "error"
+            raise
+        finally:
+            await self._hook_emit(
+                client,
+                EXECUTION_END,
+                {"response": _execution_response, "status": _execution_status},
+            )
 
     # ------------------------------------------------------------------
     # Tool execution
