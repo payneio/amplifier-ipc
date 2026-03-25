@@ -67,6 +67,18 @@ def generate_child_session_id(parent_session_id: str, agent_name: str) -> str:
 
 
 def is_top_level_session(session_id: str) -> bool:
+    """Return True if *session_id* is a root session (contains no underscore).
+
+    Child session IDs embed an underscore before the agent name suffix
+    (e.g. ``0000000000000000-<span>_agent-name``). Root session IDs are
+    plain UUIDs with no underscore.
+
+    Args:
+        session_id: The session ID string to test.
+
+    Returns:
+        ``True`` for root/top-level sessions; ``False`` for child sessions.
+    """
     return "_" not in session_id
 
 
