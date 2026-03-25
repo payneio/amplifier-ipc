@@ -248,6 +248,8 @@ async def launch_session(
                     ``service_configs``.  Same TODO as ``model_override``.
         verbose: When True, print additional session setup detail (resolved
                  services, applied overrides) to stdout.
+        working_dir: If set, passed to the Host constructor to set its working
+                     directory.
 
     Returns:
         A Host instance configured from the resolved agent definition.
