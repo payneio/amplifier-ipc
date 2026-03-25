@@ -1697,6 +1697,104 @@ async def test_resolve_agent_base_returns_empty_on_error() -> None:
     assert result == ""
 
 
+# ---------------------------------------------------------------------------
+# Tests for _preprocess_tool_mentions (task-11)
+# ---------------------------------------------------------------------------
+
+
+def test_preprocess_tool_mentions_resolves_arguments() -> None:
+    """_preprocess_tool_mentions replaces @mentions in string arguments.
+
+    Verifies:
+    - @mention in a string arg is replaced with resolved content
+    - non-string args are left unchanged
+    - original params dict is not mutated (shallow copy semantics)
+    """
+    from unittest.mock import MagicMock
+
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings())
+
+    # Mock resolver: @project:context.md -> "resolved content"
+    host.mention_resolver.resolve = MagicMock(
+        side_effect=lambda m: "resolved content" if m == "@project:context.md" else None
+    )
+
+    original_arguments = {
+        "instruction": "Read @project:context.md and summarize",
+        "count": 42,  # non-string, should be left unchanged
+    }
+    params = {"name": "read_file", "arguments": original_arguments}
+
+    result = host._preprocess_tool_mentions(params)
+
+    # @mention is resolved in the instruction string
+    assert "resolved content" in result["arguments"]["instruction"]
+    assert "@project:context.md" not in result["arguments"]["instruction"]
+
+    # Non-string args unchanged
+    assert result["arguments"]["count"] == 42
+
+    # Original params not mutated
+    assert "@project:context.md" in original_arguments["instruction"]
+    assert params["arguments"] is original_arguments  # original dict unchanged
+
+
+def test_preprocess_tool_mentions_leaves_unresolved() -> None:
+    """_preprocess_tool_mentions leaves unresolved @mentions intact."""
+    from unittest.mock import MagicMock
+
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings())
+
+    # Resolver returns None for all mentions (unresolvable)
+    host.mention_resolver.resolve = MagicMock(return_value=None)
+
+    params = {
+        "name": "read_file",
+        "arguments": {"instruction": "Read @project:unknown.md please"},
+    }
+
+    result = host._preprocess_tool_mentions(params)
+
+    # Unresolved mention is left intact
+    assert "@project:unknown.md" in result["arguments"]["instruction"]
+
+
+def test_preprocess_tool_mentions_non_dict_passthrough() -> None:
+    """_preprocess_tool_mentions returns non-dict params as-is."""
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings())
+
+    # Non-dict params returned unchanged
+    assert host._preprocess_tool_mentions(None) is None
+    assert host._preprocess_tool_mentions("string") == "string"
+    assert host._preprocess_tool_mentions(42) == 42
+
+    # Dict without arguments key returned unchanged
+    params_no_args: dict[str, Any] = {"name": "tool"}
+    assert host._preprocess_tool_mentions(params_no_args) is params_no_args
+
+    # Dict with non-dict arguments returned unchanged
+    params_list_args: dict[str, Any] = {"name": "tool", "arguments": ["a", "b"]}
+    assert host._preprocess_tool_mentions(params_list_args) is params_list_args
+
+
 def test_host_run_creates_persistence_for_preset_session_id() -> None:
     """Verifies that pre-setting _session_id before run() still creates persistence.
 

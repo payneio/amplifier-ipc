@@ -24,6 +24,7 @@ from amplifier_ipc.host.config import (
 from amplifier_ipc.host.content import assemble_system_prompt
 from amplifier_ipc.host.mentions import (
     MentionResolverChain,
+    parse_mentions,
     resolve_and_load,
 )
 from amplifier_ipc.host.events import (
@@ -1001,7 +1002,78 @@ class Host:
         """
         if self._router is None:
             raise RuntimeError("Router has not been initialised")
+        if method == "request.tool_execute":
+            params = self._preprocess_tool_mentions(params)
         return await self._router.route_request(method, params)
+
+    # ------------------------------------------------------------------
+    # Tool input pre-processing
+    # ------------------------------------------------------------------
+
+    def _preprocess_tool_mentions(self, params: Any) -> Any:
+        """Pre-process tool execution params by resolving @mentions in string arguments.
+
+        Scans each string argument value for ``@mention`` patterns and resolves
+        them via the :attr:`mention_resolver` chain.  Non-string argument values
+        are left untouched.  Unresolved mentions remain in the string unchanged
+        (logged at debug).  Per-mention exceptions are caught and logged at
+        warning level so a single failing resolution never corrupts the whole
+        call.
+
+        Args:
+            params: The JSON-RPC params payload from the orchestrator.
+
+        Returns:
+            A shallow copy of *params* with the ``arguments`` dict updated when
+            at least one mention was resolved, or the original *params* object
+            unchanged when no mentions were resolved or the input is not in the
+            expected format.
+        """
+        if not isinstance(params, dict):
+            return params
+
+        arguments = params.get("arguments")
+        if not isinstance(arguments, dict):
+            return params
+
+        new_args = dict(arguments)
+        changed = False
+
+        for key, value in arguments.items():
+            if not isinstance(value, str):
+                continue
+
+            mentions = parse_mentions(value)
+            if not mentions:
+                continue
+
+            new_value = value
+            for mention in mentions:
+                try:
+                    resolved = self.mention_resolver.resolve(mention)
+                    if resolved is None:
+                        logger.debug(
+                            "_preprocess_tool_mentions: unresolved mention %r in arg %r",
+                            mention,
+                            key,
+                        )
+                    else:
+                        new_value = new_value.replace(mention, resolved)
+                        changed = True
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "_preprocess_tool_mentions: error resolving mention %r in arg %r",
+                        mention,
+                        key,
+                    )
+
+            if new_value != value:
+                new_args[key] = new_value
+
+        if not changed:
+            return params
+
+        return {**params, "arguments": new_args}
 
     # ------------------------------------------------------------------
     # Working directory content loading
