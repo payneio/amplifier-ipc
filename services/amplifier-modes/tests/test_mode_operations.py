@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from amplifier_modes.__main__ import ModeServer
 from amplifier_modes.hooks.mode import ModeDefinition, ModeHooks
 
 
@@ -97,8 +98,6 @@ class _MockWriter:
 @pytest.mark.asyncio
 async def test_mode_server_wires_tool_to_hook() -> None:
     """ModeServer wires ModeTool._mode_hooks to the ModeHooks instance after configure."""
-    from amplifier_modes.__main__ import ModeServer
-
     server = ModeServer("amplifier_modes")
     reader = asyncio.StreamReader()
     writer = _MockWriter()
@@ -125,8 +124,6 @@ async def test_mode_server_wires_tool_to_hook() -> None:
 @pytest.mark.asyncio
 async def test_mode_server_describe_still_works() -> None:
     """ModeServer describe response includes 'mode' in tool names (no regression)."""
-    from amplifier_modes.__main__ import ModeServer
-
     server = ModeServer("amplifier_modes")
     reader = asyncio.StreamReader()
     writer = _MockWriter()
