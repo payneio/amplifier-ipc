@@ -1147,7 +1147,37 @@ async def test_orchestrator_loop_yields_tool_call_event() -> None:
     assert events[3].result == "done"
 
 
-async def test_build_spawn_handler_provides_event_callback() -> None:
+@pytest.fixture()
+def spawn_handler_host() -> Host:
+    """Pre-configured Host for testing _build_spawn_handler."""
+    registry = ServiceIndex()
+    registry.register(
+        "foundation",
+        {
+            "tools": [],
+            "hooks": [],
+            "orchestrators": [{"name": "loop"}],
+            "context_managers": [{"name": "simple"}],
+            "providers": [{"name": "anthropic"}],
+            "content": [],
+        },
+    )
+    config = SessionConfig(
+        services=["foundation"],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+    host = Host(config=config, settings=settings)
+    host._registry = registry
+    host._persistence = None
+    return host
+
+
+async def test_build_spawn_handler_provides_event_callback(
+    spawn_handler_host: Host,
+) -> None:
     """_build_spawn_handler passes event_callback that wraps child events in ChildSessionEvent.
 
     Verifies that when spawn_child_session is called the handler:
@@ -1163,30 +1193,7 @@ async def test_build_spawn_handler_provides_event_callback() -> None:
     )
     from amplifier_ipc.host.spawner import SpawnRequest
 
-    registry = ServiceIndex()
-    registry.register(
-        "foundation",
-        {
-            "tools": [],
-            "hooks": [],
-            "orchestrators": [{"name": "loop"}],
-            "context_managers": [{"name": "simple"}],
-            "providers": [{"name": "anthropic"}],
-            "content": [],
-        },
-    )
-
-    config = SessionConfig(
-        services=["foundation"],
-        orchestrator="loop",
-        context_manager="simple",
-        provider="anthropic",
-    )
-    settings = HostSettings()
-
-    host = Host(config=config, settings=settings)
-    host._registry = registry
-    host._persistence = None
+    host = spawn_handler_host
 
     captured_callback: list[Any] = []
 
@@ -1241,37 +1248,16 @@ async def test_build_spawn_handler_provides_event_callback() -> None:
     assert queue_items[2].depth == 1
 
 
-async def test_build_spawn_handler_passes_child_session_id() -> None:
+async def test_build_spawn_handler_passes_child_session_id(
+    spawn_handler_host: Host,
+) -> None:
     """_build_spawn_handler generates child_session_id once and passes it to spawn_child_session.
 
     Verifies that the spawn handler:
     1. Passes child_session_id as a keyword argument to spawn_child_session.
     2. The child_session_id contains the agent name (e.g., '_explorer').
     """
-    registry = ServiceIndex()
-    registry.register(
-        "foundation",
-        {
-            "tools": [],
-            "hooks": [],
-            "orchestrators": [{"name": "loop"}],
-            "context_managers": [{"name": "simple"}],
-            "providers": [{"name": "anthropic"}],
-            "content": [],
-        },
-    )
-
-    config = SessionConfig(
-        services=["foundation"],
-        orchestrator="loop",
-        context_manager="simple",
-        provider="anthropic",
-    )
-    settings = HostSettings()
-
-    host = Host(config=config, settings=settings)
-    host._registry = registry
-    host._persistence = None
+    host = spawn_handler_host
 
     captured_kwargs: list[dict[str, Any]] = []
 
