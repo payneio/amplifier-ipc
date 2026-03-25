@@ -296,7 +296,7 @@ def test_chain_resolve_first_wins() -> None:
     """First resolver returning non-None wins; subsequent resolvers are not needed."""
     r1 = FakeSyncResolver("first result")
     r2 = FakeSyncResolver("second result")
-    chain = MentionResolverChain(resolvers=[r1, r2])
+    chain = MentionResolverChain(resolvers=[r1, r2])  # type: ignore[arg-type]
     assert chain.resolve("@ns:path.md") == "first result"
 
 
@@ -304,7 +304,7 @@ def test_chain_resolve_skips_none() -> None:
     """Resolvers returning None are skipped; the next resolver is tried."""
     r1 = FakeSyncResolver(None)
     r2 = FakeSyncResolver("second result")
-    chain = MentionResolverChain(resolvers=[r1, r2])
+    chain = MentionResolverChain(resolvers=[r1, r2])  # type: ignore[arg-type]
     assert chain.resolve("@ns:path.md") == "second result"
 
 
@@ -312,23 +312,23 @@ def test_chain_resolve_all_none() -> None:
     """Returns None when all resolvers in the chain return None."""
     r1 = FakeSyncResolver(None)
     r2 = FakeSyncResolver(None)
-    chain = MentionResolverChain(resolvers=[r1, r2])
+    chain = MentionResolverChain(resolvers=[r1, r2])  # type: ignore[arg-type]
     assert chain.resolve("@ns:path.md") is None
 
 
 def test_chain_prepend() -> None:
     """prepend inserts a resolver at the front (highest priority)."""
     r_existing = FakeSyncResolver("existing")
-    chain = MentionResolverChain(resolvers=[r_existing])
+    chain = MentionResolverChain(resolvers=[r_existing])  # type: ignore[arg-type]
     r_prepended = FakeSyncResolver("prepended")
-    chain.prepend(r_prepended)
+    chain.prepend(r_prepended)  # type: ignore[arg-type]
     assert chain.resolve("@ns:path.md") == "prepended"
 
 
 def test_chain_append() -> None:
     """append adds a resolver at the end (lowest priority)."""
     r_none = FakeSyncResolver(None)
-    chain = MentionResolverChain(resolvers=[r_none])
+    chain = MentionResolverChain(resolvers=[r_none])  # type: ignore[arg-type]
     r_appended = FakeSyncResolver("appended")
-    chain.append(r_appended)
+    chain.append(r_appended)  # type: ignore[arg-type]
     assert chain.resolve("@ns:path.md") == "appended"
