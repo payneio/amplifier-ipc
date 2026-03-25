@@ -700,3 +700,48 @@ async def test_spawn_child_session_uses_provided_child_session_id() -> None:
     assert mock_run.called
     args, _ = mock_run.call_args
     assert args[0] == provided_id
+
+
+# ---------------------------------------------------------------------------
+# Triple-ID consistency integration test (1 test)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_triple_id_consistency_events_return_and_host() -> None:
+    """All three IDs (events, return value, Host persistence) must match.
+
+    Before the fix, _build_spawn_handler generated ID-A for events,
+    spawn_child_session generated ID-B for the return value, and Host.run()
+    generated ID-C for disk persistence. Now they all match.
+    """
+    from amplifier_ipc.host.events import CompleteEvent
+
+    provided_id = "0000000000000000-abcdef0123456789_test-agent"
+
+    async def mock_run(prompt: str):  # type: ignore[return]
+        yield CompleteEvent(result="done")
+
+    with patch("amplifier_ipc.host.host.Host") as MockHost:
+        mock_instance = MagicMock()
+        mock_instance._session_id = None
+        mock_instance.run = mock_run
+        MockHost.return_value = mock_instance
+
+        result = await _run_child_session(
+            child_session_id=provided_id,
+            child_config={},
+            instruction="test instruction",
+            request=SpawnRequest(agent="test-agent", instruction="test instruction"),
+        )
+
+    # Host persistence ID matches
+    assert mock_instance._session_id == provided_id, (
+        f"Host._session_id mismatch: expected {provided_id!r}, "
+        f"got {mock_instance._session_id!r}"
+    )
+    # Return dict ID matches
+    assert result["session_id"] == provided_id, (
+        f"Return value session_id mismatch: expected {provided_id!r}, "
+        f"got {result['session_id']!r}"
+    )
