@@ -54,7 +54,7 @@ from amplifier_ipc.protocol.errors import (
     JsonRpcError,
     make_error_response,
 )
-from amplifier_ipc_protocol.events import SESSION_END, SESSION_START  # noqa: F401  # SESSION_END used in a future task (session:end emission)
+from amplifier_ipc_protocol.events import SESSION_END, SESSION_START
 from amplifier_ipc.protocol.framing import read_message, write_message
 
 logger = logging.getLogger(__name__)
@@ -360,6 +360,7 @@ class Host:
         session_id = self._session_id
         assert self._persistence is not None
 
+        _session_status = "completed"
         try:
             # 1b. Load shared state from persistence
             self._state = self._persistence.load_state()
@@ -480,7 +481,17 @@ class Host:
             self._persistence.save_metadata(existing_meta)
             self._persistence.finalize()
 
+        except asyncio.CancelledError:
+            _session_status = "cancelled"
+            raise
+        except Exception:
+            _session_status = "failed"
+            raise
         finally:
+            await self._emit_hook_event(
+                SESSION_END,
+                {"session_id": self._session_id, "status": _session_status},
+            )
             await self._teardown_services()
 
     # ------------------------------------------------------------------

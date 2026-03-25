@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,7 @@ import pytest
 from amplifier_ipc.host.config import HostSettings, SessionConfig
 from amplifier_ipc.host.host import Host
 from amplifier_ipc.host.service_index import ServiceIndex
-from amplifier_ipc_protocol.events import SESSION_START
+from amplifier_ipc_protocol.events import SESSION_END, SESSION_START
 
 
 # ---------------------------------------------------------------------------
@@ -230,3 +231,84 @@ async def test_run_session_start_includes_parent_id(tmp_path: Path) -> None:
 
     _, payload = start_calls[0]
     assert payload["parent_id"] == "parent-123"
+
+
+@pytest.mark.asyncio
+async def test_run_emits_session_end_completed(tmp_path: Path) -> None:
+    """Host.run() emits SESSION_END with status='completed' on normal exit."""
+    host = _make_host_with_registry(session_dir=tmp_path)
+
+    calls = await _drain(host)
+
+    end_calls = [(evt, data) for evt, data in calls if evt == SESSION_END]
+    assert len(end_calls) == 1, f"Expected 1 session:end call, got {len(end_calls)}"
+
+    _, payload = end_calls[0]
+    assert payload["session_id"] == host._session_id
+    assert payload["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_run_emits_session_end_failed(tmp_path: Path) -> None:
+    """Host.run() emits SESSION_END with status='failed' when orchestrator raises RuntimeError."""
+    host = _make_host_with_registry(session_dir=tmp_path)
+
+    captured: list[tuple[str, dict[str, Any]]] = []
+
+    async def capture_emit(event_name: str, data: dict[str, Any]) -> None:
+        captured.append((event_name, data))
+
+    async def exploding_loop(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("orchestrator exploded")
+        yield  # type: ignore[misc]  # noqa: unreachable
+
+    with (
+        patch.object(host, "_emit_hook_event", capture_emit),
+        patch.object(host, "_orchestrator_loop", exploding_loop),
+        patch(
+            "amplifier_ipc.host.host.assemble_system_prompt",
+            AsyncMock(return_value="system prompt"),
+        ),
+        pytest.raises(RuntimeError, match="orchestrator exploded"),
+    ):
+        async for _ in host.run("hello"):
+            pass
+
+    end_calls = [(evt, data) for evt, data in captured if evt == SESSION_END]
+    assert len(end_calls) == 1, f"Expected 1 session:end call, got {len(end_calls)}"
+
+    _, payload = end_calls[0]
+    assert payload["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_run_emits_session_end_cancelled(tmp_path: Path) -> None:
+    """Host.run() emits SESSION_END with status='cancelled' when CancelledError is raised."""
+    host = _make_host_with_registry(session_dir=tmp_path)
+
+    captured: list[tuple[str, dict[str, Any]]] = []
+
+    async def capture_emit(event_name: str, data: dict[str, Any]) -> None:
+        captured.append((event_name, data))
+
+    async def cancelled_loop(*args: Any, **kwargs: Any) -> Any:
+        raise asyncio.CancelledError()
+        yield  # type: ignore[misc]  # noqa: unreachable
+
+    with (
+        patch.object(host, "_emit_hook_event", capture_emit),
+        patch.object(host, "_orchestrator_loop", cancelled_loop),
+        patch(
+            "amplifier_ipc.host.host.assemble_system_prompt",
+            AsyncMock(return_value="system prompt"),
+        ),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        async for _ in host.run("hello"):
+            pass
+
+    end_calls = [(evt, data) for evt, data in captured if evt == SESSION_END]
+    assert len(end_calls) == 1, f"Expected 1 session:end call, got {len(end_calls)}"
+
+    _, payload = end_calls[0]
+    assert payload["status"] == "cancelled"
