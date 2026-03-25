@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from amplifier_ipc.host.service_index import ServiceIndex
 
@@ -122,6 +122,38 @@ class WorkingDirResolver:
         except (FileNotFoundError, OSError):
             logger.warning("WorkingDirResolver: could not read file %r", str(file_path))
             return None
+
+
+# ---------------------------------------------------------------------------
+# MentionResolverChain
+# ---------------------------------------------------------------------------
+
+
+class MentionResolverChain:
+    """Ordered chain of :class:`MentionResolver` instances.
+
+    Tries each resolver in order and returns the first non-``None`` result.
+    If all resolvers return ``None`` (or the chain is empty), returns ``None``.
+    """
+
+    def __init__(self, resolvers: list[MentionResolver] | None = None) -> None:
+        self._resolvers: list[MentionResolver] = list(resolvers) if resolvers else []
+
+    def resolve(self, mention: str) -> str | None:
+        """Try each resolver in order; return first non-``None`` result."""
+        for resolver in self._resolvers:
+            result = cast("str | None", resolver(mention))
+            if result is not None:
+                return result
+        return None
+
+    def prepend(self, resolver: MentionResolver) -> None:
+        """Insert *resolver* at the front of the chain (highest priority)."""
+        self._resolvers.insert(0, resolver)
+
+    def append(self, resolver: MentionResolver) -> None:
+        """Add *resolver* to the end of the chain (lowest priority)."""
+        self._resolvers.append(resolver)
 
 
 # ---------------------------------------------------------------------------

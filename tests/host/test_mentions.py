@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from amplifier_ipc.host.mentions import (
+    MentionResolverChain,
     NamespaceResolver,
     WorkingDirResolver,
     parse_mentions,
@@ -263,3 +264,71 @@ def test_working_dir_resolver_returns_none_for_missing_file(
         result = resolver("@~/nonexistent.md")
     assert result is None
     assert "nonexistent.md" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Helpers for MentionResolverChain tests
+# ---------------------------------------------------------------------------
+
+
+class FakeSyncResolver:
+    """Sync resolver that returns a fixed result for every mention."""
+
+    def __init__(self, result: str | None) -> None:
+        self._result = result
+
+    def __call__(self, mention: str) -> str | None:
+        return self._result
+
+
+# ---------------------------------------------------------------------------
+# Tests: MentionResolverChain
+# ---------------------------------------------------------------------------
+
+
+def test_chain_empty() -> None:
+    """Empty chain returns None for any mention."""
+    chain = MentionResolverChain()
+    assert chain.resolve("@ns:path.md") is None
+
+
+def test_chain_resolve_first_wins() -> None:
+    """First resolver returning non-None wins; subsequent resolvers are not needed."""
+    r1 = FakeSyncResolver("first result")
+    r2 = FakeSyncResolver("second result")
+    chain = MentionResolverChain(resolvers=[r1, r2])
+    assert chain.resolve("@ns:path.md") == "first result"
+
+
+def test_chain_resolve_skips_none() -> None:
+    """Resolvers returning None are skipped; the next resolver is tried."""
+    r1 = FakeSyncResolver(None)
+    r2 = FakeSyncResolver("second result")
+    chain = MentionResolverChain(resolvers=[r1, r2])
+    assert chain.resolve("@ns:path.md") == "second result"
+
+
+def test_chain_resolve_all_none() -> None:
+    """Returns None when all resolvers in the chain return None."""
+    r1 = FakeSyncResolver(None)
+    r2 = FakeSyncResolver(None)
+    chain = MentionResolverChain(resolvers=[r1, r2])
+    assert chain.resolve("@ns:path.md") is None
+
+
+def test_chain_prepend() -> None:
+    """prepend inserts a resolver at the front (highest priority)."""
+    r_existing = FakeSyncResolver("existing")
+    chain = MentionResolverChain(resolvers=[r_existing])
+    r_prepended = FakeSyncResolver("prepended")
+    chain.prepend(r_prepended)
+    assert chain.resolve("@ns:path.md") == "prepended"
+
+
+def test_chain_append() -> None:
+    """append adds a resolver at the end (lowest priority)."""
+    r_none = FakeSyncResolver(None)
+    chain = MentionResolverChain(resolvers=[r_none])
+    r_appended = FakeSyncResolver("appended")
+    chain.append(r_appended)
+    assert chain.resolve("@ns:path.md") == "appended"
