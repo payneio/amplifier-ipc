@@ -1492,6 +1492,77 @@ def test_host_has_mention_resolver_chain() -> None:
     assert isinstance(host.mention_resolver, MentionResolverChain)
 
 
+async def test_host_load_working_dir_content(tmp_path: Any) -> None:
+    """_load_working_dir_content returns XML-wrapped content of AGENTS.md and .amplifier/*.md files."""
+    # Create AGENTS.md
+    agents_md = tmp_path / "AGENTS.md"
+    agents_md.write_text("# Agents\nAgent instructions here.")
+
+    # Create .amplifier/*.md files
+    amplifier_dir = tmp_path / ".amplifier"
+    amplifier_dir.mkdir()
+    (amplifier_dir / "context.md").write_text("# Context\nSome context.")
+    (amplifier_dir / "skills.md").write_text("# Skills\nSome skills.")
+
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings(), working_dir=tmp_path)
+
+    result = await host._load_working_dir_content()
+
+    assert '<context_file path="AGENTS.md">' in result
+    assert "Agent instructions here." in result
+    assert '<context_file path=".amplifier/context.md">' in result
+    assert "Some context." in result
+    assert '<context_file path=".amplifier/skills.md">' in result
+    assert "Some skills." in result
+
+
+async def test_host_load_working_dir_content_no_dir() -> None:
+    """_load_working_dir_content returns empty string when working_dir is None."""
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings())  # no working_dir
+
+    result = await host._load_working_dir_content()
+
+    assert result == ""
+
+
+async def test_host_load_working_dir_content_deduplicates(tmp_path: Any) -> None:
+    """_load_working_dir_content deduplicates files with the same content (same SHA-256)."""
+    same_content = "# Same Content\nIdentical content in both files."
+
+    agents_md = tmp_path / "AGENTS.md"
+    agents_md.write_text(same_content)
+
+    amplifier_dir = tmp_path / ".amplifier"
+    amplifier_dir.mkdir()
+    (amplifier_dir / "context.md").write_text(same_content)  # same content
+
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings(), working_dir=tmp_path)
+
+    result = await host._load_working_dir_content()
+
+    # Only the first occurrence should be included (deduplication by SHA-256)
+    count = result.count(same_content)
+    assert count == 1, f"Expected content to appear once, but appeared {count} times"
+
+
 async def test_host_mention_resolver_uses_mutable_refs() -> None:
     """mention_resolver's NamespaceResolver uses mutable refs — resolves correctly after
     services are populated (mutable reference pattern).

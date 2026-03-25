@@ -22,7 +22,11 @@ from amplifier_ipc.host.config import (
     resolve_service_command,
 )
 from amplifier_ipc.host.content import assemble_system_prompt
-from amplifier_ipc.host.mentions import MentionResolverChain, NamespaceResolver
+from amplifier_ipc.host.mentions import (
+    MentionResolverChain,
+    NamespaceResolver,
+    resolve_and_load,
+)
 from amplifier_ipc.host.events import (
     ApprovalRequestEvent,
     ChildSessionEndEvent,
@@ -83,10 +87,12 @@ class Host:
         shared_registry: ServiceIndex | None = None,
         spawn_depth: int = 0,
         parent_session_id: str | None = None,
+        working_dir: Path | None = None,
     ) -> None:
         self._config = config
         self._settings = settings
         self._session_dir = session_dir or (Path.home() / ".amplifier" / "sessions")
+        self._working_dir = working_dir
         self._spawn_depth = spawn_depth
 
         # When shared_services/shared_registry are provided (child sessions), the Host
@@ -452,6 +458,11 @@ class Host:
             system_prompt = await assemble_system_prompt(
                 self._registry, self._services, resolver_chain=self.mention_resolver
             )
+
+            # 6a. Append working directory context (AGENTS.md + .amplifier/*.md)
+            working_dir_content = await self._load_working_dir_content()
+            if working_dir_content:
+                system_prompt = system_prompt + "\n" + working_dir_content
 
             # 6b. Stop the orchestrator service's Client background read loop.
             #
@@ -936,6 +947,77 @@ class Host:
         if self._router is None:
             raise RuntimeError("Router has not been initialised")
         return await self._router.route_request(method, params)
+
+    # ------------------------------------------------------------------
+    # Working directory content loading
+    # ------------------------------------------------------------------
+
+    async def _load_working_dir_content(self) -> str:
+        """Scan working directory for AGENTS.md and .amplifier/*.md files.
+
+        Collects:
+
+        * Root ``AGENTS.md`` (if present)
+        * All ``*.md`` files under ``.amplifier/`` (sorted)
+
+        For each file the content is deduplicated by SHA-256 hash, wrapped in
+        ``<context_file path="...">`` XML, and any ``@mention`` references
+        inside the file are recursively resolved via :func:`resolve_and_load`.
+        All files in a single call share the same ``seen_hashes`` set so
+        identical content is never included twice.
+
+        Returns:
+            Combined context string, or ``""`` if :attr:`_working_dir` is
+            ``None`` or no matching files were found.
+        """
+        import hashlib
+
+        if self._working_dir is None:
+            return ""
+
+        # Collect candidate files
+        files: list[Path] = []
+        agents_md = self._working_dir / "AGENTS.md"
+        if agents_md.exists():
+            files.append(agents_md)
+
+        amplifier_dir = self._working_dir / ".amplifier"
+        if amplifier_dir.is_dir():
+            files.extend(sorted(amplifier_dir.glob("*.md")))
+
+        if not files:
+            return ""
+
+        seen_hashes: set[str] = set()
+        parts: list[str] = []
+
+        for file_path in files:
+            try:
+                text = file_path.read_text(encoding="utf-8")
+            except OSError:
+                logger.warning(
+                    "_load_working_dir_content: could not read %r", str(file_path)
+                )
+                continue
+
+            content_hash = hashlib.sha256(text.encode()).hexdigest()
+            if content_hash in seen_hashes:
+                continue
+            seen_hashes.add(content_hash)
+
+            rel_path = file_path.relative_to(self._working_dir)
+            parts.append(f'<context_file path="{rel_path}">\n{text}\n</context_file>')
+
+            # Resolve @mentions found in the file (shared dedup via seen_hashes)
+            nested = resolve_and_load(
+                text, self.mention_resolver, seen_hashes=seen_hashes
+            )
+            for resolved in nested:
+                parts.append(
+                    f'<context_file path="{resolved.key}">\n{resolved.content}\n</context_file>'
+                )
+
+        return "\n".join(parts)
 
     # ------------------------------------------------------------------
     # Lifecycle helpers
