@@ -124,8 +124,38 @@ class ModeTool:
         )
 
     async def _handle_set(self, input: dict[str, Any]) -> ToolResult:
-        """Activate a mode — stub raises NotImplementedError."""
-        raise NotImplementedError("ModeTool.set is not yet implemented")
+        if self._mode_hooks is None:
+            return self._not_ready_result()
+        name = input.get("name")
+        if not name:
+            return ToolResult(
+                success=False,
+                error={
+                    "code": "missing_name",
+                    "message": "The 'name' parameter is required for set.",
+                },
+            )
+        modes = self._discover_modes()
+        mode = next((m for m in modes if m.name == name), None)
+        if mode is None:
+            available = [m.name for m in modes]
+            return ToolResult(
+                success=False,
+                error={
+                    "code": "unknown_mode",
+                    "message": f"Mode '{name}' not found.",
+                    "available": available,
+                },
+            )
+        self._mode_hooks.set_active_mode(mode)
+        return ToolResult(
+            success=True,
+            output={
+                "name": mode.name,
+                "description": mode.description,
+                "message": f"Mode '{mode.name}' activated.",
+            },
+        )
 
     async def _handle_clear(self) -> ToolResult:
         """Deactivate the current mode."""

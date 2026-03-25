@@ -444,3 +444,129 @@ async def test_list_returns_error_when_hooks_not_wired() -> None:
     assert result.success is False
     assert result.error is not None
     assert result.error["code"] == "not_ready"
+
+
+# ---------------------------------------------------------------------------
+# _handle_set operation tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_set_activates_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_handle_set activates the named mode and stores it in ModeHooks."""
+    _write_mode_file(tmp_path, "focus.md", _SAMPLE_MODE_CONTENT)
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "no-home"))
+
+    tool = ModeTool()
+    hooks = ModeHooks()
+    tool._mode_hooks = hooks
+
+    result = await tool.execute({"operation": "set", "name": "focus"})
+
+    assert result.success is True
+    assert result.output is not None
+    assert result.output["name"] == "focus"
+    assert "activated" in result.output["message"].lower()
+    # Verify hook state was actually updated
+    assert hooks.get_active_mode() is not None
+    assert hooks.get_active_mode().name == "focus"  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_set_unknown_mode_returns_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_handle_set returns unknown_mode error when name not found, listing available modes."""
+    _write_mode_file(tmp_path, "focus.md", _SAMPLE_MODE_CONTENT)
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "no-home"))
+
+    tool = ModeTool()
+    hooks = ModeHooks()
+    tool._mode_hooks = hooks
+
+    result = await tool.execute({"operation": "set", "name": "nonexistent"})
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error["code"] == "unknown_mode"
+    assert "nonexistent" in result.error["message"]
+    assert "available" in result.error
+    assert "focus" in result.error["available"]
+
+
+@pytest.mark.asyncio
+async def test_set_replaces_existing_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_handle_set replaces the existing active mode (set is not additive)."""
+    _write_mode_file(tmp_path, "focus.md", _SAMPLE_MODE_CONTENT)
+    _write_mode_file(tmp_path, "plan.md", _SAMPLE_MODE_2_CONTENT)
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "no-home"))
+
+    tool = ModeTool()
+    hooks = ModeHooks()
+    focus_mode = ModeDefinition(name="focus", description="Deep focus mode")
+    hooks.set_active_mode(focus_mode)
+    tool._mode_hooks = hooks
+
+    result = await tool.execute({"operation": "set", "name": "plan"})
+
+    assert result.success is True
+    assert result.output is not None
+    assert result.output["name"] == "plan"
+    # Verify that plan is now active (not focus)
+    active = hooks.get_active_mode()
+    assert active is not None
+    assert active.name == "plan"
+
+
+@pytest.mark.asyncio
+async def test_set_missing_name_returns_error() -> None:
+    """_handle_set returns missing_name error when 'name' param is not provided."""
+    tool = ModeTool()
+    hooks = ModeHooks()
+    tool._mode_hooks = hooks
+
+    result = await tool.execute({"operation": "set"})
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error["code"] == "missing_name"
+
+
+@pytest.mark.asyncio
+async def test_set_returns_error_when_hooks_not_wired() -> None:
+    """_handle_set returns not_ready error when _mode_hooks is None."""
+    tool = ModeTool()
+    # Do NOT set _mode_hooks — leave it as the class default (None)
+
+    result = await tool.execute({"operation": "set", "name": "focus"})
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error["code"] == "not_ready"
+
+
+@pytest.mark.asyncio
+async def test_set_with_no_modes_on_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_handle_set returns unknown_mode error when no mode files exist on disk."""
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path / "no-project"))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "no-home"))
+
+    tool = ModeTool()
+    hooks = ModeHooks()
+    tool._mode_hooks = hooks
+
+    result = await tool.execute({"operation": "set", "name": "focus"})
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error["code"] == "unknown_mode"
+    assert result.error["available"] == []
