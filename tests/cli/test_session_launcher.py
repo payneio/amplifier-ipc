@@ -771,3 +771,101 @@ agent:
         call_args = mock_host_class.call_args
         host_kwargs = call_args.kwargs if call_args.kwargs else {}
         assert host_kwargs.get("working_dir") is None
+
+
+# ---------------------------------------------------------------------------
+# AsyncIteratorMock helper
+# ---------------------------------------------------------------------------
+
+
+class AsyncIteratorMock:
+    """Async iterator helper for testing async for loops over host.run() output."""
+
+    def __init__(self, items: list) -> None:
+        self._items = list(items)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._items:
+            raise StopAsyncIteration
+        return self._items.pop(0)
+
+
+# ---------------------------------------------------------------------------
+# Test 11: TestRunCommandPassesWorkingDir
+# ---------------------------------------------------------------------------
+
+
+class TestRunCommandPassesWorkingDir:
+    def test_run_agent_passes_working_dir_to_launch_session(self) -> None:
+        """_run_agent converts working_dir str to Path and passes it to launch_session.
+
+        Case 1: explicit working_dir='/tmp/my-project' -> Path('/tmp/my-project')
+        Case 2: working_dir=None -> Path.cwd()
+        """
+        from unittest.mock import AsyncMock, patch
+
+        from amplifier_ipc.cli.commands.run import _run_agent
+
+        mock_host = MagicMock()
+        mock_host.run.return_value = AsyncIteratorMock([])
+        mock_host.session_id = None
+
+        with (
+            patch(
+                "amplifier_ipc.cli.commands.run._resolve_agent_name",
+                return_value="test-agent",
+            ),
+            patch(
+                "amplifier_ipc.cli.commands.run.launch_session",
+                new_callable=AsyncMock,
+            ) as mock_launch,
+            patch("amplifier_ipc.cli.commands.run.KeyManager") as mock_km,
+        ):
+            mock_launch.return_value = mock_host
+            mock_km.return_value.load_keys = MagicMock()
+
+            # Case 1: explicit working_dir string -> converted to Path
+            asyncio.run(
+                _run_agent(
+                    "test-agent",       # agent_name_arg
+                    "hello",            # message
+                    [],                 # behaviors
+                    None,               # session
+                    None,               # project
+                    "/tmp/my-project",  # working_dir
+                    None,               # provider
+                    None,               # model
+                    None,               # max_tokens
+                    False,              # verbose
+                    "text",             # output_format
+                )
+            )
+
+            call_kwargs = mock_launch.call_args.kwargs
+            assert call_kwargs["working_dir"] == Path("/tmp/my-project")
+
+            # Case 2: working_dir=None -> defaults to Path.cwd()
+            mock_launch.reset_mock()
+            mock_host.run.return_value = AsyncIteratorMock([])
+
+            asyncio.run(
+                _run_agent(
+                    "test-agent",  # agent_name_arg
+                    "hello",       # message
+                    [],            # behaviors
+                    None,          # session
+                    None,          # project
+                    None,          # working_dir
+                    None,          # provider
+                    None,          # model
+                    None,          # max_tokens
+                    False,         # verbose
+                    "text",        # output_format
+                )
+            )
+
+            call_kwargs = mock_launch.call_args.kwargs
+            assert call_kwargs["working_dir"] == Path.cwd()

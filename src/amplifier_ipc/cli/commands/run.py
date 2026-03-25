@@ -7,6 +7,7 @@ import json
 import sys
 import traceback
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import click
@@ -177,6 +178,7 @@ async def _run_agent(
             model_override=model,
             max_tokens=max_tokens,
             verbose=verbose,
+            working_dir=Path(working_dir) if working_dir else Path.cwd(),
         )
 
         if session is not None:
