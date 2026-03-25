@@ -133,6 +133,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "amplifier-ipc" },
+    { name = "amplifier-ipc-protocol" },
     { name = "beautifulsoup4" },
     { name = "click" },
     { name = "duckduckgo-search" },
@@ -151,6 +152,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "amplifier-ipc", directory = "../../" },
+    { name = "amplifier-ipc-protocol", directory = "../../amplifier-ipc-protocol" },
     { name = "beautifulsoup4", specifier = ">=4.12" },
     { name = "click", specifier = ">=8.0" },
     { name = "duckduckgo-search", specifier = ">=6.0" },
@@ -167,6 +169,7 @@ name = "amplifier-ipc"
 version = "0.1.0"
 source = { directory = "../../" }
 dependencies = [
+    { name = "amplifier-ipc-protocol" },
     { name = "click" },
     { name = "prompt-toolkit" },
     { name = "pydantic" },
@@ -177,6 +180,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "amplifier-ipc-protocol", directory = "../../amplifier-ipc-protocol" },
     { name = "click", specifier = ">=8.1.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
     { name = "pydantic", specifier = ">=2.0" },
@@ -187,6 +191,19 @@ requires-dist = [
     { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.0.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "amplifier-ipc-protocol"
+version = "0.1.0"
+source = { directory = "../../amplifier-ipc-protocol" }
+
+[package.metadata]
+requires-dist = [
+    { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1" },
 ]
 provides-extras = ["dev"]
