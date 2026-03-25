@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Optional
 
 from amplifier_ipc.protocol import ToolResult, tool
@@ -55,8 +56,6 @@ class ModeTool:
         )
 
     def _discover_modes(self) -> list[ModeDefinition]:
-        from pathlib import Path
-
         modes_by_name: dict[str, ModeDefinition] = {}
         # User-level first so project-level overwrites on collision
         for base in [Path.home(), Path.cwd()]:

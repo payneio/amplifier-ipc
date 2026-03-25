@@ -280,13 +280,12 @@ You are in planning mode. Think and discuss before acting.
 """
 
 
-def _write_mode_file(base: Path, name: str, content: str) -> Path:
+def _write_mode_file(base: Path, name: str, content: str) -> None:
     """Write a mode file to base/.amplifier/modes/name.md."""
     mode_dir = base / ".amplifier" / "modes"
     mode_dir.mkdir(parents=True, exist_ok=True)
     file_path = mode_dir / name
     file_path.write_text(content, encoding="utf-8")
-    return file_path
 
 
 def test_discover_modes_finds_project_modes(
@@ -304,6 +303,7 @@ def test_discover_modes_finds_project_modes(
     assert len(modes) == 1
     assert modes[0].name == "focus"
     assert modes[0].description == "Deep focus mode"
+    assert modes[0].source is not None and modes[0].source.endswith("focus.md")
 
 
 def test_discover_modes_finds_user_modes(
@@ -322,6 +322,7 @@ def test_discover_modes_finds_user_modes(
     assert len(modes) == 1
     assert modes[0].name == "focus"
     assert modes[0].description == "Deep focus mode"
+    assert modes[0].source is not None and modes[0].source.endswith("focus.md")
 
 
 def test_discover_modes_project_overrides_user(
