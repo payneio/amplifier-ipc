@@ -39,7 +39,8 @@ async def test_spawn_child_session_end_to_end() -> None:
     Verifies:
     - result has the correct response string
     - turn_count == 1
-    - session_id starts with zero-sentinel prefix (0000000000000000-)
+    - session_id uses W3C Trace Context format with all-zeros parent span (0000000000000000-)
+      because the parent is a root UUID session
     - session_id ends with '_self'
     - metadata has agent='self'
     """
