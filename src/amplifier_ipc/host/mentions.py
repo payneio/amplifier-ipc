@@ -4,11 +4,14 @@ Provides:
 
 * :func:`parse_mentions` — regex extraction of ``@namespace:path`` tokens from
   text, excluding code blocks, fenced blocks, and inline code.
-* :class:`MentionResolver` — async callable protocol for mention resolution.
+* :class:`MentionResolver` — **async** callable protocol (used by
+  :class:`NamespaceResolver`).  Do **not** add async resolvers to the chain.
+* :class:`SyncMentionResolver` — **sync** callable protocol accepted by
+  :class:`MentionResolverChain`.
 * :class:`NamespaceResolver` — resolves ``@namespace:path`` via ``content.read`` RPC.
 * :class:`WorkingDirResolver` — resolves ``@~/``, ``@user:``, ``@project:``
   via local filesystem.
-* :class:`MentionResolverChain` — ordered list of resolvers, first non-None wins.
+* :class:`MentionResolverChain` — ordered list of sync resolvers, first non-None wins.
 * :func:`resolve_and_load` — recursive loader with SHA-256 dedup and depth limit.
 """
 
@@ -19,7 +22,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from amplifier_ipc.host.service_index import ServiceIndex
 
@@ -37,9 +40,32 @@ class MentionResolver(Protocol):
 
     Returns the content string on success, or ``None`` if the mention cannot
     be resolved (unknown namespace, invalid format, RPC error, etc.).
+
+    .. note::
+        This is the **async** resolver protocol, used by :class:`NamespaceResolver`.
+        For the sync chain (:class:`MentionResolverChain`), use the
+        :class:`SyncMentionResolver` protocol instead.
     """
 
     async def __call__(self, mention: str) -> str | None:  # pragma: no cover
+        ...
+
+
+@runtime_checkable
+class SyncMentionResolver(Protocol):
+    """Sync callable that resolves a mention string to its content.
+
+    Returns the content string on success, or ``None`` if the mention cannot
+    be resolved (unknown namespace, invalid format, etc.).
+
+    This is the protocol accepted by :class:`MentionResolverChain`.  Its
+    :meth:`~MentionResolverChain.resolve` method is synchronous so only
+    sync-callable resolvers (e.g. :class:`WorkingDirResolver`) may be added.
+    Async resolvers such as :class:`NamespaceResolver` must **not** be added
+    to the chain — they must be called directly with ``await``.
+    """
+
+    def __call__(self, mention: str) -> str | None:  # pragma: no cover
         ...
 
 
@@ -132,34 +158,36 @@ class WorkingDirResolver:
 
 
 class MentionResolverChain:
-    """Ordered chain of :class:`MentionResolver` instances.
+    """Ordered chain of :class:`SyncMentionResolver` instances.
 
     Tries each resolver in order and returns the first non-``None`` result.
     If all resolvers return ``None`` (or the chain is empty), returns ``None``.
 
     .. note::
         :meth:`resolve` is synchronous; only sync-callable resolvers (e.g.,
-        :class:`WorkingDirResolver`) should be added to the chain.  For async
+        :class:`WorkingDirResolver`) may be added to the chain.  For async
         resolvers such as :class:`NamespaceResolver`, call them directly or
-        use an async wrapper.
+        use an async wrapper — **never** add an async resolver to this chain.
     """
 
-    def __init__(self, resolvers: list[MentionResolver] | None = None) -> None:
-        self._resolvers: list[MentionResolver] = list(resolvers) if resolvers else []
+    def __init__(self, resolvers: list[SyncMentionResolver] | None = None) -> None:
+        self._resolvers: list[SyncMentionResolver] = (
+            list(resolvers) if resolvers else []
+        )
 
     def resolve(self, mention: str) -> str | None:
         """Try each resolver in order; return first non-``None`` result."""
         for resolver in self._resolvers:
-            result = cast("str | None", resolver(mention))
+            result = resolver(mention)
             if result is not None:
                 return result
         return None
 
-    def prepend(self, resolver: MentionResolver) -> None:
+    def prepend(self, resolver: SyncMentionResolver) -> None:
         """Insert *resolver* at the front of the chain (highest priority)."""
         self._resolvers.insert(0, resolver)
 
-    def append(self, resolver: MentionResolver) -> None:
+    def append(self, resolver: SyncMentionResolver) -> None:
         """Add *resolver* to the end of the chain (lowest priority)."""
         self._resolvers.append(resolver)
 

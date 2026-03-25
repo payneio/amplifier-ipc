@@ -10,9 +10,11 @@ from amplifier_ipc.host.config import (
 )
 from amplifier_ipc.host.content import assemble_system_prompt
 from amplifier_ipc.host.mentions import (
+    MentionResolver,
     MentionResolverChain,
     NamespaceResolver,
     ResolvedContent,
+    SyncMentionResolver,
     WorkingDirResolver,
     parse_mentions,
     resolve_and_load,
@@ -106,6 +108,8 @@ __all__ = [
     # Content
     "assemble_system_prompt",
     # Mentions
+    "MentionResolver",
+    "SyncMentionResolver",
     "MentionResolverChain",
     "NamespaceResolver",
     "WorkingDirResolver",

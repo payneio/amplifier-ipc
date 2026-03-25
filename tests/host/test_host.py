@@ -1492,7 +1492,7 @@ def test_host_has_mention_resolver_chain() -> None:
     assert isinstance(host.mention_resolver, MentionResolverChain)
 
 
-async def test_host_load_working_dir_content(tmp_path: Any) -> None:
+def test_host_load_working_dir_content(tmp_path: Any) -> None:
     """_load_working_dir_content returns XML-wrapped content of AGENTS.md and .amplifier/*.md files."""
     # Create AGENTS.md
     agents_md = tmp_path / "AGENTS.md"
@@ -1512,7 +1512,7 @@ async def test_host_load_working_dir_content(tmp_path: Any) -> None:
     )
     host = Host(config=config, settings=HostSettings(), working_dir=tmp_path)
 
-    result = await host._load_working_dir_content()
+    result = host._load_working_dir_content()
 
     assert '<context_file path="AGENTS.md">' in result
     assert "Agent instructions here." in result
@@ -1522,7 +1522,7 @@ async def test_host_load_working_dir_content(tmp_path: Any) -> None:
     assert "Some skills." in result
 
 
-async def test_host_load_working_dir_content_no_dir() -> None:
+def test_host_load_working_dir_content_no_dir() -> None:
     """_load_working_dir_content returns empty string when working_dir is None."""
     config = SessionConfig(
         services=[],
@@ -1532,12 +1532,12 @@ async def test_host_load_working_dir_content_no_dir() -> None:
     )
     host = Host(config=config, settings=HostSettings())  # no working_dir
 
-    result = await host._load_working_dir_content()
+    result = host._load_working_dir_content()
 
     assert result == ""
 
 
-async def test_host_load_working_dir_content_deduplicates(tmp_path: Any) -> None:
+def test_host_load_working_dir_content_deduplicates(tmp_path: Any) -> None:
     """_load_working_dir_content deduplicates files with the same content (same SHA-256)."""
     same_content = "# Same Content\nIdentical content in both files."
 
@@ -1556,7 +1556,7 @@ async def test_host_load_working_dir_content_deduplicates(tmp_path: Any) -> None
     )
     host = Host(config=config, settings=HostSettings(), working_dir=tmp_path)
 
-    result = await host._load_working_dir_content()
+    result = host._load_working_dir_content()
 
     # Only the first occurrence should be included (deduplication by SHA-256)
     count = result.count(same_content)
@@ -1580,6 +1580,46 @@ def test_host_mention_resolver_starts_empty() -> None:
         provider="anthropic",
     )
     host = Host(config=config, settings=HostSettings())
+
+    assert isinstance(host.mention_resolver, MentionResolverChain)
+    assert len(host.mention_resolver._resolvers) == 0
+
+
+def test_host_working_dir_wires_resolver(tmp_path: Any) -> None:
+    """WorkingDirResolver is wired into mention_resolver chain when working_dir is set.
+
+    When working_dir is provided, the Host must populate the mention_resolver
+    chain with a WorkingDirResolver so @project:, @user:, and @~/ mentions
+    actually resolve to file content instead of silently returning None.
+    """
+    amplifier_dir = tmp_path / ".amplifier"
+    amplifier_dir.mkdir()
+    (amplifier_dir / "test.md").write_text("resolver content")
+
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings(), working_dir=tmp_path)
+
+    # Chain must resolve @project: mentions when working_dir is set
+    result = host.mention_resolver.resolve("@project:test.md")
+    assert result == "resolver content"
+
+
+def test_host_no_working_dir_chain_stays_empty() -> None:
+    """When working_dir is None, the mention_resolver chain remains empty."""
+    from amplifier_ipc.host.mentions import MentionResolverChain
+
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings())  # no working_dir
 
     assert isinstance(host.mention_resolver, MentionResolverChain)
     assert len(host.mention_resolver._resolvers) == 0

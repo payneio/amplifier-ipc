@@ -24,6 +24,7 @@ from amplifier_ipc.host.config import (
 from amplifier_ipc.host.content import assemble_system_prompt
 from amplifier_ipc.host.mentions import (
     MentionResolverChain,
+    WorkingDirResolver,
     parse_mentions,
     resolve_and_load,
 )
@@ -128,6 +129,8 @@ class Host:
         # NamespaceResolver is async and must NOT be added here — the chain's
         # resolve() method is synchronous and cannot await async callables.
         self.mention_resolver: MentionResolverChain = MentionResolverChain()
+        if working_dir is not None:
+            self.mention_resolver.append(WorkingDirResolver(working_dir))
 
     # ------------------------------------------------------------------
     # Hook event emission (session-level)
@@ -459,7 +462,7 @@ class Host:
             )
 
             # 6a. Append working directory context (AGENTS.md + .amplifier/*.md)
-            working_dir_content = await self._load_working_dir_content()
+            working_dir_content = self._load_working_dir_content()
             if working_dir_content:
                 system_prompt = system_prompt + "\n" + working_dir_content
 
@@ -1079,7 +1082,7 @@ class Host:
     # Working directory content loading
     # ------------------------------------------------------------------
 
-    async def _load_working_dir_content(self) -> str:
+    def _load_working_dir_content(self) -> str:
         """Scan working directory for AGENTS.md and .amplifier/*.md files.
 
         Collects:
