@@ -208,6 +208,7 @@ async def launch_session(
     model_override: str | None = None,
     max_tokens: int | None = None,
     verbose: bool = False,
+    working_dir: Path | None = None,
 ) -> Host:
     """Resolve an agent definition and create a Host ready to run a session.
 
@@ -335,4 +336,9 @@ async def launch_session(
     )
     settings = HostSettings(service_overrides=merged_overrides)
 
-    return Host(config, settings, service_configs=resolved.service_configs)
+    return Host(
+        config,
+        settings,
+        service_configs=resolved.service_configs,
+        working_dir=working_dir,
+    )

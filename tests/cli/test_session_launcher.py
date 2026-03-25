@@ -697,3 +697,77 @@ agent:
             asyncio.run(launch_session("no-source-agent", registry=registry))
 
         mock_install.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Test 10: TestLaunchSessionForwardsWorkingDir
+# ---------------------------------------------------------------------------
+
+
+class TestLaunchSessionForwardsWorkingDir:
+    def test_launch_session_forwards_working_dir_to_host(self, tmp_path: Path) -> None:
+        """launch_session forwards working_dir to the Host constructor."""
+        from amplifier_ipc.host.definition_registry import Registry
+        from amplifier_ipc.cli.session_launcher import launch_session
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+
+        agent_yaml = """\
+agent:
+  ref: wd-agent
+  uuid: aaaaaaaa-0000-0000-0000-000000000042
+  orchestrator: streaming
+  context_manager: simple
+  provider: anthropic
+  service:
+    stack: my-stack
+"""
+        registry.register_definition(agent_yaml)
+
+        fake_working_dir = tmp_path / "my-working-dir"
+        mock_host_instance = MagicMock()
+
+        with patch("amplifier_ipc.cli.session_launcher.Host") as mock_host_class:
+            mock_host_class.return_value = mock_host_instance
+            asyncio.run(
+                launch_session(
+                    "wd-agent", registry=registry, working_dir=fake_working_dir
+                )
+            )
+
+        assert mock_host_class.call_count == 1
+        call_args = mock_host_class.call_args
+        host_kwargs = call_args.kwargs if call_args.kwargs else {}
+        assert host_kwargs.get("working_dir") == fake_working_dir
+
+    def test_launch_session_omits_working_dir_when_none(self, tmp_path: Path) -> None:
+        """launch_session passes working_dir=None to Host when not provided."""
+        from amplifier_ipc.host.definition_registry import Registry
+        from amplifier_ipc.cli.session_launcher import launch_session
+
+        registry = Registry(home=tmp_path / "amplifier_home")
+        registry.ensure_home()
+
+        agent_yaml = """\
+agent:
+  ref: no-wd-agent
+  uuid: aaaaaaaa-0000-0000-0000-000000000043
+  orchestrator: streaming
+  context_manager: simple
+  provider: anthropic
+  service:
+    stack: my-stack
+"""
+        registry.register_definition(agent_yaml)
+
+        mock_host_instance = MagicMock()
+
+        with patch("amplifier_ipc.cli.session_launcher.Host") as mock_host_class:
+            mock_host_class.return_value = mock_host_instance
+            asyncio.run(launch_session("no-wd-agent", registry=registry))
+
+        assert mock_host_class.call_count == 1
+        call_args = mock_host_class.call_args
+        host_kwargs = call_args.kwargs if call_args.kwargs else {}
+        assert host_kwargs.get("working_dir") is None
