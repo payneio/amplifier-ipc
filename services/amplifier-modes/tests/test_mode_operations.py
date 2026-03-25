@@ -1,5 +1,12 @@
 """Tests for ModeHooks accessor methods: set_active_mode, clear_active_mode, get_active_mode."""
 
+from __future__ import annotations
+
+import asyncio
+import json
+
+import pytest
+
 from amplifier_modes.hooks.mode import ModeDefinition, ModeHooks
 
 
@@ -57,3 +64,84 @@ def test_clear_active_mode_is_idempotent() -> None:
     hooks.clear_active_mode()
     hooks.clear_active_mode()
     assert hooks.get_active_mode() is None
+
+
+# ---------------------------------------------------------------------------
+# ModeServer wiring tests
+# ---------------------------------------------------------------------------
+
+
+class _MockWriter:
+    """Collects bytes written via write()/drain() for later assertion."""
+
+    def __init__(self) -> None:
+        self._buf = bytearray()
+
+    def write(self, data: bytes) -> None:
+        self._buf.extend(data)
+
+    async def drain(self) -> None:
+        pass  # no-op for testing
+
+    @property
+    def messages(self) -> list[dict]:
+        """Parse all written newline-delimited JSON messages."""
+        result = []
+        for line in self._buf.split(b"\n"):
+            stripped = line.strip()
+            if stripped:
+                result.append(json.loads(stripped))
+        return result
+
+
+@pytest.mark.asyncio
+async def test_mode_server_wires_tool_to_hook() -> None:
+    """ModeServer wires ModeTool._mode_hooks to the ModeHooks instance after configure."""
+    from amplifier_modes.__main__ import ModeServer
+
+    server = ModeServer("amplifier_modes")
+    reader = asyncio.StreamReader()
+    writer = _MockWriter()
+
+    request = (
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "configure", "params": {}})
+        + "\n"
+    )
+    reader.feed_data(request.encode())
+    reader.feed_eof()
+
+    await server.handle_stream(reader, writer)
+
+    mode_tool = server._tools.get("mode")
+    assert mode_tool is not None, "ModeTool 'mode' must be registered"
+    assert hasattr(mode_tool, "_mode_hooks"), (
+        "ModeTool must have _mode_hooks attribute after wiring"
+    )
+    assert isinstance(mode_tool._mode_hooks, ModeHooks), (
+        f"Expected _mode_hooks to be ModeHooks instance, got: {type(mode_tool._mode_hooks)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_mode_server_describe_still_works() -> None:
+    """ModeServer describe response includes 'mode' in tool names (no regression)."""
+    from amplifier_modes.__main__ import ModeServer
+
+    server = ModeServer("amplifier_modes")
+    reader = asyncio.StreamReader()
+    writer = _MockWriter()
+
+    request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "describe"}) + "\n"
+    reader.feed_data(request.encode())
+    reader.feed_eof()
+
+    await server.handle_stream(reader, writer)
+
+    messages = writer.messages
+    assert len(messages) == 1, f"Expected 1 response, got {len(messages)}"
+    assert "result" in messages[0], f"Expected 'result' in response, got: {messages[0]}"
+
+    result = messages[0]["result"]
+    tools = result["capabilities"]["tools"]
+    tool_names = [t["name"] for t in tools]
+    assert "mode" in tool_names, f"Expected 'mode' in tool names; found: {tool_names}"
