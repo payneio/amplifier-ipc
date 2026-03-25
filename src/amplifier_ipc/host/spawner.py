@@ -20,6 +20,7 @@ from pydantic import BaseModel
 _SPAN_HEX_LEN = 16
 _DEFAULT_PARENT_SPAN = "0" * _SPAN_HEX_LEN
 _SPAN_PATTERN = re.compile(r"^([0-9a-f]{16})-([0-9a-f]{16})_")
+_AGENT_NAME_CLEANUP = re.compile(r"[^a-z0-9]+")
 
 
 def generate_child_session_id(parent_session_id: str, agent_name: str) -> str:
@@ -54,7 +55,7 @@ def generate_child_session_id(parent_session_id: str, agent_name: str) -> str:
 
     # Sanitize agent name
     sanitized = agent_name.lower()
-    sanitized = re.sub(r"[^a-z0-9]+", "-", sanitized)
+    sanitized = _AGENT_NAME_CLEANUP.sub("-", sanitized)
     sanitized = sanitized.strip("-.")
     if not sanitized:
         sanitized = "agent"

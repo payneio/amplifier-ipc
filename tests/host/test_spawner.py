@@ -77,7 +77,9 @@ def test_generate_child_session_id_sanitizes_agent_name() -> None:
     parent_session_id = "5b67d79f-4b83-4d05-8c63-666569550fcf"
     result = generate_child_session_id(parent_session_id, "My:Agent/Name")
     # Should be lowercase with non-alphanum collapsed to hyphens
-    assert "_my-agent-name" in result, f"Expected sanitized name in: {result}"
+    assert result.endswith("_my-agent-name"), (
+        f"Expected result to end with _my-agent-name, got: {result}"
+    )
 
 
 def test_generate_child_session_id_empty_agent_defaults() -> None:
