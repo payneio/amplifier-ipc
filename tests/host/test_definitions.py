@@ -512,3 +512,35 @@ def test_behavior_definition_has_ref_not_local_ref() -> None:
     assert not hasattr(behavior, "type"), (
         "BehaviorDefinition should not have a 'type' attribute"
     )
+
+
+# ---------------------------------------------------------------------------
+# AgentDefinition.base field tests
+# ---------------------------------------------------------------------------
+
+
+def test_agent_definition_base_field_default() -> None:
+    """AgentDefinition.base defaults to None when not specified."""
+    agent = AgentDefinition()
+    assert agent.base is None
+
+
+def test_parse_agent_definition_reads_base() -> None:
+    """parse_agent_definition() extracts base field from YAML."""
+    yaml_content = """\
+agent:
+  ref: my-agent
+  base: foundation:base-agent
+"""
+    result = parse_agent_definition(yaml_content)
+    assert result.base == "foundation:base-agent"
+
+
+def test_parse_agent_definition_base_absent() -> None:
+    """parse_agent_definition() sets base=None when base field is absent in YAML."""
+    yaml_content = """\
+agent:
+  ref: my-agent
+"""
+    result = parse_agent_definition(yaml_content)
+    assert result.base is None

@@ -50,6 +50,7 @@ class AgentDefinition(BaseModel):
     version: str | None = None
     description: str | None = None
     orchestrator: str | None = None
+    base: str | None = None
     context_manager: str | None = None
     provider: str | None = None
     tools: bool = False
@@ -162,6 +163,7 @@ def parse_agent_definition(yaml_content: str) -> AgentDefinition:
     component_config: dict[str, Any] = config if isinstance(config, dict) else {}
     return AgentDefinition(
         ref=data.get("ref"),
+        base=data.get("base"),
         uuid=data.get("uuid"),
         version=str(data["version"]) if data.get("version") is not None else None,
         description=data.get("description"),
