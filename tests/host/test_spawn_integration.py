@@ -62,7 +62,8 @@ async def test_spawn_child_session_end_to_end() -> None:
 
     assert result["response"] == "Hello world"
     assert result["turn_count"] == 1
-    assert result["session_id"].startswith(parent_session_id)
+    # W3C Trace Context format: root parents get zero-sentinel prefix
+    assert result["session_id"].startswith("0000000000000000-")
     assert result["session_id"].endswith("_self")
     assert result["metadata"]["agent"] == "self"
 

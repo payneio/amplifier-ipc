@@ -323,7 +323,7 @@ class Host:
         # the transcript accumulates across turns and can be replayed into the
         # (freshly spawned) context manager at the start of each subsequent turn.
         if self._session_id is None:
-            self._session_id = uuid.uuid4().hex[:16]
+            self._session_id = str(uuid.uuid4())
             self._persistence = SessionPersistence(self._session_id, self._session_dir)
 
         session_id = self._session_id
