@@ -28,9 +28,18 @@ from amplifier_ipc.protocol import (
     orchestrator,
 )
 from amplifier_ipc_protocol.events import (
+    CONTENT_BLOCK_DELTA,
     CONTENT_BLOCK_END,
     CONTENT_BLOCK_START,
+    EXECUTION_END,
+    EXECUTION_START,
+    LLM_REQUEST,
+    LLM_RESPONSE,
+    PROVIDER_RESOLVE,
     PROVIDER_RESPONSE,
+    PROVIDER_THROTTLE,
+    THINKING_DELTA,
+    THINKING_FINAL,
 )
 
 logger = logging.getLogger(__name__)
