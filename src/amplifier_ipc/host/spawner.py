@@ -469,6 +469,7 @@ async def spawn_child_session(
     shared_services: dict[str, Any] | None = None,
     shared_registry: Any | None = None,
     event_callback: Any | None = None,
+    child_session_id: str | None = None,
 ) -> Any:
     """Orchestrate spawning of a child session.
 
@@ -505,8 +506,9 @@ async def spawn_child_session(
     # 1. Enforce recursion depth limit
     check_self_delegation_depth(current_depth)
 
-    # 2. Generate child session ID
-    child_session_id = generate_child_session_id(parent_session_id, request.agent)
+    # 2. Use provided child session ID or generate one
+    if child_session_id is None:
+        child_session_id = generate_child_session_id(parent_session_id, request.agent)
 
     # 3. Build child config
     # Always clone the parent config so the child inherits orchestrator,

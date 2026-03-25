@@ -671,3 +671,32 @@ async def test_run_child_session_injects_session_id_into_host() -> None:
         )
 
     assert mock_instance._session_id == "0000000000000000-abcdef0123456789_explorer"
+
+
+@pytest.mark.asyncio
+async def test_spawn_child_session_uses_provided_child_session_id() -> None:
+    """spawn_child_session uses provided child_session_id instead of generating one."""
+    request = SpawnRequest(agent="self", instruction="Do something")
+    provided_id = "0000000000000000-abcdef0123456789_self"
+
+    with patch(
+        "amplifier_ipc.host.spawner._run_child_session", new_callable=AsyncMock
+    ) as mock_run:
+        mock_run.return_value = {
+            "session_id": provided_id,
+            "response": "result",
+            "turn_count": 1,
+            "metadata": {},
+        }
+        await spawn_child_session(
+            parent_session_id="parent-123",
+            parent_config={"tools": []},
+            transcript=[],
+            request=request,
+            current_depth=0,
+            child_session_id=provided_id,
+        )
+
+    assert mock_run.called
+    args, _ = mock_run.call_args
+    assert args[0] == provided_id
