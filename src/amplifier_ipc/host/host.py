@@ -80,6 +80,7 @@ class Host:
         shared_services: dict[str, Any] | None = None,
         shared_registry: ServiceIndex | None = None,
         spawn_depth: int = 0,
+        parent_session_id: str | None = None,
     ) -> None:
         self._config = config
         self._settings = settings
@@ -112,6 +113,32 @@ class Host:
         self._approval_queue: asyncio.Queue[bool] = asyncio.Queue()
         self._session_id: str | None = None
         self._resume_session_id: str | None = None
+        self._parent_session_id: str | None = parent_session_id
+
+    # ------------------------------------------------------------------
+    # Hook event emission (session-level)
+    # ------------------------------------------------------------------
+
+    async def _emit_hook_event(self, event_name: str, data: dict[str, Any]) -> None:
+        """Emit a hook event through the router.
+
+        No-op when no router is active (e.g. before ``run()`` is called).
+        Exceptions from the router are caught and logged so that a failing
+        hook never crashes the session.
+
+        Args:
+            event_name: The hook event name (e.g. ``"session.start"``).
+            data: Arbitrary payload attached to the event.
+        """
+        if self._router is None:
+            return
+        try:
+            await self._router.route_request(
+                "request.hook_emit",
+                {"event": event_name, "data": data},
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to emit hook event %r", event_name)
 
     # ------------------------------------------------------------------
     # Public API
