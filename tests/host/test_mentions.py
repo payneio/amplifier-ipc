@@ -2,7 +2,82 @@
 
 from __future__ import annotations
 
-from amplifier_ipc.host.mentions import parse_mentions
+from typing import Any
+
+from amplifier_ipc.host.mentions import NamespaceResolver, parse_mentions
+from amplifier_ipc.host.service_index import ServiceIndex
+
+
+# ---------------------------------------------------------------------------
+# Helpers for NamespaceResolver tests
+# ---------------------------------------------------------------------------
+
+
+class FakeClient:
+    """In-memory fake client that serves content.read requests."""
+
+    def __init__(self, files: dict[str, str]) -> None:
+        self._files = files
+
+    async def request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if method == "content.read":
+            path = params["path"]
+            if path in self._files:
+                return {"content": self._files[path]}
+            raise KeyError(f"File not found: {path}")
+        raise NotImplementedError(f"Unknown method: {method}")
+
+
+class FakeService:
+    """Wraps a FakeClient to look like a real service."""
+
+    def __init__(self, client: FakeClient) -> None:
+        self.client = client
+
+
+def _build_registry_and_services() -> tuple[ServiceIndex, dict[str, Any]]:
+    """Build a ServiceIndex and services dict for testing.
+
+    Creates:
+    - foundation: serves agents/explorer.md, context/shared/common.md
+    - superpowers: serves context/philosophy.md
+    """
+    registry = ServiceIndex()
+
+    # Register foundation service
+    registry.register(
+        "foundation",
+        {
+            "content": ["agents/explorer.md", "context/shared/common.md"],
+        },
+    )
+
+    # Register superpowers service
+    registry.register(
+        "superpowers",
+        {
+            "content": ["context/philosophy.md"],
+        },
+    )
+
+    foundation_client = FakeClient(
+        {
+            "agents/explorer.md": "Explorer agent content",
+            "context/shared/common.md": "Common context content",
+        }
+    )
+    superpowers_client = FakeClient(
+        {
+            "context/philosophy.md": "Philosophy content",
+        }
+    )
+
+    services: dict[str, Any] = {
+        "foundation": FakeService(foundation_client),
+        "superpowers": FakeService(superpowers_client),
+    }
+
+    return registry, services
 
 
 # ---------------------------------------------------------------------------
@@ -72,3 +147,50 @@ def test_parse_mentions_empty_text() -> None:
 def test_parse_mentions_no_mentions() -> None:
     """Text with no mentions returns empty list."""
     assert parse_mentions("Just plain text with no at-signs of interest.") == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: NamespaceResolver
+# ---------------------------------------------------------------------------
+
+
+async def test_namespace_resolver_resolves_known_namespace() -> None:
+    """Resolves a known @namespace:path mention by calling content.read RPC."""
+    registry, services = _build_registry_and_services()
+    resolver = NamespaceResolver(registry=registry, services=services)
+    result = await resolver("@foundation:agents/explorer.md")
+    assert result == "Explorer agent content"
+
+
+async def test_namespace_resolver_returns_none_for_unknown_namespace() -> None:
+    """Returns None when namespace is not in the registry."""
+    registry, services = _build_registry_and_services()
+    resolver = NamespaceResolver(registry=registry, services=services)
+    result = await resolver("@unknown:some/path.md")
+    assert result is None
+
+
+async def test_namespace_resolver_returns_none_for_invalid_format() -> None:
+    """Returns None when mention has no colon separator (invalid format)."""
+    registry, services = _build_registry_and_services()
+    resolver = NamespaceResolver(registry=registry, services=services)
+    result = await resolver("@nocolon")
+    assert result is None
+
+
+async def test_namespace_resolver_returns_none_on_rpc_error() -> None:
+    """Returns None gracefully when the RPC call raises an exception."""
+    registry, services = _build_registry_and_services()
+    resolver = NamespaceResolver(registry=registry, services=services)
+    # Request a path that doesn't exist in the FakeClient
+    result = await resolver("@foundation:agents/nonexistent.md")
+    assert result is None
+
+
+async def test_namespace_resolver_strips_at_prefix() -> None:
+    """Works with or without the leading @ prefix on the mention string."""
+    registry, services = _build_registry_and_services()
+    resolver = NamespaceResolver(registry=registry, services=services)
+    # Without @ prefix
+    result = await resolver("foundation:context/shared/common.md")
+    assert result == "Common context content"

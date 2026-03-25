@@ -19,11 +19,72 @@ import logging
 import re
 from dataclasses import dataclass  # noqa: F401 — used by resolver classes (future task)
 from pathlib import Path  # noqa: F401 — used by WorkingDirResolver (future task)
-from typing import Any, Protocol  # noqa: F401 — used by MentionResolver protocol (future task)
+from typing import Any, Protocol, runtime_checkable
 
-from amplifier_ipc.host.service_index import ServiceIndex  # noqa: F401 — used by NamespaceResolver (future task)
+from amplifier_ipc.host.service_index import ServiceIndex
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Resolver protocol
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class MentionResolver(Protocol):
+    """Async callable that resolves a mention string to its content.
+
+    Returns the content string on success, or ``None`` if the mention cannot
+    be resolved (unknown namespace, invalid format, RPC error, etc.).
+    """
+
+    async def __call__(self, mention: str) -> str | None:  # pragma: no cover
+        ...
+
+
+# ---------------------------------------------------------------------------
+# NamespaceResolver
+# ---------------------------------------------------------------------------
+
+
+class NamespaceResolver:
+    """Resolves ``@namespace:path`` mentions via ``content.read`` RPC.
+
+    Looks up the namespace in the service registry's content services, then
+    delegates to the matching service's client to read the file content.
+
+    Gracefully returns ``None`` on any error (unknown namespace, RPC failure,
+    missing key, etc.) to avoid crashing the caller.
+    """
+
+    def __init__(self, registry: ServiceIndex, services: dict[str, Any]) -> None:
+        self._registry = registry
+        self._services = services
+
+    async def __call__(self, mention: str) -> str | None:
+        """Resolve *mention* to its content, or return ``None`` on failure."""
+        # Strip optional leading @
+        ref = mention.lstrip("@")
+
+        # Must contain a colon to be a namespace:path mention
+        if ":" not in ref:
+            return None
+
+        namespace, path = ref.split(":", 1)
+
+        # Check namespace is registered as a content service
+        content_services = self._registry.get_content_services()
+        if namespace not in content_services:
+            return None
+
+        try:
+            service = self._services[namespace]
+            result = await service.client.request("content.read", {"path": path})
+            return result["content"]
+        except Exception:
+            logger.warning("NamespaceResolver: failed to resolve %r", mention)
+            return None
 
 
 # ---------------------------------------------------------------------------
