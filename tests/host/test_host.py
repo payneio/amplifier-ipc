@@ -1247,6 +1247,16 @@ async def test_build_spawn_handler_provides_event_callback(
     assert isinstance(queue_items[2], ChildSessionEndEvent)
     assert queue_items[2].depth == 1
 
+    # Verify session ID consistency: start event, end event, and spawn result all use same ID
+    start_event = queue_items[0]
+    end_event = queue_items[2]
+    assert start_event.session_id == end_event.session_id, (
+        "ChildSessionStartEvent and ChildSessionEndEvent must use the same session ID"
+    )
+    assert "_explorer" in start_event.session_id, (
+        "Session ID should contain the agent name suffix"
+    )
+
 
 async def test_build_spawn_handler_passes_child_session_id(
     spawn_handler_host: Host,
