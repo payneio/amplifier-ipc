@@ -1184,6 +1184,8 @@ async def test_build_spawn_handler_provides_event_callback(
     1. Emits ChildSessionStartEvent to _child_event_queue before spawning.
     2. Passes event_callback that wraps events in ChildSessionEvent(depth=1).
     3. Emits ChildSessionEndEvent to _child_event_queue after spawning (finally).
+    4. ChildSessionStartEvent and ChildSessionEndEvent share the same session ID,
+       and that ID contains the agent name suffix.
     """
     from amplifier_ipc.host.events import (
         ChildSessionEndEvent,
@@ -1247,7 +1249,7 @@ async def test_build_spawn_handler_provides_event_callback(
     assert isinstance(queue_items[2], ChildSessionEndEvent)
     assert queue_items[2].depth == 1
 
-    # Verify session ID consistency: start event, end event, and spawn result all use same ID
+    # Verify session ID consistency: start event and end event use the same ID
     start_event = queue_items[0]
     end_event = queue_items[2]
     assert start_event.session_id == end_event.session_id, (
