@@ -14,10 +14,8 @@ Provides:
 
 from __future__ import annotations
 
-import hashlib  # noqa: F401 — used by resolve_and_load (future task)
 import logging
 import re
-from dataclasses import dataclass  # noqa: F401 — used by resolver classes (future task)
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -65,7 +63,7 @@ class NamespaceResolver:
     async def __call__(self, mention: str) -> str | None:
         """Resolve *mention* to its content, or return ``None`` on failure."""
         # Strip optional leading @
-        ref = mention.lstrip("@")
+        ref = mention.removeprefix("@")
 
         # Must contain a colon to be a namespace:path mention
         if ":" not in ref:
@@ -108,7 +106,7 @@ class WorkingDirResolver:
 
     def __call__(self, mention: str) -> str | None:
         """Resolve *mention* to its file content, or return ``None`` on failure."""
-        ref = mention.lstrip("@")
+        ref = mention.removeprefix("@")
 
         if ref.startswith("~/"):
             file_path = self._home_dir / ref[2:]

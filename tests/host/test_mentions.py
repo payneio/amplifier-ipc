@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from amplifier_ipc.host.mentions import (
     NamespaceResolver,
@@ -248,11 +251,15 @@ def test_working_dir_resolver_returns_none_for_unhandled(tmp_path: Path) -> None
     assert result is None
 
 
-def test_working_dir_resolver_returns_none_for_missing_file(tmp_path: Path) -> None:
+def test_working_dir_resolver_returns_none_for_missing_file(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """Returns None (with warning) when the resolved file does not exist."""
     home_dir = tmp_path / "home"
     home_dir.mkdir()
 
     resolver = WorkingDirResolver(working_dir=tmp_path, home_dir=home_dir)
-    result = resolver("@~/nonexistent.md")
+    with caplog.at_level(logging.WARNING, logger="amplifier_ipc.host.mentions"):
+        result = resolver("@~/nonexistent.md")
     assert result is None
+    assert "nonexistent.md" in caplog.text
