@@ -44,7 +44,9 @@ class TestHandleToolCallEvent:
         event = ToolCallEvent(tool_name="bash", arguments={"command": "ls -la"})
 
         captured = StringIO()
-        with patch("click.echo", side_effect=lambda msg, **kw: captured.write(str(msg) + "\n")):
+        with patch(
+            "click.echo", side_effect=lambda msg, **kw: captured.write(str(msg) + "\n")
+        ):
             handle_host_event(event)
 
         assert "bash" in captured.getvalue()
@@ -69,7 +71,9 @@ class TestHandleToolResultEvent:
         """ToolResultEvent with failure should be handled without raising an error."""
         from amplifier_ipc.cli.repl import handle_host_event
 
-        event = ToolResultEvent(tool_name="bash", success=False, output="command not found")
+        event = ToolResultEvent(
+            tool_name="bash", success=False, output="command not found"
+        )
 
         # Should not raise
         handle_host_event(event)
@@ -85,7 +89,9 @@ class TestHandleChildSessionStart:
         """ChildSessionStartEvent should be handled without raising an error."""
         from amplifier_ipc.cli.repl import handle_host_event
 
-        event = ChildSessionStartEvent(agent_name="my-agent", session_id="abc123", depth=1)
+        event = ChildSessionStartEvent(
+            agent_name="my-agent", session_id="abc123", depth=1
+        )
 
         # Should not raise
         handle_host_event(event)
@@ -246,7 +252,7 @@ class TestHandleHostEventApprovalCallsSendApproval:
     def test_handle_host_event_approval_calls_send_approval(self) -> None:
         """ApprovalRequestEvent handling in interactive_repl calls host.send_approval."""
         import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import MagicMock, patch
 
         from amplifier_ipc.host.events import ApprovalRequestEvent
 
@@ -426,9 +432,7 @@ class TestExitMessageShowsSessionId:
             )
 
         # Check that the exit message was printed with the truncated session ID
-        printed_text = " ".join(
-            str(call) for call in console.print.call_args_list
-        )
+        printed_text = " ".join(str(call) for call in console.print.call_args_list)
         assert "abc12345" in printed_text
         assert "test-agent" in printed_text
 
@@ -452,9 +456,7 @@ class TestExitMessageShowsSessionId:
         ):
             asyncio.run(interactive_repl(host, console=console))
 
-        printed_text = " ".join(
-            str(call) for call in console.print.call_args_list
-        )
+        printed_text = " ".join(str(call) for call in console.print.call_args_list)
         assert "resume" not in printed_text.lower()
 
 
