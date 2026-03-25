@@ -18,9 +18,9 @@ class ModeTool:
 
     Operations:
         list    - List all available modes (stub: returns empty)
-        current - Show the currently active mode (stub: returns no active mode)
+        current - Show the currently active mode
         set     - Activate a mode (stub: not implemented)
-        clear   - Deactivate the current mode (stub: returns success)
+        clear   - Deactivate the currently active mode
     """
 
     name = "mode"
