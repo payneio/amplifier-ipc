@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
 
@@ -250,8 +251,6 @@ async def test_clear_returns_error_when_hooks_not_wired() -> None:
 # _discover_modes tests
 # ---------------------------------------------------------------------------
 
-from pathlib import Path
-
 
 _SAMPLE_MODE_CONTENT = """\
 ---
@@ -290,7 +289,9 @@ def _write_mode_file(base: Path, name: str, content: str) -> Path:
     return file_path
 
 
-def test_discover_modes_finds_project_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_discover_modes_finds_project_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """_discover_modes finds modes in the project-level .amplifier/modes/ directory."""
     _write_mode_file(tmp_path, "focus.md", _SAMPLE_MODE_CONTENT)
     monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path))
@@ -305,7 +306,9 @@ def test_discover_modes_finds_project_modes(tmp_path: Path, monkeypatch: pytest.
     assert modes[0].description == "Deep focus mode"
 
 
-def test_discover_modes_finds_user_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_discover_modes_finds_user_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """_discover_modes finds modes in the user-level ~/.amplifier/modes/ directory."""
     home_dir = tmp_path / "home"
     _write_mode_file(home_dir, "focus.md", _SAMPLE_MODE_CONTENT)
@@ -321,7 +324,9 @@ def test_discover_modes_finds_user_modes(tmp_path: Path, monkeypatch: pytest.Mon
     assert modes[0].description == "Deep focus mode"
 
 
-def test_discover_modes_project_overrides_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_discover_modes_project_overrides_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Project-level mode with same name overrides user-level mode."""
     home_dir = tmp_path / "home"
     project_dir = tmp_path / "project"
@@ -331,7 +336,9 @@ def test_discover_modes_project_overrides_user(tmp_path: Path, monkeypatch: pyte
     _write_mode_file(home_dir, "focus.md", user_content)
 
     # Project-level: focus mode with project description
-    project_content = _SAMPLE_MODE_CONTENT.replace("Deep focus mode", "Project focus mode")
+    project_content = _SAMPLE_MODE_CONTENT.replace(
+        "Deep focus mode", "Project focus mode"
+    )
     _write_mode_file(project_dir, "focus.md", project_content)
 
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home_dir))
@@ -344,7 +351,9 @@ def test_discover_modes_project_overrides_user(tmp_path: Path, monkeypatch: pyte
     assert modes[0].description == "Project focus mode"
 
 
-def test_discover_modes_missing_dirs_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_discover_modes_missing_dirs_ok(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """_discover_modes returns empty list when neither directory exists."""
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "no-home"))
     monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path / "no-project"))
@@ -355,7 +364,9 @@ def test_discover_modes_missing_dirs_ok(tmp_path: Path, monkeypatch: pytest.Monk
     assert modes == []
 
 
-def test_discover_modes_merges_both_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_discover_modes_merges_both_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """_discover_modes returns modes from both user and project directories when names differ."""
     home_dir = tmp_path / "home"
     project_dir = tmp_path / "project"
