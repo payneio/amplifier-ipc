@@ -1007,6 +1007,9 @@ async def test_orchestrator_emits_execution_end_cancelled() -> None:
     assert data.get("status") == "cancelled", (
         f"Expected status='cancelled' in execution:end payload, got {data.get('status')!r}"
     )
+    assert data.get("response") == "partial response", (
+        f"Expected response='partial response' in execution:end payload, got {data.get('response')!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
