@@ -54,6 +54,7 @@ from amplifier_ipc.protocol.errors import (
     JsonRpcError,
     make_error_response,
 )
+from amplifier_ipc_protocol.events import SESSION_END, SESSION_START  # noqa: F401
 from amplifier_ipc.protocol.framing import read_message, write_message
 
 logger = logging.getLogger(__name__)
@@ -413,6 +414,16 @@ class Host:
                 on_provider_notification=_queue_provider_notification,
                 spawn_handler=_handle_spawn,
                 resume_handler=_handle_resume,
+            )
+
+            # 5a. Emit session:start hook event
+            await self._emit_hook_event(
+                SESSION_START,
+                {
+                    "session_id": self._session_id,
+                    "parent_id": self._parent_session_id,
+                    "raw": self._config.model_dump(),
+                },
             )
 
             # 5b. Resume session: restore previous transcript if resuming
