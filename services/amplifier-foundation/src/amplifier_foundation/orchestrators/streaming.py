@@ -28,18 +28,18 @@ from amplifier_ipc.protocol import (
     orchestrator,
 )
 from amplifier_ipc_protocol.events import (
-    CONTENT_BLOCK_DELTA,
+    CONTENT_BLOCK_DELTA,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
     CONTENT_BLOCK_END,
     CONTENT_BLOCK_START,
-    EXECUTION_END,
-    EXECUTION_START,
-    LLM_REQUEST,
-    LLM_RESPONSE,
-    PROVIDER_RESOLVE,
+    EXECUTION_END,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
+    EXECUTION_START,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
+    LLM_REQUEST,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
+    LLM_RESPONSE,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
+    PROVIDER_RESOLVE,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
     PROVIDER_RESPONSE,
-    PROVIDER_THROTTLE,
-    THINKING_DELTA,
-    THINKING_FINAL,
+    PROVIDER_THROTTLE,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
+    THINKING_DELTA,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
+    THINKING_FINAL,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
 )
 
 logger = logging.getLogger(__name__)
