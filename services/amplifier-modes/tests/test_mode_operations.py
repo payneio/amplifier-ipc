@@ -192,3 +192,55 @@ async def test_current_returns_error_when_hooks_not_wired() -> None:
     assert result.success is False
     assert result.error is not None
     assert result.error["code"] == "not_ready"
+
+
+# ---------------------------------------------------------------------------
+# _handle_clear operation tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_clear_deactivates_active_mode() -> None:
+    """_handle_clear calls clear_active_mode() so hook state becomes None."""
+    tool = ModeTool()
+    hooks = ModeHooks()
+    focus_mode = ModeDefinition(name="focus", description="Deep work mode")
+    hooks.set_active_mode(focus_mode)
+    tool._mode_hooks = hooks
+
+    result = await tool.execute({"operation": "clear"})
+
+    assert result.success is True
+    assert result.output is not None
+    assert result.output["status"] == "cleared"
+    # Verify the hook state was actually cleared
+    assert hooks.get_active_mode() is None
+
+
+@pytest.mark.asyncio
+async def test_clear_is_idempotent() -> None:
+    """_handle_clear with no active mode still returns success with status 'cleared'."""
+    tool = ModeTool()
+    hooks = ModeHooks()
+    # No mode set — hooks has no active mode
+    tool._mode_hooks = hooks
+
+    result = await tool.execute({"operation": "clear"})
+
+    assert result.success is True
+    assert result.output is not None
+    assert result.output["status"] == "cleared"
+    assert hooks.get_active_mode() is None
+
+
+@pytest.mark.asyncio
+async def test_clear_returns_error_when_hooks_not_wired() -> None:
+    """_handle_clear returns not_ready error when _mode_hooks is None."""
+    tool = ModeTool()
+    # Do NOT set _mode_hooks — leave it as the class default (None)
+
+    result = await tool.execute({"operation": "clear"})
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error["code"] == "not_ready"

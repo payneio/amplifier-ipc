@@ -102,11 +102,10 @@ class ModeTool:
         raise NotImplementedError("ModeTool.set is not yet implemented")
 
     async def _handle_clear(self) -> ToolResult:
-        """Deactivate the current mode — stub returns simple success."""
+        """Deactivate the current mode."""
+        if self._mode_hooks is None:
+            return self._not_ready_result()
+        self._mode_hooks.clear_active_mode()
         return ToolResult(
-            success=True,
-            output={
-                "status": "cleared",
-                "message": "Mode deactivated.",
-            },
+            success=True, output={"status": "cleared", "message": "Mode deactivated."}
         )
