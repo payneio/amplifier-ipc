@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -50,7 +51,9 @@ async def test_emit_hook_event_dispatches_to_router() -> None:
 
 
 @pytest.mark.asyncio
-async def test_emit_hook_event_swallows_exceptions() -> None:
+async def test_emit_hook_event_swallows_exceptions(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """_emit_hook_event catches exceptions from router and does not propagate them."""
     host = _make_host()
 
@@ -60,10 +63,14 @@ async def test_emit_hook_event_swallows_exceptions() -> None:
     host._router = mock_router
 
     # Should not raise — errors must be swallowed
-    await host._emit_hook_event("session.end", {})
+    with caplog.at_level(logging.ERROR):
+        await host._emit_hook_event("session.end", {})
 
     # Router was still called
     mock_router.route_request.assert_called_once()
+
+    # Exception was logged (not silently discarded)
+    assert "Failed to emit hook event" in caplog.text
 
 
 @pytest.mark.asyncio

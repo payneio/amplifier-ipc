@@ -113,7 +113,9 @@ class Host:
         self._approval_queue: asyncio.Queue[bool] = asyncio.Queue()
         self._session_id: str | None = None
         self._resume_session_id: str | None = None
-        self._parent_session_id: str | None = parent_session_id
+        self._parent_session_id: str | None = (
+            parent_session_id  # consumed by future callers (e.g. session event payloads)
+        )
 
     # ------------------------------------------------------------------
     # Hook event emission (session-level)
