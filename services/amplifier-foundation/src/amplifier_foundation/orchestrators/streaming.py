@@ -27,8 +27,8 @@ from amplifier_ipc.protocol import (
     orchestrator,
 )
 from amplifier_ipc_protocol.events import (
-    CONTENT_BLOCK_END,  # noqa: F401 — required by spec; unused pending future streaming block events
-    CONTENT_BLOCK_START,  # noqa: F401 — required by spec; unused pending future streaming block events
+    CONTENT_BLOCK_END,
+    CONTENT_BLOCK_START,
     PROVIDER_RESPONSE,
 )
 
@@ -284,17 +284,39 @@ class StreamingOrchestrator:
 
             # --- stream thinking notifications (before stream.token) ---
             if chat_response.content_blocks:
-                for block in chat_response.content_blocks:
+                for _block_idx, block in enumerate(chat_response.content_blocks):
+                    # Determine block type
+                    if isinstance(block, dict):
+                        _block_type = block.get("type", "unknown")
+                    elif hasattr(block, "type"):
+                        _block_type = block.type
+                    else:
+                        _block_type = "unknown"
+
+                    # Emit content_block:start before processing
+                    await self._hook_emit(
+                        client,
+                        CONTENT_BLOCK_START,
+                        {"block_type": _block_type, "index": _block_idx},
+                    )
+
                     if isinstance(block, ThinkingBlock):
                         thinking_text = block.thinking
                     elif isinstance(block, dict) and block.get("type") == "thinking":
                         thinking_text = block.get("thinking", "")
                     else:
-                        continue
+                        thinking_text = None
                     if thinking_text:
                         await client.send_notification(
                             STREAM_THINKING, {"thinking": thinking_text}
                         )
+
+                    # Emit content_block:end after processing
+                    await self._hook_emit(
+                        client,
+                        CONTENT_BLOCK_END,
+                        {"block_type": _block_type, "index": _block_idx},
+                    )
 
             # --- stream token notification ---
             if response_text:

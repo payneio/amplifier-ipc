@@ -731,3 +731,121 @@ async def test_orchestrator_emits_provider_response() -> None:
         assert getattr(usage, "output_tokens", None) == 5, (
             f"Expected output_tokens=5, got {getattr(usage, 'output_tokens', None)!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Test 14: CONTENT_BLOCK_START and CONTENT_BLOCK_END constants match expected values
+# ---------------------------------------------------------------------------
+
+
+def test_content_block_constants_match_hook_subscriptions() -> None:
+    """CONTENT_BLOCK_START and CONTENT_BLOCK_END must equal 'content_block:start' and 'content_block:end'."""
+    from amplifier_ipc_protocol.events import CONTENT_BLOCK_END, CONTENT_BLOCK_START
+
+    assert CONTENT_BLOCK_START == "content_block:start", (
+        f"Expected CONTENT_BLOCK_START='content_block:start', got {CONTENT_BLOCK_START!r}"
+    )
+    assert CONTENT_BLOCK_END == "content_block:end", (
+        f"Expected CONTENT_BLOCK_END='content_block:end', got {CONTENT_BLOCK_END!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 15: content_block:start/end hook events emitted around each content block
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_content_block_start_end() -> None:
+    """content_block:start and content_block:end hook events emitted around each content block."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    response_with_blocks = {
+        "content": "Here is my answer.",
+        "text": "Here is my answer.",
+        "tool_calls": None,
+        "usage": None,
+        "finish_reason": None,
+        "content_blocks": [
+            {"type": "thinking", "thinking": "Let me reason..."},
+            {"type": "text", "text": "Here is my answer."},
+        ],
+    }
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": response_with_blocks,
+        }
+    )
+
+    result = await orch.execute("Think about X", {}, client)
+    assert result == "Here is my answer."
+
+    # Collect all content_block:start and content_block:end events from hook_emit calls
+    hook_emit_params = [
+        params
+        for method, params in client.requests
+        if method == "request.hook_emit" and isinstance(params, dict)
+    ]
+
+    start_events = [
+        p for p in hook_emit_params if p.get("event") == "content_block:start"
+    ]
+    end_events = [p for p in hook_emit_params if p.get("event") == "content_block:end"]
+
+    # Verify 2 start and 2 end events (one per content block)
+    assert len(start_events) == 2, (
+        f"Expected 2 content_block:start events, got {len(start_events)}"
+    )
+    assert len(end_events) == 2, (
+        f"Expected 2 content_block:end events, got {len(end_events)}"
+    )
+
+    # Verify payload shape: must contain block_type (str) and index (int)
+    for event in start_events + end_events:
+        data = event.get("data", {})
+        assert "block_type" in data, (
+            f"Expected 'block_type' in payload, got keys: {list(data.keys())}"
+        )
+        assert "index" in data, (
+            f"Expected 'index' in payload, got keys: {list(data.keys())}"
+        )
+        assert isinstance(data["block_type"], str), (
+            f"Expected block_type to be str, got {type(data['block_type'])}"
+        )
+        assert isinstance(data["index"], int), (
+            f"Expected index to be int, got {type(data['index'])}"
+        )
+
+    # Verify correct ordering: start(0), end(0), start(1), end(1)
+    content_block_events_in_order = [
+        (params["event"], params["data"]["index"])
+        for kind, method, params in client.call_log
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") in ("content_block:start", "content_block:end")
+    ]
+
+    expected_ordering = [
+        ("content_block:start", 0),
+        ("content_block:end", 0),
+        ("content_block:start", 1),
+        ("content_block:end", 1),
+    ]
+    assert content_block_events_in_order == expected_ordering, (
+        f"Expected ordering {expected_ordering}, got {content_block_events_in_order}"
+    )
+
+    # Verify block types match the content blocks
+    assert start_events[0]["data"]["block_type"] == "thinking", (
+        f"Expected block_type='thinking' for block 0, got {start_events[0]['data']['block_type']!r}"
+    )
+    assert start_events[1]["data"]["block_type"] == "text", (
+        f"Expected block_type='text' for block 1, got {start_events[1]['data']['block_type']!r}"
+    )
