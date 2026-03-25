@@ -9,6 +9,14 @@ from amplifier_ipc.host.config import (
     resolve_service_command,
 )
 from amplifier_ipc.host.content import assemble_system_prompt
+from amplifier_ipc.host.mentions import (
+    MentionResolverChain,
+    NamespaceResolver,
+    ResolvedContent,
+    WorkingDirResolver,
+    parse_mentions,
+    resolve_and_load,
+)
 from amplifier_ipc.host.definition_registry import Registry
 from amplifier_ipc.host.definitions import (
     AgentDefinition,
@@ -97,6 +105,13 @@ __all__ = [
     "Router",
     # Content
     "assemble_system_prompt",
+    # Mentions
+    "MentionResolverChain",
+    "NamespaceResolver",
+    "WorkingDirResolver",
+    "ResolvedContent",
+    "parse_mentions",
+    "resolve_and_load",
     # Persistence
     "SessionPersistence",
     # Spawner
