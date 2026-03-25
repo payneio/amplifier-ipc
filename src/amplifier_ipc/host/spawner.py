@@ -7,6 +7,7 @@ and formatting parent conversation context for child instructions.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -16,12 +17,24 @@ from pydantic import BaseModel
 # Session ID generation
 # ---------------------------------------------------------------------------
 
+_SPAN_HEX_LEN = 16
+_DEFAULT_PARENT_SPAN = "0" * _SPAN_HEX_LEN
+_SPAN_PATTERN = re.compile(r"^([0-9a-f]{16})-([0-9a-f]{16})_")
+
 
 def generate_child_session_id(parent_session_id: str, agent_name: str) -> str:
-    """Return a child session ID derived from the parent.
+    """Return a child session ID derived from the parent (W3C Trace Context format).
 
-    Format: ``{parent_session_id}-{child_span}_{agent_name}``
-    where *child_span* is the first 8 hex characters of a random UUID.
+    Format: ``{parent_span}-{child_span}_{sanitized_agent_name}``
+
+    * When the parent is a root UUID (no span pattern match), *parent_span* is
+      ``0000000000000000`` (zero sentinel).
+    * When the parent is itself a child session matching the span pattern,
+      the parent's *child_span* is promoted to become the new *parent_span*.
+
+    Agent name sanitization: lowercase, non-alphanumeric characters replaced
+    with hyphens (multiple consecutive non-alphanum collapsed to one hyphen),
+    leading dots/hyphens stripped; defaults to ``"agent"`` if the result is empty.
 
     Args:
         parent_session_id: The session ID of the spawning (parent) session.
@@ -30,8 +43,26 @@ def generate_child_session_id(parent_session_id: str, agent_name: str) -> str:
     Returns:
         A unique session ID string for the child session.
     """
-    child_span = uuid4().hex[:8]
-    return f"{parent_session_id}-{child_span}_{agent_name}"
+    # Determine parent_span from parent session ID
+    match = _SPAN_PATTERN.match(parent_session_id)
+    if match:
+        # Parent is already a child session — promote its child_span
+        parent_span = match.group(2)
+    else:
+        # Parent is a root UUID — use zero sentinel
+        parent_span = _DEFAULT_PARENT_SPAN
+
+    # Sanitize agent name
+    sanitized = agent_name.lower()
+    sanitized = re.sub(r"[^a-z0-9]+", "-", sanitized)
+    sanitized = sanitized.strip("-.")
+    if not sanitized:
+        sanitized = "agent"
+
+    # Generate a fresh child span
+    child_span = uuid4().hex[:_SPAN_HEX_LEN]
+
+    return f"{parent_span}-{child_span}_{sanitized}"
 
 
 # ---------------------------------------------------------------------------

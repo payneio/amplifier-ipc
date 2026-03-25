@@ -34,20 +34,33 @@ def test_spawn_request_is_pydantic_base_model() -> None:
 
 
 # ---------------------------------------------------------------------------
-# generate_child_session_id (2 tests)
+# generate_child_session_id (5 tests) — W3C Trace Context format
 # ---------------------------------------------------------------------------
 
 
-def test_generate_child_session_id_format() -> None:
-    """Session ID follows {parent}-{child_span}_{agent} format."""
-    parent_session_id = "abc123"
-    agent_name = "my-agent"
-
-    result = generate_child_session_id(parent_session_id, agent_name)
-
-    pattern = re.compile(r"^abc123-[0-9a-f]{8}_my-agent$")
+def test_generate_child_session_id_root_parent_uses_zero_sentinel() -> None:
+    """Root UUID parent produces parent_span of all zeros (16 zeros)."""
+    # A root UUID (not matching span pattern)
+    parent_session_id = "5b67d79f-4b83-4d05-8c63-666569550fcf"
+    result = generate_child_session_id(parent_session_id, "my-agent")
+    # Format: {parent_span}-{child_span}_{agent_name}
+    # parent_span should be all zeros for root UUID
+    pattern = re.compile(r"^0{16}-[0-9a-f]{16}_my-agent$")
     assert pattern.match(result), (
-        f"Expected format abc123-<8hex>_my-agent, got: {result}"
+        f"Expected format 0{{16}}-<16hex>_my-agent, got: {result}"
+    )
+
+
+def test_generate_child_session_id_child_parent_extracts_span() -> None:
+    """Child parent promotes its child_span to new parent_span."""
+    # A child session ID matching the span pattern
+    # parent_span = "aabbccdd11223344", child_span = "99887766aabbccdd"
+    parent_session_id = "aabbccdd11223344-99887766aabbccdd_some-agent"
+    result = generate_child_session_id(parent_session_id, "next-agent")
+    # The new parent_span should be "99887766aabbccdd" (promoted from parent's child_span)
+    pattern = re.compile(r"^99887766aabbccdd-[0-9a-f]{16}_next-agent$")
+    assert pattern.match(result), (
+        f"Expected format 99887766aabbccdd-<16hex>_next-agent, got: {result}"
     )
 
 
@@ -57,6 +70,23 @@ def test_generate_child_session_id_unique() -> None:
     result2 = generate_child_session_id("parent", "agent")
 
     assert result1 != result2
+
+
+def test_generate_child_session_id_sanitizes_agent_name() -> None:
+    """Agent name is lowercased and non-alphanumeric chars replaced with hyphens."""
+    parent_session_id = "5b67d79f-4b83-4d05-8c63-666569550fcf"
+    result = generate_child_session_id(parent_session_id, "My:Agent/Name")
+    # Should be lowercase with non-alphanum collapsed to hyphens
+    assert "_my-agent-name" in result, f"Expected sanitized name in: {result}"
+
+
+def test_generate_child_session_id_empty_agent_defaults() -> None:
+    """Empty agent name defaults to 'agent'."""
+    parent_session_id = "5b67d79f-4b83-4d05-8c63-666569550fcf"
+    result = generate_child_session_id(parent_session_id, "")
+    assert result.endswith("_agent"), (
+        f"Expected result to end with _agent, got: {result}"
+    )
 
 
 # ---------------------------------------------------------------------------
