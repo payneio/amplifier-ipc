@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from amplifier_ipc.protocol import ToolResult, tool
 
-from amplifier_modes.hooks.mode import ModeHooks
+from amplifier_modes.hooks.mode import ModeDefinition, ModeHooks, parse_mode_file
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,22 @@ class ModeTool:
             success=False,
             error={"code": "not_ready", "message": "Mode service not ready"},
         )
+
+    def _discover_modes(self) -> list[ModeDefinition]:
+        from pathlib import Path
+
+        modes_by_name: dict[str, ModeDefinition] = {}
+        # User-level first so project-level overwrites on collision
+        for base in [Path.home(), Path.cwd()]:
+            mode_dir = base / ".amplifier" / "modes"
+            if not mode_dir.is_dir():
+                continue
+            for file_path in sorted(mode_dir.glob("*.md")):
+                mode = parse_mode_file(file_path)
+                if mode is not None:
+                    mode.source = str(file_path)
+                    modes_by_name[mode.name] = mode
+        return list(modes_by_name.values())
 
     async def execute(self, input: dict[str, Any]) -> ToolResult:
         """Execute a mode operation."""

@@ -244,3 +244,130 @@ async def test_clear_returns_error_when_hooks_not_wired() -> None:
     assert result.success is False
     assert result.error is not None
     assert result.error["code"] == "not_ready"
+
+
+# ---------------------------------------------------------------------------
+# _discover_modes tests
+# ---------------------------------------------------------------------------
+
+from pathlib import Path
+
+
+_SAMPLE_MODE_CONTENT = """\
+---
+mode:
+  name: focus
+  description: Deep focus mode
+  shortcut: f
+  tools:
+    safe: [read_file, grep]
+    warn: [bash]
+  default_action: block
+---
+You are in focus mode. Only read and search.
+"""
+
+_SAMPLE_MODE_2_CONTENT = """\
+---
+mode:
+  name: plan
+  description: Planning mode
+  shortcut: p
+  tools:
+    safe: [read_file, grep, write_file]
+  default_action: allow
+---
+You are in planning mode. Think and discuss before acting.
+"""
+
+
+def _write_mode_file(base: Path, name: str, content: str) -> Path:
+    """Write a mode file to base/.amplifier/modes/name.md."""
+    mode_dir = base / ".amplifier" / "modes"
+    mode_dir.mkdir(parents=True, exist_ok=True)
+    file_path = mode_dir / name
+    file_path.write_text(content, encoding="utf-8")
+    return file_path
+
+
+def test_discover_modes_finds_project_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_discover_modes finds modes in the project-level .amplifier/modes/ directory."""
+    _write_mode_file(tmp_path, "focus.md", _SAMPLE_MODE_CONTENT)
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path))
+    # Patch home to somewhere that won't have modes
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "no-home"))
+
+    tool = ModeTool()
+    modes = tool._discover_modes()
+
+    assert len(modes) == 1
+    assert modes[0].name == "focus"
+    assert modes[0].description == "Deep focus mode"
+
+
+def test_discover_modes_finds_user_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_discover_modes finds modes in the user-level ~/.amplifier/modes/ directory."""
+    home_dir = tmp_path / "home"
+    _write_mode_file(home_dir, "focus.md", _SAMPLE_MODE_CONTENT)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home_dir))
+    # Patch cwd to somewhere that won't have modes
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path / "no-project"))
+
+    tool = ModeTool()
+    modes = tool._discover_modes()
+
+    assert len(modes) == 1
+    assert modes[0].name == "focus"
+    assert modes[0].description == "Deep focus mode"
+
+
+def test_discover_modes_project_overrides_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Project-level mode with same name overrides user-level mode."""
+    home_dir = tmp_path / "home"
+    project_dir = tmp_path / "project"
+
+    # User-level: focus mode with user description
+    user_content = _SAMPLE_MODE_CONTENT.replace("Deep focus mode", "User focus mode")
+    _write_mode_file(home_dir, "focus.md", user_content)
+
+    # Project-level: focus mode with project description
+    project_content = _SAMPLE_MODE_CONTENT.replace("Deep focus mode", "Project focus mode")
+    _write_mode_file(project_dir, "focus.md", project_content)
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home_dir))
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: project_dir))
+
+    tool = ModeTool()
+    modes = tool._discover_modes()
+
+    assert len(modes) == 1
+    assert modes[0].description == "Project focus mode"
+
+
+def test_discover_modes_missing_dirs_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_discover_modes returns empty list when neither directory exists."""
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "no-home"))
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path / "no-project"))
+
+    tool = ModeTool()
+    modes = tool._discover_modes()
+
+    assert modes == []
+
+
+def test_discover_modes_merges_both_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_discover_modes returns modes from both user and project directories when names differ."""
+    home_dir = tmp_path / "home"
+    project_dir = tmp_path / "project"
+
+    _write_mode_file(home_dir, "focus.md", _SAMPLE_MODE_CONTENT)
+    _write_mode_file(project_dir, "plan.md", _SAMPLE_MODE_2_CONTENT)
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home_dir))
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: project_dir))
+
+    tool = ModeTool()
+    modes = tool._discover_modes()
+
+    names = {m.name for m in modes}
+    assert names == {"focus", "plan"}
