@@ -295,7 +295,7 @@ def resolve_and_load(
 
         seen_hashes.add(content_hash)
 
-        resolved = ResolvedContent(key=mention.lstrip("@"), content=content)
+        resolved = ResolvedContent(key=mention.removeprefix("@"), content=content)
         results.append(resolved)
 
         nested = resolve_and_load(

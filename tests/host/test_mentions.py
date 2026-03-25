@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any
 
 import pytest
-
-import hashlib
 
 from amplifier_ipc.host.mentions import (
     MentionResolverChain,
