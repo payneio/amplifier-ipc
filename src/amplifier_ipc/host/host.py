@@ -22,6 +22,7 @@ from amplifier_ipc.host.config import (
     resolve_service_command,
 )
 from amplifier_ipc.host.content import assemble_system_prompt
+from amplifier_ipc.host.mentions import MentionResolverChain, NamespaceResolver
 from amplifier_ipc.host.events import (
     ApprovalRequestEvent,
     ChildSessionEndEvent,
@@ -116,6 +117,11 @@ class Host:
         self._resume_session_id: str | None = None
         self._parent_session_id: str | None = (
             parent_session_id  # consumed by future callers (e.g. session event payloads)
+        )
+        # MentionResolverChain holds mutable references to _registry and _services so
+        # resolution works correctly after services are discovered during run().
+        self.mention_resolver: MentionResolverChain = MentionResolverChain(
+            [NamespaceResolver(self._registry, self._services)]
         )
 
     # ------------------------------------------------------------------
@@ -443,7 +449,9 @@ class Host:
                     )
 
             # 6. Assemble system prompt
-            system_prompt = await assemble_system_prompt(self._registry, self._services)
+            system_prompt = await assemble_system_prompt(
+                self._registry, self._services, resolver_chain=self.mention_resolver
+            )
 
             # 6b. Stop the orchestrator service's Client background read loop.
             #

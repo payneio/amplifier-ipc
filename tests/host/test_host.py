@@ -1439,7 +1439,7 @@ async def test_run_replays_transcript_on_second_turn(tmp_path: Any) -> None:
     async def noop() -> None:
         pass
 
-    async def noop_system_prompt(*args: Any) -> str:
+    async def noop_system_prompt(*args: Any, **kwargs: Any) -> str:
         return "be helpful"
 
     # Give the fake service a process with stdin/stdout for the orchestrator loop
@@ -1469,6 +1469,74 @@ async def test_run_replays_transcript_on_second_turn(tmp_path: Any) -> None:
     )
     assert add_calls[0][1] == {"message": {"role": "user", "content": "Hello!"}}
     assert add_calls[1][1] == {"message": {"role": "assistant", "content": "Hi there!"}}
+
+
+# ---------------------------------------------------------------------------
+# Tests for mention_resolver (task-7)
+# ---------------------------------------------------------------------------
+
+
+def test_host_has_mention_resolver_chain() -> None:
+    """Host has mention_resolver attribute of type MentionResolverChain after __init__."""
+    from amplifier_ipc.host.mentions import MentionResolverChain
+
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings())
+
+    assert hasattr(host, "mention_resolver")
+    assert isinstance(host.mention_resolver, MentionResolverChain)
+
+
+async def test_host_mention_resolver_uses_mutable_refs() -> None:
+    """mention_resolver's NamespaceResolver uses mutable refs — resolves correctly after
+    services are populated (mutable reference pattern).
+
+    The NamespaceResolver is created at __init__ time with references to
+    host._registry and host._services.  When those are populated later (e.g.
+    during run()), the resolver must use the updated state.
+    """
+    from amplifier_ipc.host.mentions import MentionResolverChain, NamespaceResolver
+
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings())
+
+    # Resolver created during __init__ with empty registry and services
+    assert isinstance(host.mention_resolver, MentionResolverChain)
+    assert len(host.mention_resolver._resolvers) >= 1
+    namespace_resolver = host.mention_resolver._resolvers[0]
+    assert isinstance(namespace_resolver, NamespaceResolver)
+
+    # Populate registry and services AFTER init (mutable reference pattern)
+    host._registry.register(
+        "foundation",
+        {
+            "tools": [],
+            "hooks": [],
+            "orchestrators": [],
+            "context_managers": [],
+            "providers": [],
+            "content": ["agents/readme.md"],
+        },
+    )
+    fake_client = FakeClient(
+        responses={"content.read": {"content": "readme content here"}}
+    )
+    host._services["foundation"] = FakeService(fake_client)
+
+    # The resolver should now resolve because it holds mutable references to
+    # _registry and _services (not copies made at construction time)
+    result = await namespace_resolver("@foundation:agents/readme.md")
+    assert result == "readme content here"
 
 
 def test_host_run_creates_persistence_for_preset_session_id() -> None:
