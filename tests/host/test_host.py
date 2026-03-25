@@ -1563,15 +1563,15 @@ async def test_host_load_working_dir_content_deduplicates(tmp_path: Any) -> None
     assert count == 1, f"Expected content to appear once, but appeared {count} times"
 
 
-async def test_host_mention_resolver_uses_mutable_refs() -> None:
-    """mention_resolver's NamespaceResolver uses mutable refs — resolves correctly after
-    services are populated (mutable reference pattern).
+def test_host_mention_resolver_starts_empty() -> None:
+    """mention_resolver chain is empty at __init__ time.
 
-    The NamespaceResolver is created at __init__ time with references to
-    host._registry and host._services.  When those are populated later (e.g.
-    during run()), the resolver must use the updated state.
+    NamespaceResolver is intentionally excluded from the chain because its
+    __call__ is async; the MentionResolverChain.resolve() method is synchronous
+    and cannot safely call async resolvers.  Callers that need async namespace
+    resolution must use NamespaceResolver directly (with await).
     """
-    from amplifier_ipc.host.mentions import MentionResolverChain, NamespaceResolver
+    from amplifier_ipc.host.mentions import MentionResolverChain
 
     config = SessionConfig(
         services=[],
@@ -1581,33 +1581,120 @@ async def test_host_mention_resolver_uses_mutable_refs() -> None:
     )
     host = Host(config=config, settings=HostSettings())
 
-    # Resolver created during __init__ with empty registry and services
     assert isinstance(host.mention_resolver, MentionResolverChain)
-    assert len(host.mention_resolver._resolvers) >= 1
-    namespace_resolver = host.mention_resolver._resolvers[0]
-    assert isinstance(namespace_resolver, NamespaceResolver)
+    assert len(host.mention_resolver._resolvers) == 0
 
-    # Populate registry and services AFTER init (mutable reference pattern)
-    host._registry.register(
-        "foundation",
-        {
-            "tools": [],
-            "hooks": [],
-            "orchestrators": [],
-            "context_managers": [],
-            "providers": [],
-            "content": ["agents/readme.md"],
-        },
-    )
-    fake_client = FakeClient(
-        responses={"content.read": {"content": "readme content here"}}
-    )
-    host._services["foundation"] = FakeService(fake_client)
 
-    # The resolver should now resolve because it holds mutable references to
-    # _registry and _services (not copies made at construction time)
-    result = await namespace_resolver("@foundation:agents/readme.md")
-    assert result == "readme content here"
+# ---------------------------------------------------------------------------
+# Tests for _resolve_agent_base (task-10)
+# ---------------------------------------------------------------------------
+
+
+async def test_resolve_agent_base_returns_content() -> None:
+    """_resolve_agent_base returns base file content + nested @mention content.
+
+    When an agent definition has a 'base' field, the host should:
+    1. Resolve the base mention via mention_resolver.resolve().
+    2. Recursively resolve nested @mentions via resolve_and_load().
+    3. Return all content joined with '\\n\\n'.
+    """
+    from unittest.mock import MagicMock, patch
+
+    from amplifier_ipc.host.mentions import ResolvedContent
+
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings())
+
+    # Base content that contains a nested @mention
+    base_content = (
+        "# Base Agent Instructions\nBe helpful.\n@foundation:context/extra.md"
+    )
+    nested_content = [
+        ResolvedContent(
+            key="foundation:context/extra.md", content="Extra context here."
+        )
+    ]
+
+    # Mock mention_resolver.resolve to return base content
+    host.mention_resolver.resolve = MagicMock(return_value=base_content)
+
+    # Build a mock AgentDefinition with base set
+    mock_agent_def = MagicMock()
+    mock_agent_def.base = "foundation:agents/base.md"
+
+    # Build a mock Registry and path
+    mock_path = MagicMock()
+    mock_path.read_text.return_value = (
+        "agent:\n  ref: test\n  base: foundation:agents/base.md"
+    )
+    mock_registry_instance = MagicMock()
+    mock_registry_instance.resolve_agent.return_value = mock_path
+    mock_registry_class = MagicMock(return_value=mock_registry_instance)
+
+    with (
+        patch("amplifier_ipc.host.definition_registry.Registry", mock_registry_class),
+        patch(
+            "amplifier_ipc.host.definitions.parse_agent_definition",
+            return_value=mock_agent_def,
+        ),
+        patch("amplifier_ipc.host.host.resolve_and_load", return_value=nested_content),
+    ):
+        result = host._resolve_agent_base("test-agent")
+
+    # Result should contain base content and nested content joined with '\n\n'
+    assert base_content in result
+    assert "Extra context here." in result
+    assert "\n\n" in result
+
+
+async def test_resolve_agent_base_returns_empty_for_self() -> None:
+    """_resolve_agent_base returns '' for agent_name == 'self' (no resolution needed)."""
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings())
+
+    result = host._resolve_agent_base("self")
+
+    assert result == ""
+
+
+async def test_resolve_agent_base_returns_empty_on_error() -> None:
+    """_resolve_agent_base returns '' when any exception occurs during resolution.
+
+    If Registry lookup, YAML parsing, mention resolution, or any other step
+    raises an exception, the method must return '' with a warning log instead
+    of propagating the exception.
+    """
+    from unittest.mock import patch
+
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    host = Host(config=config, settings=HostSettings())
+
+    # Make Registry raise an exception (agent not registered)
+    mock_registry_instance = MagicMock()
+    mock_registry_instance.resolve_agent.side_effect = FileNotFoundError(
+        "agent 'unknown-agent' not found in registry"
+    )
+    mock_registry_class = MagicMock(return_value=mock_registry_instance)
+
+    with patch("amplifier_ipc.host.definition_registry.Registry", mock_registry_class):
+        result = host._resolve_agent_base("unknown-agent")
+
+    assert result == ""
 
 
 def test_host_run_creates_persistence_for_preset_session_id() -> None:

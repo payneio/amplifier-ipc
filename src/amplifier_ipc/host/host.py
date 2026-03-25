@@ -24,7 +24,6 @@ from amplifier_ipc.host.config import (
 from amplifier_ipc.host.content import assemble_system_prompt
 from amplifier_ipc.host.mentions import (
     MentionResolverChain,
-    NamespaceResolver,
     resolve_and_load,
 )
 from amplifier_ipc.host.events import (
@@ -124,11 +123,10 @@ class Host:
         self._parent_session_id: str | None = (
             parent_session_id  # consumed by future callers (e.g. session event payloads)
         )
-        # MentionResolverChain holds mutable references to _registry and _services so
-        # resolution works correctly after services are discovered during run().
-        self.mention_resolver: MentionResolverChain = MentionResolverChain(
-            [NamespaceResolver(self._registry, self._services)]
-        )
+        # MentionResolverChain for sync mention resolution (e.g. WorkingDirResolver).
+        # NamespaceResolver is async and must NOT be added here — the chain's
+        # resolve() method is synchronous and cannot await async callables.
+        self.mention_resolver: MentionResolverChain = MentionResolverChain()
 
     # ------------------------------------------------------------------
     # Hook event emission (session-level)
@@ -542,9 +540,13 @@ class Host:
             """Handle request.session_spawn from the orchestrator."""
             p = params if isinstance(params, dict) else {}
             agent_name = p.get("agent", "self")
+            instruction = p.get("instruction", "")
+            agent_base = self._resolve_agent_base(agent_name)
+            if agent_base:
+                instruction = agent_base + "\n\n" + instruction
             spawn_request = SpawnRequest(
                 agent=agent_name,
-                instruction=p.get("instruction", ""),
+                instruction=instruction,
                 context_depth=p.get("context_depth", "none"),
                 context_scope=p.get("context_scope", "conversation"),
                 context_turns=p.get("context_turns"),
@@ -679,6 +681,59 @@ class Host:
             )
 
         return _handle_resume
+
+    # ------------------------------------------------------------------
+    # Agent base resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_agent_base(self, agent_name: str) -> str:
+        """Resolve base context content for an agent from its definition.
+
+        Looks up the agent definition, checks for a ``base`` field, resolves the
+        base mention via :attr:`mention_resolver`, and recursively resolves any
+        nested ``@mention`` references found inside the base content.
+
+        Args:
+            agent_name: The agent ref alias.  Returns ``""`` immediately for
+                ``"self"`` since self-spawns inherit the parent's context.
+
+        Returns:
+            Combined content string (base + nested), joined with ``"\\n\\n"``,
+            or ``""`` when *agent_name* is ``"self"``, when no ``base`` field is
+            defined, or when any exception occurs (with a warning log).
+        """
+        if agent_name == "self":
+            return ""
+        try:
+            from amplifier_ipc.host.definition_registry import (  # noqa: PLC0415
+                Registry,
+            )
+            from amplifier_ipc.host.definitions import (  # noqa: PLC0415
+                parse_agent_definition,
+            )
+
+            reg = Registry()
+            agent_path = reg.resolve_agent(agent_name)
+            yaml_content = agent_path.read_text(encoding="utf-8")
+            agent_def = parse_agent_definition(yaml_content)
+
+            if not agent_def.base:
+                return ""
+
+            base_content = self.mention_resolver.resolve(f"@{agent_def.base}")
+            if not base_content:
+                return ""
+
+            # Recursively resolve nested @mentions found in the base content
+            nested = resolve_and_load(base_content, self.mention_resolver)
+            parts = [base_content] + [r.content for r in nested]
+            return "\n\n".join(parts)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "_resolve_agent_base: failed to resolve base for agent %r",
+                agent_name,
+            )
+            return ""
 
     # ------------------------------------------------------------------
     # Session resume helper
