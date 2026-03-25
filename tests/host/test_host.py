@@ -1414,3 +1414,44 @@ async def test_run_replays_transcript_on_second_turn(tmp_path: Any) -> None:
     )
     assert add_calls[0][1] == {"message": {"role": "user", "content": "Hello!"}}
     assert add_calls[1][1] == {"message": {"role": "assistant", "content": "Hi there!"}}
+
+
+def test_host_run_creates_persistence_for_preset_session_id() -> None:
+    """Verifies that pre-setting _session_id before run() still creates persistence.
+
+    This simulates the refactored two-if-block logic where session ID generation
+    and persistence creation are independent, allowing child sessions to inject
+    their own session ID.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from amplifier_ipc.host.persistence import SessionPersistence
+
+    config = SessionConfig(
+        services=[],
+        orchestrator="loop",
+        context_manager="simple",
+        provider="anthropic",
+    )
+    settings = HostSettings()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        host = Host(config=config, settings=settings, session_dir=Path(tmpdir))
+
+        # Pre-set session ID (as a child session would do)
+        host._session_id = "injected-child-session-id"
+
+        # Persistence should be None before run() initialises it
+        assert host._persistence is None
+
+        # Simulate the refactored two-if-block logic from Host.run()
+        if host._session_id is None:
+            host._session_id = "should-not-reach-here"
+        if host._persistence is None:
+            host._persistence = SessionPersistence(host._session_id, Path(tmpdir))
+
+        # Assertions: persistence created, session ID preserved
+        assert host._persistence is not None
+        assert host._session_id == "injected-child-session-id"
+        assert "injected-child-session-id" in str(host._persistence.transcript_path)

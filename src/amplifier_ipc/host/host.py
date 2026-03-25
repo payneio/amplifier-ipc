@@ -324,6 +324,7 @@ class Host:
         # (freshly spawned) context manager at the start of each subsequent turn.
         if self._session_id is None:
             self._session_id = str(uuid.uuid4())
+        if self._persistence is None:
             self._persistence = SessionPersistence(self._session_id, self._session_dir)
 
         session_id = self._session_id
