@@ -647,3 +647,27 @@ async def test_spawn_child_session_forwards_event_callback() -> None:
     assert mock_run.called
     _, kwargs = mock_run.call_args
     assert kwargs.get("event_callback") is callback
+
+
+@pytest.mark.asyncio
+async def test_run_child_session_injects_session_id_into_host() -> None:
+    """_run_child_session must inject child_session_id into host._session_id before run()."""
+    from amplifier_ipc.host.events import CompleteEvent
+
+    async def mock_run(prompt: str):  # type: ignore[return]
+        yield CompleteEvent(result="done")
+
+    with patch("amplifier_ipc.host.host.Host") as MockHost:
+        mock_instance = MagicMock()
+        mock_instance._session_id = None
+        mock_instance.run = mock_run
+        MockHost.return_value = mock_instance
+
+        await _run_child_session(
+            child_session_id="0000000000000000-abcdef0123456789_explorer",
+            child_config={},
+            instruction="explore",
+            request=SpawnRequest(agent="explorer", instruction="explore"),
+        )
+
+    assert mock_instance._session_id == "0000000000000000-abcdef0123456789_explorer"

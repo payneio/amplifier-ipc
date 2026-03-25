@@ -430,6 +430,10 @@ async def _run_child_session(
         spawn_depth=spawn_depth,
     )
 
+    # Inject the pre-generated child session ID so the Host uses it for
+    # persistence instead of generating its own (fixes triple-ID mismatch).
+    host._session_id = child_session_id
+
     # 4. Run the host, iterating async events, collecting CompleteEvent response
     response = ""
     turn_count = 0
