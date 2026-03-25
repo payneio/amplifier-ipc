@@ -91,10 +91,21 @@ class ModeTool:
             )
 
     async def _handle_list(self) -> ToolResult:
-        """List available modes — stub returns empty."""
+        if self._mode_hooks is None:
+            return self._not_ready_result()
+        modes = self._discover_modes()
         return ToolResult(
             success=True,
-            output={"modes": []},
+            output={
+                "modes": [
+                    {
+                        "name": m.name,
+                        "description": m.description,
+                        "shortcut": m.shortcut,
+                    }
+                    for m in modes
+                ]
+            },
         )
 
     async def _handle_current(self) -> ToolResult:

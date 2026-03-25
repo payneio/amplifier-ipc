@@ -383,3 +383,64 @@ def test_discover_modes_merges_both_sources(
 
     names = {m.name for m in modes}
     assert names == {"focus", "plan"}
+
+
+# ---------------------------------------------------------------------------
+# _handle_list operation tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_returns_discovered_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_handle_list returns modes discovered from filesystem with name/description/shortcut."""
+    _write_mode_file(tmp_path, "focus.md", _SAMPLE_MODE_CONTENT)
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "no-home"))
+
+    tool = ModeTool()
+    hooks = ModeHooks()
+    tool._mode_hooks = hooks
+
+    result = await tool.execute({"operation": "list"})
+
+    assert result.success is True
+    assert result.output is not None
+    modes = result.output["modes"]
+    assert len(modes) == 1
+    assert modes[0]["name"] == "focus"
+    assert modes[0]["description"] == "Deep focus mode"
+    assert modes[0]["shortcut"] == "f"
+
+
+@pytest.mark.asyncio
+async def test_list_returns_empty_when_no_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_handle_list returns empty modes list when no mode files exist."""
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path / "no-project"))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "no-home"))
+
+    tool = ModeTool()
+    hooks = ModeHooks()
+    tool._mode_hooks = hooks
+
+    result = await tool.execute({"operation": "list"})
+
+    assert result.success is True
+    assert result.output is not None
+    assert result.output["modes"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_returns_error_when_hooks_not_wired() -> None:
+    """_handle_list returns not_ready error when _mode_hooks is None."""
+    tool = ModeTool()
+    # Do NOT set _mode_hooks — leave it as the class default (None)
+
+    result = await tool.execute({"operation": "list"})
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error["code"] == "not_ready"
