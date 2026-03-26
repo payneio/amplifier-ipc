@@ -38,8 +38,8 @@ from amplifier_ipc_protocol.events import (
     PROVIDER_RESOLVE,
     PROVIDER_RESPONSE,
     PROVIDER_THROTTLE,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
-    THINKING_DELTA,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
-    THINKING_FINAL,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
+    THINKING_DELTA,
+    THINKING_FINAL,
 )
 
 logger = logging.getLogger(__name__)
@@ -376,6 +376,16 @@ class StreamingOrchestrator:
                             )
 
                         if thinking_text:
+                            await self._hook_emit(
+                                client,
+                                THINKING_DELTA,
+                                {"index": _block_idx, "delta": thinking_text},
+                            )
+                            await self._hook_emit(
+                                client,
+                                THINKING_FINAL,
+                                {"index": _block_idx, "text": thinking_text},
+                            )
                             await client.send_notification(
                                 STREAM_THINKING, {"thinking": thinking_text}
                             )

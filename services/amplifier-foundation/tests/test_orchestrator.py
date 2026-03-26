@@ -1418,3 +1418,146 @@ async def test_orchestrator_emits_content_block_delta() -> None:
     assert block_events_in_order == expected_ordering, (
         f"Expected ordering {expected_ordering}, got {block_events_in_order}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 24: thinking:delta emitted for thinking blocks only
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_thinking_delta() -> None:
+    """thinking:delta hook event emitted for thinking blocks only, not text blocks."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    response_with_thinking = {
+        "content": "Here is the answer.",
+        "text": "Here is the answer.",
+        "tool_calls": None,
+        "usage": None,
+        "finish_reason": None,
+        "content_blocks": [
+            {"type": "thinking", "thinking": "Step 1: consider X..."},
+            {"type": "text", "text": "Here is the answer."},
+        ],
+    }
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": response_with_thinking,
+        }
+    )
+
+    result = await orch.execute("Think about X", {}, client)
+    assert result == "Here is the answer."
+
+    # Collect all thinking:delta hook_emit events
+    thinking_delta_events = [
+        params
+        for kind, method, params in client.call_log
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") == "thinking:delta"
+    ]
+
+    # Verify exactly 1 thinking:delta (only for the thinking block, not the text block)
+    assert len(thinking_delta_events) == 1, (
+        f"Expected exactly 1 thinking:delta event, got {len(thinking_delta_events)}"
+    )
+
+    # Verify payload: index=0, delta="Step 1: consider X..."
+    data = thinking_delta_events[0].get("data", {})
+    assert data.get("index") == 0, (
+        f"Expected index=0 in thinking:delta payload, got {data.get('index')!r}"
+    )
+    assert data.get("delta") == "Step 1: consider X...", (
+        f"Expected delta='Step 1: consider X...' in thinking:delta payload, got {data.get('delta')!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 25: thinking:final emitted with correct payload and ordering
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_thinking_final() -> None:
+    """thinking:final hook event emitted after thinking:delta with correct payload."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    response_with_thinking = {
+        "content": "Here is the answer.",
+        "text": "Here is the answer.",
+        "tool_calls": None,
+        "usage": None,
+        "finish_reason": None,
+        "content_blocks": [
+            {"type": "thinking", "thinking": "I need to reason..."},
+            {"type": "text", "text": "Here is the answer."},
+        ],
+    }
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": response_with_thinking,
+        }
+    )
+
+    result = await orch.execute("Think about X", {}, client)
+    assert result == "Here is the answer."
+
+    # Collect all thinking:final hook_emit events
+    thinking_final_events = [
+        params
+        for kind, method, params in client.call_log
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") == "thinking:final"
+    ]
+
+    # Verify exactly 1 thinking:final event
+    assert len(thinking_final_events) == 1, (
+        f"Expected exactly 1 thinking:final event, got {len(thinking_final_events)}"
+    )
+
+    # Verify payload: index=0, text="I need to reason..."
+    data = thinking_final_events[0].get("data", {})
+    assert data.get("index") == 0, (
+        f"Expected index=0 in thinking:final payload, got {data.get('index')!r}"
+    )
+    assert data.get("text") == "I need to reason...", (
+        f"Expected text='I need to reason...' in thinking:final payload, got {data.get('text')!r}"
+    )
+
+    # Verify ordering: thinking:delta comes before thinking:final in hook events
+    thinking_event_order = [
+        (i, params.get("event"))
+        for i, (kind, method, params) in enumerate(client.call_log)
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") in ("thinking:delta", "thinking:final")
+    ]
+
+    assert len(thinking_event_order) >= 2, (
+        f"Expected both thinking:delta and thinking:final events, got: {thinking_event_order}"
+    )
+
+    delta_log_idx = next(i for i, event in thinking_event_order if event == "thinking:delta")
+    final_log_idx = next(i for i, event in thinking_event_order if event == "thinking:final")
+    assert delta_log_idx < final_log_idx, (
+        f"thinking:delta (call_log idx {delta_log_idx}) must come before "
+        f"thinking:final (call_log idx {final_log_idx})"
+    )
