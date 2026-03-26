@@ -121,7 +121,8 @@ async def _run_agent(
         behaviors: Extra behaviors supplied via ``--add-behavior``.
         session: Session ID to resume (``--session``), or ``None``.
         project: Project name (``--project``), unused by Host directly.
-        working_dir: Working directory override (``--working-dir``), unused directly.
+        working_dir: Working directory override (``--working-dir``); converted to a
+            :class:`~pathlib.Path` and forwarded to :func:`launch_session`.
         provider: Provider override (``--provider``), or ``None``.
         model: Model override (``--model``), or ``None``.
         max_tokens: Maximum output tokens (``--max-tokens``), or ``None``.

@@ -2,7 +2,7 @@
 
 import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from amplifier_ipc.host.config import ServiceOverride
 from amplifier_ipc.host.definitions import ResolvedAgent, ServiceEntry
@@ -805,8 +805,6 @@ class TestRunCommandPassesWorkingDir:
         Case 1: explicit working_dir='/tmp/my-project' -> Path('/tmp/my-project')
         Case 2: working_dir=None -> Path.cwd()
         """
-        from unittest.mock import AsyncMock, patch
-
         from amplifier_ipc.cli.commands.run import _run_agent
 
         mock_host = MagicMock()
@@ -830,17 +828,17 @@ class TestRunCommandPassesWorkingDir:
             # Case 1: explicit working_dir string -> converted to Path
             asyncio.run(
                 _run_agent(
-                    "test-agent",       # agent_name_arg
-                    "hello",            # message
-                    [],                 # behaviors
-                    None,               # session
-                    None,               # project
+                    "test-agent",  # agent_name_arg
+                    "hello",  # message
+                    [],  # behaviors
+                    None,  # session
+                    None,  # project
                     "/tmp/my-project",  # working_dir
-                    None,               # provider
-                    None,               # model
-                    None,               # max_tokens
-                    False,              # verbose
-                    "text",             # output_format
+                    None,  # provider
+                    None,  # model
+                    None,  # max_tokens
+                    False,  # verbose
+                    "text",  # output_format
                 )
             )
 
@@ -854,16 +852,16 @@ class TestRunCommandPassesWorkingDir:
             asyncio.run(
                 _run_agent(
                     "test-agent",  # agent_name_arg
-                    "hello",       # message
-                    [],            # behaviors
-                    None,          # session
-                    None,          # project
-                    None,          # working_dir
-                    None,          # provider
-                    None,          # model
-                    None,          # max_tokens
-                    False,         # verbose
-                    "text",        # output_format
+                    "hello",  # message
+                    [],  # behaviors
+                    None,  # session
+                    None,  # project
+                    None,  # working_dir
+                    None,  # provider
+                    None,  # model
+                    None,  # max_tokens
+                    False,  # verbose
+                    "text",  # output_format
                 )
             )
 
