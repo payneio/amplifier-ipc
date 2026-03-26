@@ -351,7 +351,7 @@ class StreamingOrchestrator:
                         elif (
                             isinstance(block, dict) and block.get("type") == "thinking"
                         ):
-                            thinking_text = block.get("thinking", "")
+                            thinking_text = block.get("thinking") or ""
                             _block_content = thinking_text
                         else:
                             thinking_text = None
