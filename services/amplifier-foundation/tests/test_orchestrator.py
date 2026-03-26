@@ -1066,3 +1066,81 @@ async def test_orchestrator_emits_execution_end_error() -> None:
     assert data.get("response") == "", (
         f"Expected response='' in execution:end payload on error path, got {data.get('response')!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 20: provider:resolve emitted after execution:start, before prompt:submit
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_provider_resolve() -> None:
+    """provider:resolve must be emitted exactly once with payload {\"provider\": ...} between execution:start and prompt:submit."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": chat_response("Hello!"),
+        }
+    )
+
+    result = await orch.execute("Hi", {"provider_name": "anthropic"}, client)
+    assert result == "Hello!"
+
+    # Collect all hook_emit calls in order
+    hook_emit_events = [
+        (i, params)
+        for i, (kind, method, params) in enumerate(client.call_log)
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+    ]
+
+    # Find provider:resolve events
+    provider_resolve_events = [
+        (i, params)
+        for i, params in hook_emit_events
+        if params.get("event") == "provider:resolve"
+    ]
+
+    # Verify exactly 1 provider:resolve event
+    assert len(provider_resolve_events) == 1, (
+        f"Expected exactly 1 provider:resolve hook_emit, got {len(provider_resolve_events)}"
+    )
+
+    # Verify payload contains the resolved provider name
+    data = provider_resolve_events[0][1].get("data", {})
+    assert data.get("provider") == "anthropic", (
+        f"Expected provider='anthropic' in provider:resolve payload, got {data.get('provider')!r}"
+    )
+
+    # Verify ordering: execution:start < provider:resolve < prompt:submit
+    execution_start_indices = [
+        i for i, params in hook_emit_events if params.get("event") == "execution:start"
+    ]
+    prompt_submit_indices = [
+        i for i, params in hook_emit_events if params.get("event") == "prompt:submit"
+    ]
+
+    assert len(execution_start_indices) >= 1, (
+        "Expected at least one execution:start event"
+    )
+    assert len(prompt_submit_indices) >= 1, "Expected at least one prompt:submit event"
+
+    exec_start_idx = execution_start_indices[0]
+    provider_resolve_idx = provider_resolve_events[0][0]
+    prompt_submit_idx = prompt_submit_indices[0]
+
+    assert exec_start_idx < provider_resolve_idx, (
+        f"execution:start (call_log idx {exec_start_idx}) must come before "
+        f"provider:resolve (call_log idx {provider_resolve_idx})"
+    )
+    assert provider_resolve_idx < prompt_submit_idx, (
+        f"provider:resolve (call_log idx {provider_resolve_idx}) must come before "
+        f"prompt:submit (call_log idx {prompt_submit_idx})"
+    )

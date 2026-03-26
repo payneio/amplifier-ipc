@@ -35,7 +35,7 @@ from amplifier_ipc_protocol.events import (
     EXECUTION_START,
     LLM_REQUEST,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
     LLM_RESPONSE,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
-    PROVIDER_RESOLVE,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
+    PROVIDER_RESOLVE,
     PROVIDER_RESPONSE,
     PROVIDER_THROTTLE,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
     THINKING_DELTA,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
@@ -141,6 +141,9 @@ class StreamingOrchestrator:
             self._pending_ephemeral_injections = []
             self._last_provider_call_end = None
             self._cancelled = False
+
+            # --- emit provider:resolve ---
+            await self._hook_emit(client, PROVIDER_RESOLVE, {"provider": provider_name})
 
             # ----------------------------------------------------------------
             # Step 1: emit prompt:submit — check for DENY
