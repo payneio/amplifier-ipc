@@ -1144,3 +1144,174 @@ async def test_orchestrator_emits_provider_resolve() -> None:
         f"provider:resolve (call_log idx {provider_resolve_idx}) must come before "
         f"prompt:submit (call_log idx {prompt_submit_idx})"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 21: llm:request emitted before provider_complete call
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_llm_request() -> None:
+    """llm:request hook event emitted before provider_complete with correct payload."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": chat_response("Hello!"),
+        }
+    )
+
+    result = await orch.execute("Hi", {"provider_name": "claude"}, client)
+    assert result == "Hello!"
+
+    # Find all llm:request hook_emit calls
+    llm_request_calls = [
+        params
+        for kind, method, params in client.call_log
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") == "llm:request"
+    ]
+
+    # Verify exactly 1 llm:request event
+    assert len(llm_request_calls) == 1, (
+        f"Expected exactly 1 llm:request hook_emit, got {len(llm_request_calls)}"
+    )
+
+    # Verify payload
+    data = llm_request_calls[0].get("data", {})
+    assert data.get("provider") == "claude", (
+        f"Expected provider='claude' in llm:request payload, got {data.get('provider')!r}"
+    )
+    assert data.get("message_count") == 0, (
+        f"Expected message_count=0 in llm:request payload, got {data.get('message_count')!r}"
+    )
+    assert data.get("iteration") == 1, (
+        f"Expected iteration=1 in llm:request payload, got {data.get('iteration')!r}"
+    )
+
+    # Verify ordering: llm:request comes before provider_complete in call_log
+    llm_request_idx = next(
+        i
+        for i, (kind, method, params) in enumerate(client.call_log)
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") == "llm:request"
+    )
+    provider_complete_idx = next(
+        i
+        for i, (kind, method, _) in enumerate(client.call_log)
+        if kind == "request" and method == "request.provider_complete"
+    )
+    assert llm_request_idx < provider_complete_idx, (
+        f"llm:request (call_log idx {llm_request_idx}) must come before "
+        f"provider_complete (call_log idx {provider_complete_idx})"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 22: llm:response emitted after provider_complete, before provider:response
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_llm_response() -> None:
+    """llm:response hook event emitted after provider_complete with correct payload."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    provider_result = {
+        "content": "Response text.",
+        "text": "Response text.",
+        "tool_calls": None,
+        "usage": {"input_tokens": 50, "output_tokens": 20},
+        "finish_reason": None,
+    }
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": provider_result,
+        }
+    )
+
+    result = await orch.execute("Hello", {"provider_name": "anthropic"}, client)
+    assert result == "Response text."
+
+    # Find all llm:response hook_emit calls
+    llm_response_calls = [
+        params
+        for kind, method, params in client.call_log
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") == "llm:response"
+    ]
+
+    # Verify exactly 1 llm:response event
+    assert len(llm_response_calls) == 1, (
+        f"Expected exactly 1 llm:response hook_emit, got {len(llm_response_calls)}"
+    )
+
+    # Verify payload
+    data = llm_response_calls[0].get("data", {})
+    assert data.get("provider") == "anthropic", (
+        f"Expected provider='anthropic' in llm:response payload, got {data.get('provider')!r}"
+    )
+    assert data.get("status") == "ok", (
+        f"Expected status='ok' in llm:response payload, got {data.get('status')!r}"
+    )
+
+    # Verify usage contains input_tokens=50, output_tokens=20 (dict or Pydantic model)
+    usage = data.get("usage")
+    assert usage is not None, "Expected usage to be present in llm:response payload"
+    if isinstance(usage, dict):
+        assert usage.get("input_tokens") == 50, (
+            f"Expected input_tokens=50, got {usage.get('input_tokens')!r}"
+        )
+        assert usage.get("output_tokens") == 20, (
+            f"Expected output_tokens=20, got {usage.get('output_tokens')!r}"
+        )
+    else:
+        assert getattr(usage, "input_tokens", None) == 50, (
+            f"Expected input_tokens=50, got {getattr(usage, 'input_tokens', None)!r}"
+        )
+        assert getattr(usage, "output_tokens", None) == 20, (
+            f"Expected output_tokens=20, got {getattr(usage, 'output_tokens', None)!r}"
+        )
+
+    # Verify ordering: llm:response comes before provider:response in hook events
+    hook_event_order = [
+        (i, params.get("event"))
+        for i, (kind, method, params) in enumerate(client.call_log)
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") in ("llm:response", "provider:response")
+    ]
+
+    assert len(hook_event_order) >= 2, (
+        f"Expected both llm:response and provider:response events, got: {hook_event_order}"
+    )
+
+    llm_response_log_idx = next(
+        i for i, event in hook_event_order if event == "llm:response"
+    )
+    provider_response_log_idx = next(
+        i for i, event in hook_event_order if event == "provider:response"
+    )
+    assert llm_response_log_idx < provider_response_log_idx, (
+        f"llm:response (call_log idx {llm_response_log_idx}) must come before "
+        f"provider:response (call_log idx {provider_response_log_idx})"
+    )

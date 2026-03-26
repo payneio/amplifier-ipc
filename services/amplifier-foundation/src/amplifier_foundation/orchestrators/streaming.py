@@ -33,8 +33,8 @@ from amplifier_ipc_protocol.events import (
     CONTENT_BLOCK_START,
     EXECUTION_END,
     EXECUTION_START,
-    LLM_REQUEST,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
-    LLM_RESPONSE,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
+    LLM_REQUEST,
+    LLM_RESPONSE,
     PROVIDER_RESOLVE,
     PROVIDER_RESPONSE,
     PROVIDER_THROTTLE,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
@@ -221,6 +221,17 @@ class StreamingOrchestrator:
                     reasoning_effort=config.get("reasoning_effort"),
                 )
 
+                # --- emit llm:request before provider call ---
+                await self._hook_emit(
+                    client,
+                    LLM_REQUEST,
+                    {
+                        "provider": provider_name,
+                        "message_count": len(messages),
+                        "iteration": iteration,
+                    },
+                )
+
                 # --- call provider.complete (with retry + exponential backoff) ---
                 response_raw: Any = None
                 for _attempt in range(_MAX_PROVIDER_RETRIES + 1):
@@ -289,6 +300,17 @@ class StreamingOrchestrator:
                 self._last_provider_call_end = time.monotonic()
 
                 chat_response = ChatResponse.model_validate(response_raw)
+
+                # --- emit llm:response after successful provider call ---
+                await self._hook_emit(
+                    client,
+                    LLM_RESPONSE,
+                    {
+                        "provider": provider_name,
+                        "usage": chat_response.usage,
+                        "status": "ok",
+                    },
+                )
 
                 # --- emit provider:response hook ---
                 await self._hook_emit(
