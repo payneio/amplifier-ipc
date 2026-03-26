@@ -37,7 +37,7 @@ from amplifier_ipc_protocol.events import (
     LLM_RESPONSE,
     PROVIDER_RESOLVE,
     PROVIDER_RESPONSE,
-    PROVIDER_THROTTLE,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
+    PROVIDER_THROTTLE,
     THINKING_DELTA,
     THINKING_FINAL,
 )
@@ -45,7 +45,7 @@ from amplifier_ipc_protocol.events import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Event name constants — local definitions (remaining Phase-1 events; see import above for content_block/provider:response)
+# Event name constants — local definitions (see import above for Phase 2 IPC protocol events)
 # ---------------------------------------------------------------------------
 
 PROMPT_SUBMIT = "prompt:submit"
@@ -125,9 +125,6 @@ class StreamingOrchestrator:
         Returns:
             The final assistant response text.
         """
-        # --- emit execution:start (first event in execute) ---
-        await self._hook_emit(client, EXECUTION_START, {"prompt": prompt})
-
         # Allow config overrides
         max_iterations: int = config.get("max_iterations", self.max_iterations)
         min_delay_ms: int = config.get("min_delay_between_calls_ms", 0)
@@ -137,6 +134,9 @@ class StreamingOrchestrator:
         _execution_response = ""
 
         try:
+            # --- emit execution:start (first event in execute) ---
+            await self._hook_emit(client, EXECUTION_START, {"prompt": prompt})
+
             # Reset per-execute state
             self._pending_ephemeral_injections = []
             self._last_provider_call_end = None
@@ -212,7 +212,9 @@ class StreamingOrchestrator:
                     )
 
                 # --- apply rate limit delay ---
-                await self._apply_rate_limit_delay(client, min_delay_ms, iteration)
+                await self._apply_rate_limit_delay(
+                    client, min_delay_ms, iteration, provider_name
+                )
 
                 # --- build ChatRequest ---
                 chat_request = ChatRequest(
@@ -679,7 +681,11 @@ class StreamingOrchestrator:
     # ------------------------------------------------------------------
 
     async def _apply_rate_limit_delay(
-        self, client: Any, min_delay_ms: int, iteration: int
+        self,
+        client: Any,
+        min_delay_ms: int,
+        iteration: int,
+        provider_name: str = "unknown",
     ) -> None:
         """Delay if configured and the inter-call gap is too short."""
         if min_delay_ms <= 0 or self._last_provider_call_end is None:
@@ -697,6 +703,15 @@ class StreamingOrchestrator:
                     "configured_ms": min_delay_ms,
                     "elapsed_ms": elapsed_ms,
                     "iteration": iteration,
+                },
+            )
+            await self._hook_emit(
+                client,
+                PROVIDER_THROTTLE,
+                {
+                    "provider": provider_name,
+                    "delay_ms": remaining_ms,
+                    "reason": "rate_limit",
                 },
             )
             await asyncio.sleep(remaining_ms / 1000)

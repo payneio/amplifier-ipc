@@ -1555,9 +1555,86 @@ async def test_orchestrator_emits_thinking_final() -> None:
         f"Expected both thinking:delta and thinking:final events, got: {thinking_event_order}"
     )
 
-    delta_log_idx = next(i for i, event in thinking_event_order if event == "thinking:delta")
-    final_log_idx = next(i for i, event in thinking_event_order if event == "thinking:final")
+    delta_log_idx = next(
+        i for i, event in thinking_event_order if event == "thinking:delta"
+    )
+    final_log_idx = next(
+        i for i, event in thinking_event_order if event == "thinking:final"
+    )
     assert delta_log_idx < final_log_idx, (
         f"thinking:delta (call_log idx {delta_log_idx}) must come before "
         f"thinking:final (call_log idx {final_log_idx})"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 26: provider:throttle emitted during rate-limit delay
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_provider_throttle() -> None:
+    """provider:throttle hook event emitted when rate-limit delay triggers."""
+    from unittest.mock import AsyncMock, patch
+
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    tool_call_response = chat_response(
+        text="",
+        tool_calls=[
+            {"id": "call_throttle", "tool": "bash", "arguments": {"command": "echo hi"}}
+        ],
+    )
+    final_response = chat_response("Done!")
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": Sequence(tool_call_response, final_response),
+            "request.tool_execute": tool_result_ok("hi"),
+        }
+    )
+
+    config = {
+        "provider_name": "anthropic",
+        "min_delay_between_calls_ms": 999999,
+    }
+
+    with patch(
+        "amplifier_foundation.orchestrators.streaming.asyncio.sleep",
+        new_callable=AsyncMock,
+    ):
+        result = await orch.execute("Run bash", config, client)
+
+    assert result == "Done!"
+
+    # Collect all provider:throttle hook_emit events
+    throttle_events = [
+        params
+        for kind, method, params in client.call_log
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") == "provider:throttle"
+    ]
+
+    # Verify exactly 1 provider:throttle event
+    assert len(throttle_events) == 1, (
+        f"Expected exactly 1 provider:throttle event, got {len(throttle_events)}"
+    )
+
+    # Verify payload fields
+    data = throttle_events[0].get("data", {})
+    assert data.get("provider") == "anthropic", (
+        f"Expected provider='anthropic', got {data.get('provider')!r}"
+    )
+    assert data.get("reason") == "rate_limit", (
+        f"Expected reason='rate_limit', got {data.get('reason')!r}"
+    )
+    assert isinstance(data.get("delay_ms"), (int, float)) and data["delay_ms"] > 0, (
+        f"Expected delay_ms > 0, got {data.get('delay_ms')!r}"
     )
