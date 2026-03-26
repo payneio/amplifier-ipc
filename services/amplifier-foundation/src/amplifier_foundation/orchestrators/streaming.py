@@ -28,7 +28,7 @@ from amplifier_ipc.protocol import (
     orchestrator,
 )
 from amplifier_ipc_protocol.events import (
-    CONTENT_BLOCK_DELTA,  # noqa: F401 — Phase 2 event; wired in subsequent tasks
+    CONTENT_BLOCK_DELTA,
     CONTENT_BLOCK_END,
     CONTENT_BLOCK_START,
     EXECUTION_END,
@@ -344,14 +344,37 @@ class StreamingOrchestrator:
                             {"block_type": _block_type, "index": _block_idx},
                         )
 
+                        # Extract block content for delta emission
                         if isinstance(block, ThinkingBlock):
                             thinking_text = block.thinking
+                            _block_content = thinking_text or ""
                         elif (
                             isinstance(block, dict) and block.get("type") == "thinking"
                         ):
                             thinking_text = block.get("thinking", "")
+                            _block_content = thinking_text
                         else:
                             thinking_text = None
+                            # Text block: extract text content
+                            if isinstance(block, dict):
+                                _block_content = block.get("text", "")
+                            elif hasattr(block, "text"):
+                                _block_content = block.text or ""
+                            else:
+                                _block_content = ""
+
+                        # Emit content_block:delta with the block's content
+                        if _block_content:
+                            await self._hook_emit(
+                                client,
+                                CONTENT_BLOCK_DELTA,
+                                {
+                                    "index": _block_idx,
+                                    "block_type": _block_type,
+                                    "delta": _block_content,
+                                },
+                            )
+
                         if thinking_text:
                             await client.send_notification(
                                 STREAM_THINKING, {"thinking": thinking_text}

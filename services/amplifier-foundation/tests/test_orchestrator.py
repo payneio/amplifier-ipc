@@ -1315,3 +1315,106 @@ async def test_orchestrator_emits_llm_response() -> None:
         f"llm:response (call_log idx {llm_response_log_idx}) must come before "
         f"provider:response (call_log idx {provider_response_log_idx})"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 23: content_block:delta emitted per content block between start and end
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_content_block_delta() -> None:
+    """content_block:delta hook event emitted per block with correct payload and ordering."""
+    from amplifier_foundation.orchestrators.streaming import StreamingOrchestrator  # type: ignore[import]
+
+    orch = StreamingOrchestrator()
+
+    response_with_blocks = {
+        "content": "My answer.",
+        "text": "My answer.",
+        "tool_calls": None,
+        "usage": None,
+        "finish_reason": None,
+        "content_blocks": [
+            {"type": "thinking", "thinking": "Hmm let me think..."},
+            {"type": "text", "text": "My answer."},
+        ],
+    }
+
+    client = MockClient(
+        responses={
+            "request.hook_emit": hook_continue(),
+            "request.context_add_message": None,
+            "request.context_get_messages": [],
+            "request.provider_complete": response_with_blocks,
+        }
+    )
+
+    result = await orch.execute("Think about X", {}, client)
+    assert result == "My answer."
+
+    # Collect all content_block:delta hook_emit events
+    delta_events = [
+        params
+        for kind, method, params in client.call_log
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event") == "content_block:delta"
+    ]
+
+    # Verify 2 delta events (one per block)
+    assert len(delta_events) == 2, (
+        f"Expected 2 content_block:delta events, got {len(delta_events)}"
+    )
+
+    # Verify block 0 (thinking): index=0, block_type="thinking", delta="Hmm let me think..."
+    data0 = delta_events[0].get("data", {})
+    assert data0.get("index") == 0, (
+        f"Expected index=0 for first delta, got {data0.get('index')!r}"
+    )
+    assert data0.get("block_type") == "thinking", (
+        f"Expected block_type='thinking' for first delta, got {data0.get('block_type')!r}"
+    )
+    assert data0.get("delta") == "Hmm let me think...", (
+        f"Expected delta='Hmm let me think...' for first delta, got {data0.get('delta')!r}"
+    )
+
+    # Verify block 1 (text): index=1, block_type="text", delta="My answer."
+    data1 = delta_events[1].get("data", {})
+    assert data1.get("index") == 1, (
+        f"Expected index=1 for second delta, got {data1.get('index')!r}"
+    )
+    assert data1.get("block_type") == "text", (
+        f"Expected block_type='text' for second delta, got {data1.get('block_type')!r}"
+    )
+    assert data1.get("delta") == "My answer.", (
+        f"Expected delta='My answer.' for second delta, got {data1.get('delta')!r}"
+    )
+
+    # Verify strict ordering: start(0), delta(0), end(0), start(1), delta(1), end(1)
+    block_events_in_order = [
+        (params["event"], params["data"]["index"])
+        for kind, method, params in client.call_log
+        if kind == "request"
+        and method == "request.hook_emit"
+        and isinstance(params, dict)
+        and params.get("event")
+        in (
+            "content_block:start",
+            "content_block:delta",
+            "content_block:end",
+        )
+    ]
+
+    expected_ordering = [
+        ("content_block:start", 0),
+        ("content_block:delta", 0),
+        ("content_block:end", 0),
+        ("content_block:start", 1),
+        ("content_block:delta", 1),
+        ("content_block:end", 1),
+    ]
+    assert block_events_in_order == expected_ordering, (
+        f"Expected ordering {expected_ordering}, got {block_events_in_order}"
+    )
