@@ -416,3 +416,54 @@ async def test_run_emits_session_resume_instead_of_start(tmp_path: Path) -> None
     assert data["session_id"] is not None
     assert data["parent_id"] == host._parent_session_id
     assert "raw" in data
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — session:resume (child resume, Pattern B)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_handle_resume_emits_session_resume(tmp_path: Path) -> None:
+    """_handle_resume emits SESSION_RESUME with child_session_id and parent."""
+    host = _make_host_with_registry(session_dir=tmp_path)
+    host._session_id = "parent-xyz"
+
+    # Pre-create a child session directory with a transcript so
+    # load_transcript() doesn't fail
+    child_dir = tmp_path / "child-session-42"
+    child_dir.mkdir(parents=True)
+    (child_dir / "transcript.jsonl").write_text("")
+    (child_dir / "state.json").write_text("{}")
+
+    handler = host._build_resume_handler("parent-xyz")
+
+    emitted: list[tuple[str, dict[str, Any]]] = []
+
+    async def capture_emit(event_name: str, data: dict[str, Any]) -> None:
+        emitted.append((event_name, data))
+
+    host._emit_hook_event = capture_emit  # type: ignore[assignment]
+
+    with patch(
+        "amplifier_ipc.host.host._run_child_session",
+        new_callable=AsyncMock,
+        return_value="resumed child result",
+    ):
+        result = await handler(
+            {
+                "session_id": "child-session-42",
+                "instruction": "keep going",
+            }
+        )
+
+    assert result == "resumed child result"
+
+    resume_events = [(e, d) for e, d in emitted if e == SESSION_RESUME]
+    assert len(resume_events) == 1, (
+        f"Expected 1 session:resume, got {len(resume_events)}"
+    )
+
+    data = resume_events[0][1]
+    assert data["session_id"] == "child-session-42"
+    assert data["parent_id"] == "parent-xyz"

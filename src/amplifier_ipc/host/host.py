@@ -658,6 +658,14 @@ class Host:
             child_session_id: str = p.get("session_id", "")
             instruction: str = p.get("instruction", "")
 
+            await self._emit_hook_event(
+                SESSION_RESUME,
+                {
+                    "session_id": child_session_id,
+                    "parent_id": session_id,
+                },
+            )
+
             # 2. Create SessionPersistence for the child session
             child_persistence = SessionPersistence(child_session_id, self._session_dir)
 
