@@ -571,6 +571,15 @@ class Host:
             )
             child_session_id = generate_child_session_id(session_id, agent_name)
 
+            await self._emit_hook_event(
+                SESSION_FORK,
+                {
+                    "session_id": child_session_id,
+                    "parent_id": session_id,
+                    "agent": agent_name,
+                },
+            )
+
             def _forward_child_event(event: HostEvent) -> None:
                 """Wrap a child event and enqueue it for the orchestrator loop."""
                 # depth is always 1 here; nested grandchild events arrive already

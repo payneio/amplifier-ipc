@@ -13,7 +13,14 @@ import pytest
 from amplifier_ipc.host.config import HostSettings, SessionConfig
 from amplifier_ipc.host.host import Host
 from amplifier_ipc.host.service_index import ServiceIndex
-from amplifier_ipc_protocol.events import SESSION_END, SESSION_START
+from amplifier_ipc_protocol.events import (
+    CANCEL_COMPLETED,  # noqa: F401
+    CANCEL_REQUESTED,  # noqa: F401
+    SESSION_END,
+    SESSION_FORK,
+    SESSION_RESUME,  # noqa: F401
+    SESSION_START,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -312,3 +319,45 @@ async def test_run_emits_session_end_cancelled(tmp_path: Path) -> None:
 
     _, payload = end_calls[0]
     assert payload["status"] == "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — session:fork
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_handle_spawn_emits_session_fork(tmp_path: Path) -> None:
+    """_handle_spawn emits SESSION_FORK with child_session_id, parent, and agent."""
+    host = _make_host_with_registry(session_dir=tmp_path)
+    host._session_id = "parent-abc"
+
+    # Build the spawn handler with a known parent session_id
+    handler = host._build_spawn_handler("parent-abc", current_depth=0)
+
+    # Track _emit_hook_event calls
+    emitted: list[tuple[str, dict[str, Any]]] = []
+
+    async def capture_emit(event_name: str, data: dict[str, Any]) -> None:
+        emitted.append((event_name, data))
+
+    host._emit_hook_event = capture_emit  # type: ignore[assignment]
+
+    # Mock spawn_child_session to avoid real subprocess spawning
+    with patch(
+        "amplifier_ipc.host.host.spawn_child_session",
+        new_callable=AsyncMock,
+        return_value="child result",
+    ):
+        result = await handler({"agent": "code-review", "instruction": "review this"})
+
+    assert result == "child result"
+
+    # Verify session:fork was emitted
+    fork_events = [(e, d) for e, d in emitted if e == SESSION_FORK]
+    assert len(fork_events) == 1, f"Expected 1 session:fork, got {len(fork_events)}"
+
+    data = fork_events[0][1]
+    assert data["parent_id"] == "parent-abc"
+    assert "session_id" in data  # child_session_id is generated
+    assert data["agent"] == "code-review"
