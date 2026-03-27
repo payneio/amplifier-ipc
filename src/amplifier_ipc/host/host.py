@@ -65,7 +65,7 @@ from amplifier_ipc_protocol.events import (
     CANCEL_REQUESTED,  # noqa: F401
     SESSION_END,
     SESSION_FORK,  # noqa: F401
-    SESSION_RESUME,  # noqa: F401
+    SESSION_RESUME,
     SESSION_START,
 )
 from amplifier_ipc.protocol.framing import read_message, write_message
@@ -438,9 +438,12 @@ class Host:
                 resume_handler=_handle_resume,
             )
 
-            # 5a. Emit session:start hook event
+            # 5a. Emit session:start or session:resume hook event
+            _lifecycle_event = (
+                SESSION_RESUME if self._resume_session_id is not None else SESSION_START
+            )
             await self._emit_hook_event(
-                SESSION_START,
+                _lifecycle_event,
                 {
                     "session_id": self._session_id,
                     "parent_id": self._parent_session_id,

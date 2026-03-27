@@ -361,3 +361,58 @@ async def test_handle_spawn_emits_session_fork(tmp_path: Path) -> None:
     assert data["parent_id"] == "parent-abc"
     assert "session_id" in data  # child_session_id is generated
     assert data["agent"] == "code-review"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — session:resume (top-level, Pattern A)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_emits_session_resume_instead_of_start(tmp_path: Path) -> None:
+    """When resuming, Host.run() emits SESSION_RESUME instead of SESSION_START."""
+    host = _make_host_with_registry(session_dir=tmp_path)
+
+    # Simulate a resume by setting _resume_session_id
+    host._resume_session_id = "prev-session-999"
+
+    # Capture events, but also need to mock _restore_from_session
+    captured: list[tuple[str, dict[str, Any]]] = []
+
+    async def capture_emit(event_name: str, data: dict[str, Any]) -> None:
+        captured.append((event_name, data))
+
+    async def noop_orchestrator_loop(*args: Any, **kwargs: Any) -> Any:
+        return
+        yield  # type: ignore[misc]  # noqa: unreachable
+
+    async def fake_restore() -> str:
+        return "prev-session-999"
+
+    with (
+        patch.object(host, "_emit_hook_event", capture_emit),
+        patch.object(host, "_orchestrator_loop", noop_orchestrator_loop),
+        patch.object(host, "_restore_from_session", fake_restore),
+        patch(
+            "amplifier_ipc.host.host.assemble_system_prompt",
+            AsyncMock(return_value="system prompt"),
+        ),
+    ):
+        async for _ in host.run("continue"):
+            pass
+
+    # SESSION_RESUME should be present, SESSION_START should NOT
+    resume_events = [(e, d) for e, d in captured if e == SESSION_RESUME]
+    start_events = [(e, d) for e, d in captured if e == SESSION_START]
+
+    assert len(resume_events) == 1, (
+        f"Expected 1 session:resume, got {len(resume_events)}"
+    )
+    assert len(start_events) == 0, (
+        f"Expected 0 session:start when resuming, got {len(start_events)}"
+    )
+
+    data = resume_events[0][1]
+    assert data["session_id"] is not None
+    assert data["parent_id"] == host._parent_session_id
+    assert "raw" in data
