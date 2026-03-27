@@ -14,8 +14,8 @@ from amplifier_ipc.host.config import HostSettings, SessionConfig
 from amplifier_ipc.host.host import Host
 from amplifier_ipc.host.service_index import ServiceIndex
 from amplifier_ipc_protocol.events import (
-    CANCEL_COMPLETED,  # noqa: F401
-    CANCEL_REQUESTED,  # noqa: F401
+    CANCEL_COMPLETED,
+    CANCEL_REQUESTED,
     SESSION_END,
     SESSION_FORK,
     SESSION_RESUME,
