@@ -61,8 +61,8 @@ from amplifier_ipc.protocol.errors import (
     make_error_response,
 )
 from amplifier_ipc_protocol.events import (
-    CANCEL_COMPLETED,  # noqa: F401
-    CANCEL_REQUESTED,  # noqa: F401
+    CANCEL_COMPLETED,
+    CANCEL_REQUESTED,
     SESSION_END,
     SESSION_FORK,  # noqa: F401
     SESSION_RESUME,
@@ -514,6 +514,14 @@ class Host:
 
         except asyncio.CancelledError:
             _session_status = "cancelled"
+            await self._emit_hook_event(
+                CANCEL_REQUESTED,
+                {"session_id": self._session_id, "was_immediate": False},
+            )
+            await self._emit_hook_event(
+                CANCEL_COMPLETED,
+                {"session_id": self._session_id, "was_immediate": False},
+            )
             raise
         except Exception:
             _session_status = "failed"

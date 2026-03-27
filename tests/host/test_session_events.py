@@ -467,3 +467,75 @@ async def test_handle_resume_emits_session_resume(tmp_path: Path) -> None:
     data = resume_events[0][1]
     assert data["session_id"] == "child-session-42"
     assert data["parent_id"] == "parent-xyz"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — cancel:requested + cancel:completed
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_emits_cancel_events_on_cancellation(tmp_path: Path) -> None:
+    """CancelledError triggers cancel:requested, cancel:completed, then session:end."""
+    host = _make_host_with_registry(session_dir=tmp_path)
+
+    captured: list[tuple[str, dict[str, Any]]] = []
+
+    async def capture_emit(event_name: str, data: dict[str, Any]) -> None:
+        captured.append((event_name, data))
+
+    async def cancelled_loop(*args: Any, **kwargs: Any) -> Any:
+        raise asyncio.CancelledError()
+        yield  # type: ignore[misc]  # noqa: unreachable
+
+    with (
+        patch.object(host, "_emit_hook_event", capture_emit),
+        patch.object(host, "_orchestrator_loop", cancelled_loop),
+        patch(
+            "amplifier_ipc.host.host.assemble_system_prompt",
+            AsyncMock(return_value="system prompt"),
+        ),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        async for _ in host.run("hello"):
+            pass
+
+    # Extract cancel events
+    cancel_req = [(e, d) for e, d in captured if e == CANCEL_REQUESTED]
+    cancel_done = [(e, d) for e, d in captured if e == CANCEL_COMPLETED]
+
+    assert len(cancel_req) == 1, f"Expected 1 cancel:requested, got {len(cancel_req)}"
+    assert len(cancel_done) == 1, f"Expected 1 cancel:completed, got {len(cancel_done)}"
+
+    # Verify payloads
+    assert cancel_req[0][1]["session_id"] == host._session_id
+    assert cancel_req[0][1]["was_immediate"] is False
+
+    assert cancel_done[0][1]["session_id"] == host._session_id
+    assert cancel_done[0][1]["was_immediate"] is False
+
+    # Verify ordering: cancel:requested → cancel:completed → session:end
+    event_names = [e for e, _ in captured]
+    req_idx = event_names.index(CANCEL_REQUESTED)
+    done_idx = event_names.index(CANCEL_COMPLETED)
+    end_idx = event_names.index(SESSION_END)
+
+    assert req_idx < done_idx < end_idx, (
+        f"Expected cancel:requested ({req_idx}) < cancel:completed ({done_idx}) "
+        f"< session:end ({end_idx}), events: {event_names}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_normal_exit_does_not_emit_cancel_events(tmp_path: Path) -> None:
+    """Normal (non-cancelled) exit does NOT emit cancel:requested or cancel:completed."""
+    host = _make_host_with_registry(session_dir=tmp_path)
+
+    calls = await _drain(host)
+
+    cancel_events = [
+        (e, d) for e, d in calls if e in (CANCEL_REQUESTED, CANCEL_COMPLETED)
+    ]
+    assert len(cancel_events) == 0, (
+        f"Expected 0 cancel events on normal exit, got {cancel_events}"
+    )
