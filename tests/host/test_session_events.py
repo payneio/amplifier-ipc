@@ -18,7 +18,7 @@ from amplifier_ipc_protocol.events import (
     CANCEL_REQUESTED,  # noqa: F401
     SESSION_END,
     SESSION_FORK,
-    SESSION_RESUME,  # noqa: F401
+    SESSION_RESUME,
     SESSION_START,
 )
 
