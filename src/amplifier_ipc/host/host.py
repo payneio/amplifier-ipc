@@ -60,7 +60,14 @@ from amplifier_ipc.protocol.errors import (
     JsonRpcError,
     make_error_response,
 )
-from amplifier_ipc_protocol.events import SESSION_END, SESSION_START
+from amplifier_ipc_protocol.events import (
+    CANCEL_COMPLETED,  # noqa: F401
+    CANCEL_REQUESTED,  # noqa: F401
+    SESSION_END,
+    SESSION_FORK,  # noqa: F401
+    SESSION_RESUME,  # noqa: F401
+    SESSION_START,
+)
 from amplifier_ipc.protocol.framing import read_message, write_message
 
 logger = logging.getLogger(__name__)
