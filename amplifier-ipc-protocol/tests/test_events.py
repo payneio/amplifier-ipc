@@ -9,8 +9,8 @@ def test_events_module_importable() -> None:
     from amplifier_ipc_protocol import events  # noqa: F401
 
 
-def test_all_41_constants_defined() -> None:
-    """events.py defines exactly 41 string constants."""
+def test_all_45_constants_defined() -> None:
+    """events.py defines exactly 45 string constants."""
     from amplifier_ipc_protocol import events
 
     expected_constants = [
@@ -69,9 +69,14 @@ def test_all_41_constants_defined() -> None:
         # Cancellation
         "CANCEL_REQUESTED",
         "CANCEL_COMPLETED",
+        # Delegate
+        "DELEGATE_AGENT_SPAWNED",
+        "DELEGATE_AGENT_COMPLETED",
+        "DELEGATE_AGENT_RESUMED",
+        "DELEGATE_ERROR",
     ]
 
-    assert len(expected_constants) == 41, "Test itself has wrong count"
+    assert len(expected_constants) == 45, "Test itself has wrong count"
 
     for name in expected_constants:
         assert hasattr(events, name), f"Missing constant: {name}"
@@ -80,8 +85,8 @@ def test_all_41_constants_defined() -> None:
     actual_constants = [
         name for name in dir(events) if name.isupper() and not name.startswith("_")
     ]
-    assert len(actual_constants) == 41, (
-        f"Expected exactly 41 constants, got {len(actual_constants)}: {actual_constants}"
+    assert len(actual_constants) == 45, (
+        f"Expected exactly 45 constants, got {len(actual_constants)}: {actual_constants}"
     )
 
 
@@ -134,12 +139,12 @@ def test_canonical_string_values() -> None:
 
 
 def test_init_re_exports_all_constants() -> None:
-    """__init__.py re-exports all 41 constants and lists them in __all__."""
+    """__init__.py re-exports all 45 constants and lists them in __all__."""
     import amplifier_ipc_protocol
 
     assert hasattr(amplifier_ipc_protocol, "__all__"), "__init__.py must define __all__"
-    assert len(amplifier_ipc_protocol.__all__) == 41, (
-        f"Expected 41 items in __all__, got {len(amplifier_ipc_protocol.__all__)}"
+    assert len(amplifier_ipc_protocol.__all__) == 45, (
+        f"Expected 45 items in __all__, got {len(amplifier_ipc_protocol.__all__)}"
     )
 
     # Spot-check re-exports
@@ -176,3 +181,70 @@ def test_all_values_use_colon_separator() -> None:
         namespace, _, action = value.partition(":")
         assert namespace, f"{name} has empty namespace"
         assert action, f"{name} has empty action"
+
+
+def test_delegate_event_constants_defined_in_events_py() -> None:
+    """events.py defines the 4 delegate:* event constants with correct string values."""
+    from amplifier_ipc_protocol import events
+
+    assert hasattr(events, "DELEGATE_AGENT_SPAWNED"), "Missing DELEGATE_AGENT_SPAWNED"
+    assert hasattr(events, "DELEGATE_AGENT_COMPLETED"), (
+        "Missing DELEGATE_AGENT_COMPLETED"
+    )
+    assert hasattr(events, "DELEGATE_AGENT_RESUMED"), "Missing DELEGATE_AGENT_RESUMED"
+    assert hasattr(events, "DELEGATE_ERROR"), "Missing DELEGATE_ERROR"
+
+    assert events.DELEGATE_AGENT_SPAWNED == "delegate:agent_spawned"
+    assert events.DELEGATE_AGENT_COMPLETED == "delegate:agent_completed"
+    assert events.DELEGATE_AGENT_RESUMED == "delegate:agent_resumed"
+    assert events.DELEGATE_ERROR == "delegate:error"
+
+
+def test_delegate_constants_in_events_all() -> None:
+    """All 4 delegate:* constants are listed in events.__all__."""
+    from amplifier_ipc_protocol import events
+
+    assert "DELEGATE_AGENT_SPAWNED" in events.__all__
+    assert "DELEGATE_AGENT_COMPLETED" in events.__all__
+    assert "DELEGATE_AGENT_RESUMED" in events.__all__
+    assert "DELEGATE_ERROR" in events.__all__
+
+
+def test_delegate_constants_re_exported_from_init() -> None:
+    """__init__.py re-exports all 4 delegate:* constants."""
+    import amplifier_ipc_protocol
+
+    assert hasattr(amplifier_ipc_protocol, "DELEGATE_AGENT_SPAWNED")
+    assert hasattr(amplifier_ipc_protocol, "DELEGATE_AGENT_COMPLETED")
+    assert hasattr(amplifier_ipc_protocol, "DELEGATE_AGENT_RESUMED")
+    assert hasattr(amplifier_ipc_protocol, "DELEGATE_ERROR")
+
+    assert amplifier_ipc_protocol.DELEGATE_AGENT_SPAWNED == "delegate:agent_spawned"
+    assert amplifier_ipc_protocol.DELEGATE_AGENT_COMPLETED == "delegate:agent_completed"
+    assert amplifier_ipc_protocol.DELEGATE_AGENT_RESUMED == "delegate:agent_resumed"
+    assert amplifier_ipc_protocol.DELEGATE_ERROR == "delegate:error"
+
+
+def test_delegate_constants_in_init_all() -> None:
+    """All 4 delegate:* constants are in __init__.__all__."""
+    import amplifier_ipc_protocol
+
+    assert "DELEGATE_AGENT_SPAWNED" in amplifier_ipc_protocol.__all__
+    assert "DELEGATE_AGENT_COMPLETED" in amplifier_ipc_protocol.__all__
+    assert "DELEGATE_AGENT_RESUMED" in amplifier_ipc_protocol.__all__
+    assert "DELEGATE_ERROR" in amplifier_ipc_protocol.__all__
+
+
+def test_direct_import_delegate_constants() -> None:
+    """Delegate constants can be imported directly from amplifier_ipc_protocol.events."""
+    from amplifier_ipc_protocol.events import (
+        DELEGATE_AGENT_COMPLETED,
+        DELEGATE_AGENT_RESUMED,
+        DELEGATE_AGENT_SPAWNED,
+        DELEGATE_ERROR,
+    )
+
+    assert DELEGATE_AGENT_SPAWNED == "delegate:agent_spawned"
+    assert DELEGATE_AGENT_COMPLETED == "delegate:agent_completed"
+    assert DELEGATE_AGENT_RESUMED == "delegate:agent_resumed"
+    assert DELEGATE_ERROR == "delegate:error"

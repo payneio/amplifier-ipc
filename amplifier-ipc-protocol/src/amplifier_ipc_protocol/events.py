@@ -76,6 +76,12 @@ APPROVAL_DENIED: str = "approval:denied"
 CANCEL_REQUESTED: str = "cancel:requested"
 CANCEL_COMPLETED: str = "cancel:completed"
 
+# Delegate
+DELEGATE_AGENT_SPAWNED: str = "delegate:agent_spawned"
+DELEGATE_AGENT_COMPLETED: str = "delegate:agent_completed"
+DELEGATE_AGENT_RESUMED: str = "delegate:agent_resumed"
+DELEGATE_ERROR: str = "delegate:error"
+
 __all__ = [
     # Session Lifecycle
     "SESSION_START",
@@ -132,4 +138,9 @@ __all__ = [
     # Cancellation
     "CANCEL_REQUESTED",
     "CANCEL_COMPLETED",
+    # Delegate
+    "DELEGATE_AGENT_SPAWNED",
+    "DELEGATE_AGENT_COMPLETED",
+    "DELEGATE_AGENT_RESUMED",
+    "DELEGATE_ERROR",
 ]
