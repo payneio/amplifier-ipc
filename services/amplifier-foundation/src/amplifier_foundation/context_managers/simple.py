@@ -7,6 +7,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from amplifier_ipc.protocol import Message, ToolCall, context_manager
+from amplifier_ipc_protocol.events import (
+    CONTEXT_COMPACTION,
+    CONTEXT_POST_COMPACT,
+    CONTEXT_PRE_COMPACT,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -67,6 +72,21 @@ class SimpleContextManager:
         self.compaction_notice_min_level: int = 3
         self.output_reserve_fraction: float = 0.25
         self._last_compaction_stats: dict[str, Any] | None = None
+
+    async def _emit_hook(self, event: str, data: dict[str, Any]) -> None:
+        """Emit a hook event via the injected IPC client.
+
+        No-ops when client is None. Swallows exceptions to avoid disrupting
+        the main context manager flow.
+        """
+        if self.client is None:
+            return
+        try:
+            await self.client.request(
+                "request.hook_emit", {"event": event, "data": data}
+            )
+        except Exception:
+            logger.debug("Failed to emit hook event %r", event)
 
     async def add_message(self, message: Message) -> None:
         """Add a message to the context.
@@ -141,6 +161,12 @@ class SimpleContextManager:
 
         # Check if compaction needed (using effective budget with notice reserve deducted)
         if self._should_compact(token_count, effective_budget):
+            # Emit pre-compaction event
+            await self._emit_hook(
+                CONTEXT_PRE_COMPACT,
+                {"message_count": len(working_messages), "token_count": token_count},
+            )
+
             # Compact EPHEMERALLY - returns new list, working_messages unchanged
             compacted = await self._compact_ephemeral(
                 effective_budget, working_messages
@@ -148,6 +174,15 @@ class SimpleContextManager:
             logger.info(
                 f"Ephemeral compaction: {len(working_messages)} -> {len(compacted)} messages for this request"
             )
+
+            # Emit post-compaction events
+            compacted_token_count = self._estimate_tokens(compacted)
+            await self._emit_hook(
+                CONTEXT_POST_COMPACT,
+                {"message_count": len(compacted), "token_count": compacted_token_count},
+            )
+            if self._last_compaction_stats:
+                await self._emit_hook(CONTEXT_COMPACTION, self._last_compaction_stats)
 
             # Insert compaction notice if enabled and level threshold met
             if self.compaction_notice_enabled and self._last_compaction_stats:
