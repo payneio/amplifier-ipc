@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from amplifier_ipc.protocol import ToolResult
+from amplifier_ipc_protocol.events import ARTIFACT_WRITE
 
 from .path_validation import is_path_allowed
 
@@ -34,6 +35,7 @@ Usage:
             "allowed_write_paths", default_allowed
         )
         self.denied_write_paths = self.config.get("denied_write_paths", [])
+        self.client: Any = None
 
     @property
     def input_schema(self) -> dict:
@@ -148,6 +150,18 @@ Usage:
 
             path.write_text(new_content, encoding="utf-8")
             bytes_written = len(new_content.encode("utf-8"))
+
+            if self.client is not None:
+                try:
+                    await self.client.request(
+                        "request.hook_emit",
+                        {
+                            "event": ARTIFACT_WRITE,
+                            "data": {"path": str(path), "bytes": bytes_written},
+                        },
+                    )
+                except Exception:
+                    pass
 
             return ToolResult(
                 success=True,

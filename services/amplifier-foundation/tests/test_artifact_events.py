@@ -101,3 +101,69 @@ async def test_write_tool_works_without_client(tmp_path: Any) -> None:
 
     assert result.success is True
     assert target.read_text(encoding="utf-8") == content
+
+
+# ---------------------------------------------------------------------------
+# EditTool artifact:write tests
+# ---------------------------------------------------------------------------
+
+from amplifier_foundation.tools.filesystem.edit import EditTool  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_edit_tool_emits_artifact_write(tmp_path: Any) -> None:
+    """EditTool emits artifact:write event with path and bytes on successful edit."""
+    from amplifier_ipc_protocol.events import ARTIFACT_WRITE
+
+    target = tmp_path / "file.txt"
+    target.write_text("hello world", encoding="utf-8")
+    client = MockClient()
+
+    tool = EditTool(config={"allowed_write_paths": [str(tmp_path)]})
+    tool.client = client
+
+    result = await tool.execute(
+        {
+            "file_path": str(target),
+            "old_string": "hello",
+            "new_string": "goodbye",
+        }
+    )
+
+    assert result.success is True
+
+    emits = _hook_emits(client)
+    assert len(emits) == 1
+
+    # Verify event name
+    method_calls = [(m, p) for m, p in client.calls if m == "request.hook_emit"]
+    assert len(method_calls) == 1
+    _, params = method_calls[0]
+    assert params["event"] == ARTIFACT_WRITE
+
+    # Verify payload
+    expected_bytes = len("goodbye world".encode("utf-8"))
+    assert emits[0]["path"] == str(target)
+    assert emits[0]["bytes"] == expected_bytes
+
+
+@pytest.mark.asyncio
+async def test_edit_tool_no_event_on_failure(tmp_path: Any) -> None:
+    """EditTool does NOT emit any event when the edit fails (nonexistent file)."""
+    client = MockClient()
+
+    tool = EditTool(config={"allowed_write_paths": [str(tmp_path)]})
+    tool.client = client
+
+    # Target file does not exist — should fail
+    target = tmp_path / "nonexistent.txt"
+    result = await tool.execute(
+        {
+            "file_path": str(target),
+            "old_string": "hello",
+            "new_string": "goodbye",
+        }
+    )
+
+    assert result.success is False
+    assert _hook_emits(client) == []
