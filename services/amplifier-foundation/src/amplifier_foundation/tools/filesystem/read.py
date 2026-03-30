@@ -4,10 +4,15 @@ from pathlib import Path
 from typing import Any
 
 from amplifier_ipc.protocol import ToolResult
+from amplifier_ipc_protocol.events import ARTIFACT_READ
 
 
 class ReadTool:
     """Read files from the local filesystem with line numbering and pagination support."""
+
+    # Injected by the protocol server's _handle_tool_execute when the
+    # orchestrator is active (allows IPC calls back to the host).
+    client: Any = None
 
     name = "read_file"
     description = """\
@@ -119,6 +124,22 @@ Usage:
                 listing = "\n".join(lines)
                 output_text = f"Directory: {path}\n\n{listing}"
 
+                if self.client is not None:
+                    try:
+                        await self.client.request(
+                            "request.hook_emit",
+                            {
+                                "event": ARTIFACT_READ,
+                                "data": {
+                                    "path": str(path),
+                                    "is_directory": True,
+                                    "entry_count": len(entries),
+                                },
+                            },
+                        )
+                    except Exception:
+                        pass
+
                 return ToolResult(
                     success=True,
                     output={
@@ -159,6 +180,22 @@ Usage:
 
             if len(lines) == 0:
                 output["warning"] = "File exists but has empty contents"
+
+            if self.client is not None:
+                try:
+                    await self.client.request(
+                        "request.hook_emit",
+                        {
+                            "event": ARTIFACT_READ,
+                            "data": {
+                                "path": str(path),
+                                "is_directory": False,
+                                "lines_read": len(selected_lines),
+                            },
+                        },
+                    )
+                except Exception:
+                    pass
 
             return ToolResult(success=True, output=output)
 

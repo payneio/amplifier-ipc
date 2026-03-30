@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from amplifier_foundation.tools.filesystem.edit import EditTool
+from amplifier_foundation.tools.filesystem.read import ReadTool
 from amplifier_foundation.tools.filesystem.write import WriteTool
 
 
@@ -163,6 +164,91 @@ async def test_edit_tool_no_event_on_failure(tmp_path: Any) -> None:
             "new_string": "goodbye",
         }
     )
+
+    assert result.success is False
+    assert _hook_emits(client) == []
+
+
+# ---------------------------------------------------------------------------
+# ReadTool artifact:read tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_read_tool_emits_artifact_read(tmp_path: Any) -> None:
+    """ReadTool emits artifact:read event with path, is_directory=False, and lines_read on success."""
+    from amplifier_ipc_protocol.events import ARTIFACT_READ
+
+    target = tmp_path / "hello.txt"
+    target.write_text("line one\nline two\nline three\n", encoding="utf-8")
+    client = MockClient()
+
+    tool = ReadTool()
+    tool.client = client
+
+    result = await tool.execute({"file_path": str(target)})
+
+    assert result.success is True
+
+    emits = _hook_emits(client)
+    assert len(emits) == 1
+
+    # Verify event name
+    method_calls = [(m, p) for m, p in client.calls if m == "request.hook_emit"]
+    assert len(method_calls) == 1
+    _, params = method_calls[0]
+    assert params["event"] == ARTIFACT_READ
+
+    # Verify payload
+    assert emits[0]["path"] == str(target)
+    assert emits[0]["is_directory"] is False
+    assert emits[0]["lines_read"] == 3
+
+
+@pytest.mark.asyncio
+async def test_read_tool_emits_artifact_read_for_directory(tmp_path: Any) -> None:
+    """ReadTool emits artifact:read event with is_directory=True and entry_count for directories."""
+    from amplifier_ipc_protocol.events import ARTIFACT_READ
+
+    # Create some entries in the directory
+    (tmp_path / "file1.txt").write_text("a", encoding="utf-8")
+    (tmp_path / "file2.txt").write_text("b", encoding="utf-8")
+    (tmp_path / "subdir").mkdir()
+    client = MockClient()
+
+    tool = ReadTool()
+    tool.client = client
+
+    result = await tool.execute({"file_path": str(tmp_path)})
+
+    assert result.success is True
+
+    emits = _hook_emits(client)
+    assert len(emits) == 1
+
+    # Verify event name
+    method_calls = [(m, p) for m, p in client.calls if m == "request.hook_emit"]
+    assert len(method_calls) == 1
+    _, params = method_calls[0]
+    assert params["event"] == ARTIFACT_READ
+
+    # Verify payload
+    assert emits[0]["path"] == str(tmp_path)
+    assert emits[0]["is_directory"] is True
+    assert emits[0]["entry_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_read_tool_no_event_on_failure(tmp_path: Any) -> None:
+    """ReadTool does NOT emit any event when the read fails (nonexistent path)."""
+    client = MockClient()
+
+    tool = ReadTool()
+    tool.client = client
+
+    # Path does not exist — should fail
+    target = tmp_path / "nonexistent.txt"
+    result = await tool.execute({"file_path": str(target)})
 
     assert result.success is False
     assert _hook_emits(client) == []
