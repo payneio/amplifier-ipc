@@ -146,7 +146,7 @@ class _ApprovalCore:
             return True
 
         # Check if tool is in high-risk list
-        high_risk_tools = ["write", "edit", "bash", "execute", "run"]
+        high_risk_tools = ["write", "edit", "execute", "run"]
         return tool_name in high_risk_tools
 
     def _build_request(
