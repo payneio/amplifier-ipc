@@ -33,6 +33,19 @@ class FailingClient:
         raise RuntimeError("Connection failed")
 
 
+class SpawnFailingClient:
+    """Records hook_emit calls but raises RuntimeError on session_spawn."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Any]] = []
+
+    async def request(self, method: str, params: Any = None) -> Any:
+        self.calls.append((method, params))
+        if method == "request.session_spawn":
+            raise RuntimeError("Spawn failed")
+        return {}
+
+
 def make_spawn_response(
     session_id: str = "test-session-123",
     response: str = "Done.",
@@ -225,8 +238,12 @@ async def test_delegate_emits_agent_resumed_and_completed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_delegate_emits_error_on_failure() -> None:
-    """Basic test with FailingClient — verify result.success is False."""
+async def test_delegate_returns_failure_on_client_error() -> None:
+    """FailingClient (raises on ALL requests including hook_emit) — verify result.success is False.
+
+    Note: The error event is silently swallowed by _emit_hook because FailingClient
+    raises on hook_emit too. This test focuses solely on the ToolResult outcome.
+    """
     tool = DelegateTool()
     tool.client = FailingClient()
 
@@ -238,19 +255,6 @@ async def test_delegate_emits_error_on_failure() -> None:
     )
 
     assert result.success is False
-
-
-class SpawnFailingClient:
-    """Records hook_emit calls but raises RuntimeError on session_spawn."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, Any]] = []
-
-    async def request(self, method: str, params: Any = None) -> Any:
-        self.calls.append((method, params))
-        if method == "request.session_spawn":
-            raise RuntimeError("Spawn failed")
-        return {}
 
 
 @pytest.mark.asyncio

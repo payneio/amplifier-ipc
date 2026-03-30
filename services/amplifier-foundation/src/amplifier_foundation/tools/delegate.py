@@ -108,9 +108,13 @@ class DelegateTool:
                 await self._emit_hook(
                     DELEGATE_AGENT_SPAWNED,
                     {
-                        "agent": agent_name,
-                        "context_depth": input.get("context_depth"),
-                        "context_scope": input.get("context_scope"),
+                        k: v
+                        for k, v in {
+                            "agent": agent_name,
+                            "context_depth": input.get("context_depth"),
+                            "context_scope": input.get("context_scope"),
+                        }.items()
+                        if v is not None
                     },
                 )
                 params = {
