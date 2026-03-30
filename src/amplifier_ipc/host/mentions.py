@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -274,6 +275,7 @@ def resolve_and_load(
     *,
     seen_hashes: set[str] | None = None,
     max_depth: int = 3,
+    on_include: Callable[[str], None] | None = None,
 ) -> list[ResolvedContent]:
     """Recursively resolve and load ``@mention`` references found in *text*.
 
@@ -325,12 +327,15 @@ def resolve_and_load(
 
         resolved = ResolvedContent(key=mention.removeprefix("@"), content=content)
         results.append(resolved)
+        if on_include is not None:
+            on_include(resolved.key)
 
         nested = resolve_and_load(
             content,
             chain,
             seen_hashes=seen_hashes,
             max_depth=max_depth - 1,
+            on_include=on_include,
         )
         results.extend(nested)
 

@@ -449,3 +449,57 @@ def test_resolve_and_load_handles_resolver_exception() -> None:
     """Exceptions raised by chain.resolve() are caught; the mention is skipped."""
     results = resolve_and_load("Load @ns:a.md here", ExplodingChain())
     assert results == []
+
+
+def test_resolve_and_load_calls_on_include() -> None:
+    """on_include callback is called with resolved.key for each resolved mention."""
+    chain = FakeChain(
+        {
+            "@ns:a.md": "Content of A",
+            "@ns:b.md": "Content of B",
+        }
+    )
+    included: list[str] = []
+    resolve_and_load(
+        "Load @ns:a.md and @ns:b.md here",
+        chain,  # type: ignore[arg-type]
+        on_include=included.append,
+    )
+    assert included == ["ns:a.md", "ns:b.md"]
+
+
+def test_resolve_and_load_on_include_with_nested() -> None:
+    """on_include propagates to recursive calls and fires for nested mentions too."""
+    chain = FakeChain(
+        {
+            "@ns:a.md": "Load @ns:b.md here",
+            "@ns:b.md": "Content of B",
+        }
+    )
+    included: list[str] = []
+    resolve_and_load(
+        "Load @ns:a.md here",
+        chain,  # type: ignore[arg-type]
+        on_include=included.append,
+    )
+    assert "ns:a.md" in included
+    assert "ns:b.md" in included
+    assert included.index("ns:a.md") < included.index("ns:b.md")
+
+
+def test_resolve_and_load_on_include_not_called_for_unresolved() -> None:
+    """on_include is NOT called for mentions that return None from the chain."""
+    chain = FakeChain(
+        {
+            "@ns:a.md": None,
+            "@ns:b.md": "Content of B",
+        }
+    )
+    included: list[str] = []
+    resolve_and_load(
+        "Load @ns:a.md and @ns:b.md here",
+        chain,  # type: ignore[arg-type]
+        on_include=included.append,
+    )
+    assert "ns:a.md" not in included
+    assert "ns:b.md" in included

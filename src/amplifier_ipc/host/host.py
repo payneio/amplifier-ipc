@@ -63,6 +63,7 @@ from amplifier_ipc.protocol.errors import (
 from amplifier_ipc_protocol.events import (
     CANCEL_COMPLETED,
     CANCEL_REQUESTED,
+    CONTEXT_INCLUDE,
     SESSION_END,
     SESSION_FORK,
     SESSION_RESUME,
@@ -472,7 +473,7 @@ class Host:
             )
 
             # 6a. Append working directory context (AGENTS.md + .amplifier/*.md)
-            working_dir_content = self._load_working_dir_content()
+            working_dir_content = await self._load_working_dir_content()
             if working_dir_content:
                 system_prompt = system_prompt + "\n" + working_dir_content
 
@@ -1117,7 +1118,7 @@ class Host:
     # Working directory content loading
     # ------------------------------------------------------------------
 
-    def _load_working_dir_content(self) -> str:
+    async def _load_working_dir_content(self) -> str:
         """Scan working directory for AGENTS.md and .amplifier/*.md files.
 
         Collects:
@@ -1172,14 +1173,25 @@ class Host:
 
             rel_path = file_path.relative_to(self._working_dir)
             parts.append(f'<context_file path="{rel_path}">\n{text}\n</context_file>')
+            await self._emit_hook_event(
+                CONTEXT_INCLUDE, {"path": str(rel_path), "source": "file"}
+            )
 
             # Resolve @mentions found in the file (shared dedup via seen_hashes)
+            included_mentions: list[str] = []
             nested = resolve_and_load(
-                text, self.mention_resolver, seen_hashes=seen_hashes
+                text,
+                self.mention_resolver,
+                seen_hashes=seen_hashes,
+                on_include=included_mentions.append,
             )
             for resolved in nested:
                 parts.append(
                     f'<context_file path="{resolved.key}">\n{resolved.content}\n</context_file>'
+                )
+            for mention_key in included_mentions:
+                await self._emit_hook_event(
+                    CONTEXT_INCLUDE, {"path": mention_key, "source": "mention"}
                 )
 
         return "\n".join(parts)

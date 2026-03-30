@@ -1492,7 +1492,7 @@ def test_host_has_mention_resolver_chain() -> None:
     assert isinstance(host.mention_resolver, MentionResolverChain)
 
 
-def test_host_load_working_dir_content(tmp_path: Any) -> None:
+async def test_host_load_working_dir_content(tmp_path: Any) -> None:
     """_load_working_dir_content returns XML-wrapped content of AGENTS.md and .amplifier/*.md files."""
     # Create AGENTS.md
     agents_md = tmp_path / "AGENTS.md"
@@ -1512,7 +1512,7 @@ def test_host_load_working_dir_content(tmp_path: Any) -> None:
     )
     host = Host(config=config, settings=HostSettings(), working_dir=tmp_path)
 
-    result = host._load_working_dir_content()
+    result = await host._load_working_dir_content()
 
     assert '<context_file path="AGENTS.md">' in result
     assert "Agent instructions here." in result
@@ -1522,7 +1522,7 @@ def test_host_load_working_dir_content(tmp_path: Any) -> None:
     assert "Some skills." in result
 
 
-def test_host_load_working_dir_content_no_dir() -> None:
+async def test_host_load_working_dir_content_no_dir() -> None:
     """_load_working_dir_content returns empty string when working_dir is None."""
     config = SessionConfig(
         services=[],
@@ -1532,12 +1532,12 @@ def test_host_load_working_dir_content_no_dir() -> None:
     )
     host = Host(config=config, settings=HostSettings())  # no working_dir
 
-    result = host._load_working_dir_content()
+    result = await host._load_working_dir_content()
 
     assert result == ""
 
 
-def test_host_load_working_dir_content_deduplicates(tmp_path: Any) -> None:
+async def test_host_load_working_dir_content_deduplicates(tmp_path: Any) -> None:
     """_load_working_dir_content deduplicates files with the same content (same SHA-256)."""
     same_content = "# Same Content\nIdentical content in both files."
 
@@ -1556,7 +1556,7 @@ def test_host_load_working_dir_content_deduplicates(tmp_path: Any) -> None:
     )
     host = Host(config=config, settings=HostSettings(), working_dir=tmp_path)
 
-    result = host._load_working_dir_content()
+    result = await host._load_working_dir_content()
 
     # Only the first occurrence should be included (deduplication by SHA-256)
     count = result.count(same_content)
