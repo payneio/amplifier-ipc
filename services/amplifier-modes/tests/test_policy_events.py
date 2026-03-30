@@ -160,6 +160,7 @@ async def test_policy_violation_works_without_client() -> None:
     # client defaults to None — do not set
     hooks.set_active_mode(_make_mode_with_policy())
 
+    # _emit_policy_violation should short-circuit silently when client is None
     result = await hooks.handle("tool:pre", {"tool_name": "write_file"})
 
     assert result.action.value == "DENY"
