@@ -3,7 +3,7 @@
 Key changes from original:
 - Removed amplifier_lite.hooks.HookRegistry dependency
 - Removed amplifier_lite.session.Session dependency
-- Removed internal emit calls (APPROVAL_REQUIRED/GRANTED/DENIED); just log
+- Emits approval:required/granted/denied events via injected IPC client
 - ApprovalProvider is auto-approve in IPC mode (no interactive provider)
 - Renamed handle_tool_pre → _handle_tool_pre (internal)
 - Added handle() dispatcher for IPC discovery
@@ -15,7 +15,11 @@ import logging
 from typing import Any
 
 from amplifier_ipc.protocol.models import HookAction, HookResult
-from amplifier_ipc_protocol.events import APPROVAL_DENIED, APPROVAL_GRANTED, APPROVAL_REQUIRED
+from amplifier_ipc_protocol.events import (
+    APPROVAL_DENIED,
+    APPROVAL_GRANTED,
+    APPROVAL_REQUIRED,
+)
 
 from .audit import ApprovalRequest, ApprovalResponse, audit_log
 from .config import DEFAULT_RULES, check_auto_action
@@ -48,8 +52,8 @@ class _ApprovalCore:
             await self.client.request(
                 "request.hook_emit", {"event": event, "data": data}
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("hook emit failed for %s: %s", event, e)
 
     async def _handle_tool_pre(self, event: str, data: dict[str, Any]) -> HookResult:
         """Handle tool:pre event and request approval if needed."""

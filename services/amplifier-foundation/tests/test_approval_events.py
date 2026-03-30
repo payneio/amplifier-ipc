@@ -162,5 +162,7 @@ async def test_approval_hook_proxy_passes_client() -> None:
     )
 
     emits = _hook_emits(client, APPROVAL_REQUIRED)
-    assert len(emits) == 1, f"Expected 1 approval:required event via proxy, got {len(emits)}"
+    assert len(emits) == 1, (
+        f"Expected 1 approval:required event via proxy, got {len(emits)}"
+    )
     assert emits[0]["tool_name"] == "bash"
