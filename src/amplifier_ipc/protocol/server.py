@@ -603,6 +603,12 @@ class Server:
         final_result: HookResult = HookResult(action=HookAction.CONTINUE)
 
         for hook_instance in hooks:
+            # Inject orchestrator client so hooks can emit events
+            if (
+                hasattr(hook_instance, "client")
+                and self._current_orchestrator_client is not None
+            ):
+                hook_instance.client = self._current_orchestrator_client
             result: HookResult = await hook_instance.handle(event, data)
             final_result = result
 

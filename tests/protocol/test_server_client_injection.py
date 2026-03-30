@@ -186,3 +186,126 @@ async def test_current_orchestrator_client_initialized_to_none(tmp_path: Path) -
         )
     finally:
         _cleanup_package(tmp_path, pkg_name)
+
+
+# ---------------------------------------------------------------------------
+# Hook client injection tests
+# ---------------------------------------------------------------------------
+
+
+async def test_hook_receives_orchestrator_client(tmp_path: Path) -> None:
+    """Hook with 'client' attribute gets orchestrator client injected before handle().
+
+    When _current_orchestrator_client is set on the server (i.e., an orchestrator
+    is running), and a hook with a 'client' attribute handles an event via
+    _handle_hook_emit, the hook's client attribute should be set to the
+    orchestrator's client before handle() is called.
+    """
+    pkg_name = "mock_hook_client_injection_pkg"
+    pkg_dir = _create_mock_package(tmp_path, pkg_name)
+    hooks_dir = pkg_dir / "hooks"
+    hooks_dir.mkdir()
+    (hooks_dir / "__init__.py").write_text("")
+    (hooks_dir / "client_hook.py").write_text(
+        "from amplifier_ipc.protocol.decorators import hook\n"
+        "from amplifier_ipc.protocol.models import HookAction, HookResult\n\n"
+        "@hook(events=['test:event'])\n"
+        "class ClientHook:\n"
+        "    client = None\n"
+        "    client_at_handle_time = None\n\n"
+        "    async def handle(self, event, data):\n"
+        "        self.client_at_handle_time = self.client\n"
+        "        return HookResult(action=HookAction.CONTINUE)\n"
+    )
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        server = Server(pkg_name)
+
+        mock_client = object()
+        server._current_orchestrator_client = mock_client
+
+        await server._handle_hook_emit({"event": "test:event", "data": {}})
+
+        hook_instances = server._hooks.get("test:event", [])
+        assert hook_instances, "Expected hook instances registered for 'test:event'"
+        hook_instance = hook_instances[0]
+        assert hook_instance.client_at_handle_time is mock_client, (
+            "Hook's client attribute should have been set to the orchestrator "
+            f"client before handle(), got: {hook_instance.client_at_handle_time!r}"
+        )
+    finally:
+        _cleanup_package(tmp_path, pkg_name)
+
+
+async def test_hook_without_client_attr_unaffected(tmp_path: Path) -> None:
+    """Hook without a 'client' attribute is not affected by client injection.
+
+    If a hook does not have a 'client' attribute, _handle_hook_emit should
+    not attempt to set one (no AttributeError should be raised).
+    """
+    from amplifier_ipc.protocol.models import HookAction
+
+    pkg_name = "mock_hook_no_client_pkg"
+    pkg_dir = _create_mock_package(tmp_path, pkg_name)
+    hooks_dir = pkg_dir / "hooks"
+    hooks_dir.mkdir()
+    (hooks_dir / "__init__.py").write_text("")
+    (hooks_dir / "plain_hook.py").write_text(
+        "from amplifier_ipc.protocol.decorators import hook\n"
+        "from amplifier_ipc.protocol.models import HookAction, HookResult\n\n"
+        "@hook(events=['plain:event'])\n"
+        "class PlainHook:\n\n"
+        "    async def handle(self, event, data):\n"
+        "        return HookResult(action=HookAction.CONTINUE)\n"
+    )
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        server = Server(pkg_name)
+        server._current_orchestrator_client = object()
+
+        result = await server._handle_hook_emit({"event": "plain:event", "data": {}})
+        assert result["action"] == HookAction.CONTINUE.value
+    finally:
+        _cleanup_package(tmp_path, pkg_name)
+
+
+async def test_hook_client_not_injected_when_no_orchestrator(tmp_path: Path) -> None:
+    """Hook's existing client attribute is not overwritten when no orchestrator is running.
+
+    When _current_orchestrator_client is None (outside orchestrator context),
+    the hook's client attribute should remain unchanged.
+    """
+    pkg_name = "mock_hook_no_orch_pkg"
+    pkg_dir = _create_mock_package(tmp_path, pkg_name)
+    hooks_dir = pkg_dir / "hooks"
+    hooks_dir.mkdir()
+    (hooks_dir / "__init__.py").write_text("")
+    (hooks_dir / "client_hook2.py").write_text(
+        "from amplifier_ipc.protocol.decorators import hook\n"
+        "from amplifier_ipc.protocol.models import HookAction, HookResult\n\n"
+        "@hook(events=['noorch:event'])\n"
+        "class ClientHook2:\n"
+        "    client = None\n"
+        "    client_at_handle_time = 'sentinel'\n\n"
+        "    async def handle(self, event, data):\n"
+        "        self.client_at_handle_time = self.client\n"
+        "        return HookResult(action=HookAction.CONTINUE)\n"
+    )
+
+    sys.path.insert(0, str(tmp_path))
+    try:
+        server = Server(pkg_name)
+        assert server._current_orchestrator_client is None
+
+        await server._handle_hook_emit({"event": "noorch:event", "data": {}})
+
+        hook_instances = server._hooks.get("noorch:event", [])
+        assert hook_instances, "Expected hook instances registered for 'noorch:event'"
+        hook_instance = hook_instances[0]
+        assert hook_instance.client_at_handle_time is None, (
+            "Hook's client should not have been modified when no orchestrator is running"
+        )
+    finally:
+        _cleanup_package(tmp_path, pkg_name)
