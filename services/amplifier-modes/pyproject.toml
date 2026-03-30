@@ -9,6 +9,7 @@ description = "Amplifier Modes IPC service — runtime mode management"
 requires-python = ">=3.11"
 dependencies = [
     "amplifier-ipc",
+    "amplifier-ipc-protocol",
     "pyyaml>=6.0",
 ]
 
@@ -29,6 +30,7 @@ extraPaths = ["src"]
 
 [tool.uv.sources]
 amplifier-ipc = { path = "../../." }
+amplifier-ipc-protocol = { path = "../../amplifier-ipc-protocol" }
 
 [dependency-groups]
 dev = [

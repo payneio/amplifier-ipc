@@ -6,10 +6,12 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from amplifier_ipc.protocol import HookAction, HookResult, hook
+from amplifier_ipc_protocol.events import POLICY_VIOLATION
 
 logger = logging.getLogger(__name__)
 
@@ -99,10 +101,36 @@ class ModeHooks:
     """Generic mode enforcement via hooks."""
 
     name = "mode_hooks"
+    client: Any = None
 
     def __init__(self) -> None:
         self._warned_tools: set[str] = set()
         self._active_mode: ModeDefinition | None = None
+
+    async def _emit_policy_violation(
+        self, tool_name: str, mode_name: str, reason: str
+    ) -> None:
+        """Emit a policy:violation event via the injected IPC client.
+
+        No-ops when client is None. Swallows exceptions to avoid disrupting
+        the main policy enforcement flow.
+        """
+        if self.client is None:
+            return
+        try:
+            await self.client.request(
+                "request.hook_emit",
+                {
+                    "event": POLICY_VIOLATION,
+                    "data": {
+                        "tool_name": tool_name,
+                        "mode": mode_name,
+                        "reason": reason,
+                    },
+                },
+            )
+        except Exception as e:
+            logger.debug("policy:violation emit failed for %s: %s", tool_name, e)
 
     def set_active_mode(self, mode: ModeDefinition) -> None:
         """Set the active mode and reset warned-tools tracking."""
@@ -167,9 +195,11 @@ class ModeHooks:
 
         # Explicitly blocked tools: always deny
         if tool_name in mode.block_tools:
+            reason = f"Mode '{mode.name}': '{tool_name}' is blocked. {mode.description}"
+            await self._emit_policy_violation(tool_name, mode.name, reason)
             return HookResult(
                 action=HookAction.DENY,
-                reason=f"Mode '{mode.name}': '{tool_name}' is blocked. {mode.description}",
+                reason=reason,
             )
 
         # Warn-first tools: warn once, then allow
@@ -177,10 +207,14 @@ class ModeHooks:
             warn_key = f"{mode.name}:{tool_name}"
             if warn_key not in self._warned_tools:
                 self._warned_tools.add(warn_key)
+                reason = (
+                    f"Mode '{mode.name}': '{tool_name}' requires confirmation. "
+                    f"Call again if this is appropriate for {mode.name} mode."
+                )
+                await self._emit_policy_violation(tool_name, mode.name, reason)
                 return HookResult(
                     action=HookAction.DENY,
-                    reason=f"Mode '{mode.name}': '{tool_name}' requires confirmation. "
-                    f"Call again if this is appropriate for {mode.name} mode.",
+                    reason=reason,
                 )
             return HookResult(action=HookAction.CONTINUE)
 
@@ -189,10 +223,14 @@ class ModeHooks:
             return HookResult(action=HookAction.CONTINUE)
 
         # Default is block
+        reason = (
+            f"Mode '{mode.name}': '{tool_name}' is not in the allowed list. "
+            f"Use /mode off to exit {mode.name} mode."
+        )
+        await self._emit_policy_violation(tool_name, mode.name, reason)
         return HookResult(
             action=HookAction.DENY,
-            reason=f"Mode '{mode.name}': '{tool_name}' is not in the allowed list. "
-            f"Use /mode off to exit {mode.name} mode.",
+            reason=reason,
         )
 
 
