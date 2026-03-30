@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from amplifier_ipc.protocol import ToolResult
+from amplifier_ipc_protocol.events import ARTIFACT_WRITE
 
 from .path_validation import is_path_allowed
 
@@ -22,6 +23,10 @@ Usage:
 - This tool will overwrite the existing file if there is one at the provided path.
 - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
                    """
+
+    # Injected by the protocol server's _handle_tool_execute when the
+    # orchestrator is active (allows IPC calls back to the host).
+    client: Any = None
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         """Initialize WriteTool with configuration."""
@@ -80,6 +85,18 @@ Usage:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
             bytes_written = len(content.encode("utf-8"))
+
+            if self.client is not None:
+                try:
+                    await self.client.request(
+                        "request.hook_emit",
+                        {
+                            "event": ARTIFACT_WRITE,
+                            "data": {"path": str(path), "bytes": bytes_written},
+                        },
+                    )
+                except Exception:
+                    pass
 
             return ToolResult(
                 success=True, output={"file_path": str(path), "bytes": bytes_written}
