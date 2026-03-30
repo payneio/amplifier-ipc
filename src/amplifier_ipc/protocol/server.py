@@ -660,6 +660,9 @@ class Server:
             )
         ctx = ctx_managers[0]
 
+        if hasattr(ctx, "client") and self._current_orchestrator_client is not None:
+            ctx.client = self._current_orchestrator_client
+
         provider_info: dict[str, Any] = dict(params) if params else {}
         messages = await ctx.get_messages(provider_info)
 

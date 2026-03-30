@@ -67,3 +67,26 @@ async def test_clear_messages() -> None:
     await cm.clear()
 
     assert len(await cm.get_messages(provider_info={})) == 0
+
+
+# ---------------------------------------------------------------------------
+# Test 4: client attribute injection support
+# ---------------------------------------------------------------------------
+
+
+def test_context_manager_has_client_attribute() -> None:
+    """SimpleContextManager must have a 'client' attribute that defaults to None and can be set."""
+    from amplifier_foundation.context_managers.simple import SimpleContextManager  # type: ignore[import]
+
+    cm = SimpleContextManager()
+
+    # (1) attribute exists
+    assert hasattr(cm, "client"), "SimpleContextManager must have a 'client' attribute"
+
+    # (2) defaults to None
+    assert cm.client is None, "client attribute must default to None"
+
+    # (3) can be set
+    mock_client = object()
+    cm.client = mock_client
+    assert cm.client is mock_client, "client attribute must be settable"

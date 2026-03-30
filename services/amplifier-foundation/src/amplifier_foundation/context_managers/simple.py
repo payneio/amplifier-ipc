@@ -52,6 +52,9 @@ class SimpleContextManager:
     def __init__(self) -> None:
         """Initialize the context manager with sensible defaults."""
         self.messages: list[Message] = []
+        # Injected by the protocol server before get_messages() is called.
+        # Enables hook event emission (e.g. compaction events).
+        self.client: Any = None
         self.max_tokens: int = 200_000
         self.compact_threshold: float = 0.85
         self.target_usage: float = 0.60
