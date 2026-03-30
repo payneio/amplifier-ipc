@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from amplifier_ipc.protocol import ToolResult, tool
+from amplifier_ipc_protocol.events import (
+    DELEGATE_AGENT_COMPLETED,
+    DELEGATE_AGENT_RESUMED,
+    DELEGATE_AGENT_SPAWNED,
+    DELEGATE_ERROR,
+)
 
 
 @tool
@@ -70,14 +76,28 @@ class DelegateTool:
         "required": ["instruction"],
     }
 
+    async def _emit_hook(self, event: str, data: dict[str, Any]) -> None:
+        """Fire-and-forget hook emission — silently ignores errors."""
+        if self.client is not None:
+            try:
+                await self.client.request(
+                    "request.hook_emit", {"event": event, "data": data}
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
     async def execute(self, input: dict[str, Any]) -> ToolResult:
         """Spawn or resume a child session via request.session_spawn / request.session_resume."""
-        try:
-            instruction: str = input["instruction"]
-            session_id: str | None = input.get("session_id")
+        agent_name: str = input.get("agent", "self")
+        instruction: str = input.get("instruction", "")
+        session_id: str | None = input.get("session_id")
 
+        try:
             if session_id:
                 # Resume an existing session
+                await self._emit_hook(
+                    DELEGATE_AGENT_RESUMED, {"session_id": session_id}
+                )
                 params: dict[str, Any] = {
                     "session_id": session_id,
                     "instruction": instruction,
@@ -85,8 +105,16 @@ class DelegateTool:
                 result = await self.client.request("request.session_resume", params)
             else:
                 # Spawn a new child session
+                await self._emit_hook(
+                    DELEGATE_AGENT_SPAWNED,
+                    {
+                        "agent": agent_name,
+                        "context_depth": input.get("context_depth"),
+                        "context_scope": input.get("context_scope"),
+                    },
+                )
                 params = {
-                    "agent": input.get("agent", "self"),
+                    "agent": agent_name,
                     "instruction": instruction,
                 }
                 # Forward optional spawning parameters if provided
@@ -106,10 +134,23 @@ class DelegateTool:
             response: str = result.get("response", "")
             turn_count: int = result.get("turn_count", 0)
 
+            await self._emit_hook(
+                DELEGATE_AGENT_COMPLETED,
+                {
+                    "agent": agent_name,
+                    "sub_session_id": child_session_id,
+                    "success": True,
+                    "turn_count": turn_count,
+                },
+            )
+
             output = f"[Delegate session: {child_session_id}]\n[Turns: {turn_count}]\n\n{response}"
             return ToolResult(success=True, output=output)
 
         except Exception as exc:  # noqa: BLE001
+            await self._emit_hook(
+                DELEGATE_ERROR, {"agent": agent_name, "error": str(exc)}
+            )
             return ToolResult(
                 success=False,
                 error={"message": str(exc)},
