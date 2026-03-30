@@ -1,6 +1,6 @@
 """Canonical event name constants for the Amplifier IPC protocol.
 
-This module is the single source of truth for all 41 event constant strings.
+This module is the single source of truth for all 45 event constant strings.
 Names match the amplifier_core.events module for compatibility.
 
 All values follow the ``namespace:action`` convention where both namespace
