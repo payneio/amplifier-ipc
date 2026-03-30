@@ -81,6 +81,7 @@ async def test_policy_violation_emitted_for_warn_first_tool() -> None:
     data = req["params"]["data"]
     assert data["tool_name"] == "bash"
     assert data["mode"] == "focus"
+    assert "reason" in data
 
 
 @pytest.mark.asyncio
@@ -121,6 +122,7 @@ async def test_policy_violation_emitted_for_unlisted_tool() -> None:
     data = req["params"]["data"]
     assert data["tool_name"] == "some_unknown_tool"
     assert data["mode"] == "focus"
+    assert "reason" in data
 
 
 @pytest.mark.asyncio
