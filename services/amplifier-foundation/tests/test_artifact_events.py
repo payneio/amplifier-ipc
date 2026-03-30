@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from amplifier_foundation.tools.filesystem.edit import EditTool
 from amplifier_foundation.tools.filesystem.write import WriteTool
 
 
@@ -106,8 +107,6 @@ async def test_write_tool_works_without_client(tmp_path: Any) -> None:
 # ---------------------------------------------------------------------------
 # EditTool artifact:write tests
 # ---------------------------------------------------------------------------
-
-from amplifier_foundation.tools.filesystem.edit import EditTool  # noqa: E402
 
 
 @pytest.mark.asyncio
