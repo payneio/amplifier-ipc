@@ -30,19 +30,23 @@ def check_auto_action(
     Returns:
         Action string ("auto_approve", "auto_deny") or None
     """
-    # For bash tool, check command patterns
-    if tool_name == "bash":
-        command = arguments.get("command", "")
+    for rule in rules:
+        action = rule.get("action")
+        if not action:
+            continue
 
-        for rule in rules:
+        # Tool-name-based matching: rule has a "tool" key
+        tool_match = rule.get("tool")
+        if tool_match and tool_match == tool_name:
+            return action
+
+        # For bash tool, also check command patterns
+        if tool_name == "bash":
             pattern = rule.get("pattern", "")
-            action = rule.get("action")
-
-            if not pattern or not action:
-                continue
-
-            # Match command against glob pattern (case-insensitive)
-            if fnmatch.fnmatch(command.lower(), pattern.lower()):
-                return action
+            if pattern:
+                command = arguments.get("command", "")
+                # Match command against glob pattern (case-insensitive)
+                if fnmatch.fnmatch(command.lower(), pattern.lower()):
+                    return action
 
     return None

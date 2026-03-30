@@ -26,11 +26,14 @@ class ApprovalHook:
     events = ["tool:pre"]
     priority = 5
 
+    client: Any = None
+
     def __init__(self) -> None:
         self._core = _ApprovalCore(config={})
 
     async def handle(self, event: str, data: dict[str, Any]) -> HookResult:
         """Dispatch to the appropriate handler based on event."""
         if event == "tool:pre":
+            self._core.client = self.client
             return await self._core._handle_tool_pre(event, data)
         return HookResult(action=HookAction.CONTINUE)
